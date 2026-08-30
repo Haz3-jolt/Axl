@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 Hari Srinivasan
+# SPDX-License-Identifier: Apache-2.0
+
+name: Feature request
+description: Propose a user-facing capability or improvement
+title: "[Feature] "
+labels: [enhancement, needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user problem without assuming a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe what should become possible.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and security impact
+      description: Note affected protocols, formats, permissions, or trust boundaries.

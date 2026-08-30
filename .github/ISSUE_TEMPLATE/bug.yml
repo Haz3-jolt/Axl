@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 Hari Srinivasan
+# SPDX-License-Identifier: Apache-2.0
+
+name: Bug report
+description: Report a reproducible problem
+title: "[Bug] "
+labels: [bug, needs-triage]
+body:
+  - type: checkboxes
+    id: duplicate
+    attributes:
+      label: Duplicate check
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: List the smallest sequence that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Kepler revision
+      description: Provide the release version or Git commit.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include operating system, architecture, Node.js version, and sandbox provider.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Additional context
+      description: Remove credentials and private data before attaching logs or screenshots.

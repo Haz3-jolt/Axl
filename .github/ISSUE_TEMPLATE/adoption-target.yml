@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 Hari Srinivasan
+# SPDX-License-Identifier: Apache-2.0
+
+name: Adoption target
+description: Request support for an existing agent resource or package
+title: "[Adoption] "
+labels: [adoption, enhancement, needs-triage]
+body:
+  - type: dropdown
+    id: ecosystem
+    attributes:
+      label: Source ecosystem
+      options:
+        - Pi
+        - OpenCode
+        - DeepSeek Harness
+        - Claude Code
+        - Open standard
+        - Another ecosystem
+    validations:
+      required: true
+  - type: input
+    id: package
+    attributes:
+      label: Package or resource
+      description: Give its exact package name, repository, or documented identifier.
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Source URL
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Required behavior
+      description: Explain the primary entry surface and the workflow that should carry over.
+    validations:
+      required: true
+  - type: textarea
+    id: failure
+    attributes:
+      label: Current failure
+      description: If adoption was attempted, include the exact error after removing secrets.
+  - type: input
+    id: license
+    attributes:
+      label: Source license
+      description: Link to the package license when known.

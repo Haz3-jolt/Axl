@@ -1,0 +1,119 @@
+# SPDX-FileCopyrightText: 2026 Hari Srinivasan
+# SPDX-License-Identifier: Apache-2.0
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'packages/**'
+              - 'scripts/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig*.json'
+              - 'biome.json'
+              - '.npmrc'
+              - '.github/workflows/ci.yml'
+            workflows:
+              - '.github/workflows/**'
+
+  quality:
+    name: Build and test
+    runs-on: ubuntu-latest
+    needs: changes
+    steps:
+      - name: No code changes
+        if: needs.changes.outputs.code != 'true'
+        run: echo "No code changes detected; required check reports success."
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        if: needs.changes.outputs.code == 'true'
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          standalone: true
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: needs.changes.outputs.code == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        if: needs.changes.outputs.code == 'true'
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Format, lint, type-check, test, and build
+        if: needs.changes.outputs.code == 'true'
+        run: pnpm check
+
+  licenses:
+    name: REUSE licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Check REUSE compliance
+        uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6
+
+  dco:
+    name: DCO sign-off
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Check commit sign-offs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: node scripts/check-dco.ts "$BASE_SHA" "$HEAD_SHA"
+
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    needs: changes
+    steps:
+      - name: No workflow changes
+        if: needs.changes.outputs.workflows != 'true'
+        run: echo "No workflow changes detected; required check reports success."
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        if: needs.changes.outputs.workflows == 'true'
+      - name: Run actionlint
+        if: needs.changes.outputs.workflows == 'true'
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+  lockfile-audit:
+    name: Lockfile audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          standalone: true
+      - name: Audit locked dependencies
+        run: pnpm audit --audit-level high

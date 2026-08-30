@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@kepler/ai": ["./packages/ai/src/index.ts"],
+      "@kepler/daemon": ["./packages/daemon/src/index.ts"],
+      "@kepler/extension-mcp": ["./packages/extensions/mcp/src/index.ts"],
+      "@kepler/extension-skills": ["./packages/extensions/skills/src/index.ts"],
+      "@kepler/kernel": ["./packages/kernel/src/index.ts"],
+      "@kepler/protocol": ["./packages/protocol/src/index.ts"],
+      "@kepler/sandbox": ["./packages/sandbox/src/index.ts"]
+    },
+    "lib": ["ES2023", "ESNext.Array"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "inlineSources": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  }
+}

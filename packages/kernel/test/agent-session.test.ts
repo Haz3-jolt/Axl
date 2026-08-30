@@ -1,0 +1,380 @@
+// SPDX-FileCopyrightText: 2026 Hari Srinivasan
+// SPDX-License-Identifier: Apache-2.0
+
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test, { type TestContext } from "node:test";
+
+import {
+  type JsonObject,
+  type ModelStreamEvent,
+  parseSessionId,
+  type Usage,
+} from "@kepler/protocol";
+
+import {
+  AgentSession,
+  type KernelTool,
+  type ModelPort,
+  type ModelTurnRequest,
+  OperationConflictError,
+  SessionTree,
+  ToolRegistry,
+  verifyToolCallIntegrity,
+} from "../src/index.ts";
+
+const sessionId = parseSessionId("123e4567-e89b-42d3-a456-426614174000");
+const usage: Usage = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 };
+
+interface ScriptedPort extends ModelPort {
+  readonly requests: ModelTurnRequest[];
+}
+
+function makePort(responses: readonly (readonly ModelStreamEvent[])[]): ScriptedPort {
+  const remaining = [...responses];
+  const requests: ModelTurnRequest[] = [];
+  return {
+    requests,
+    stream(request) {
+      requests.push(request);
+      const response = remaining.shift();
+      if (response === undefined) throw new Error("scripted port has no response left");
+      return (async function* () {
+        for (const event of response) {
+          if (request.signal?.aborted) {
+            yield { type: "aborted" } as const;
+            return;
+          }
+          yield event;
+        }
+      })();
+    },
+  };
+}
+
+function echoTool(): { tool: KernelTool; calls: JsonObject[] } {
+  const calls: JsonObject[] = [];
+  return {
+    calls,
+    tool: {
+      name: "echo",
+      description: "Echo the input back",
+      inputSchema: { type: "object" },
+      execute: (input) => {
+        calls.push(input);
+        return Promise.resolve({
+          content: [{ type: "text", text: `echo:${JSON.stringify(input)}` }],
+          isError: false,
+        });
+      },
+    },
+  };
+}
+
+async function makeSession(
+  context: TestContext,
+  port: ModelPort,
+  tools = new ToolRegistry(),
+  options: { system?: string; maxModelCallsPerTurn?: number } = {},
+): Promise<{ session: AgentSession; path: string; tools: ToolRegistry }> {
+  const directory = await mkdtemp(join(tmpdir(), "kepler-agent-session-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, "session.jsonl");
+  const session = await AgentSession.open(path, sessionId, {
+    model: port,
+    tools,
+    cwd: "/workspace",
+    ...options,
+  });
+  return { session, path, tools };
+}
+
+function say(text: string): readonly ModelStreamEvent[] {
+  return [
+    { type: "thinking_delta", text: "hm " },
+    { type: "thinking_delta", text: "ok" },
+    { type: "text_delta", text },
+    { type: "completed", stopReason: "stop", usage },
+  ];
+}
+
+function callTool(callId: string, input: JsonObject): readonly ModelStreamEvent[] {
+  return [
+    { type: "tool_call", callId, name: "echo", input },
+    { type: "completed", stopReason: "tool_use", usage },
+  ];
+}
+
+test("runs a plain turn and persists the canonical events", async (context) => {
+  const port = makePort([say("hello")]);
+  const { session } = await makeSession(context, port, new ToolRegistry(), {
+    system: "You are Kepler.",
+  });
+
+  const result = await session.runTurn([{ type: "text", text: "hi" }]);
+  assert.equal(result.stopReason, "stop");
+  assert.deepEqual(
+    result.events.map((event) => event.type),
+    ["user.message", "assistant.message"],
+  );
+  const assistant = result.events[1];
+  if (assistant?.type === "assistant.message") {
+    assert.deepEqual(assistant.payload.content, [
+      { type: "thinking", text: "hm ok" },
+      { type: "text", text: "hello" },
+    ]);
+    assert.deepEqual(assistant.payload.usage, usage);
+  }
+  assert.equal(port.requests[0]?.system, "You are Kepler.");
+  assert.equal(port.requests[0]?.messages.length, 1);
+
+  const reread = await session.log.read();
+  const tree = SessionTree.fromEvents(sessionId, reread.events);
+  assert.equal(tree.size, 3); // session.created + 2
+  assert.equal(reread.events[0]?.type, "session.created");
+  await session.dispose();
+});
+
+test("dispatches tool calls, pairs results, and feeds them back", async (context) => {
+  const port = makePort([callTool("call-1", { value: 1 }), say("done")]);
+  const registry = new ToolRegistry();
+  const { tool, calls } = echoTool();
+  registry.register(tool);
+  const { session } = await makeSession(context, port, registry);
+
+  const result = await session.runTurn([{ type: "text", text: "use the tool" }]);
+  assert.equal(result.stopReason, "stop");
+  assert.deepEqual(
+    result.events.map((event) => event.type),
+    ["user.message", "assistant.message", "tool.call", "tool.result", "assistant.message"],
+  );
+  assert.deepEqual(calls, [{ value: 1 }]);
+
+  // The second model call sees the assistant tool call and the tool result.
+  const second = port.requests[1];
+  assert.equal(second?.messages.length, 3);
+  const assistantMessage = second?.messages[1];
+  assert.equal(assistantMessage?.role === "assistant" && assistantMessage.toolCalls?.length, 1);
+  const toolMessage = second?.messages[2];
+  assert.equal(toolMessage?.role === "tool" && toolMessage.callId, "call-1");
+
+  // Pairing holds under the kernel's own integrity check.
+  verifyToolCallIntegrity(SessionTree.fromEvents(sessionId, (await session.log.read()).events));
+  // The single operation owns every event of the turn.
+  const operationIds = new Set(result.events.map((event) => event.operationId));
+  assert.equal(operationIds.size, 1);
+});
+
+test("an unregistered tool yields an error result, not a crash", async (context) => {
+  const port = makePort([
+    [
+      { type: "tool_call", callId: "call-1", name: "missing", input: {} },
+      { type: "completed", stopReason: "tool_use", usage },
+    ],
+    say("recovered"),
+  ]);
+  const { session } = await makeSession(context, port);
+
+  const result = await session.runTurn([{ type: "text", text: "go" }]);
+  assert.equal(result.stopReason, "stop");
+  const toolResult = result.events.find((event) => event.type === "tool.result");
+  if (toolResult?.type === "tool.result") {
+    assert.equal(toolResult.payload.isError, true);
+    assert.match(
+      toolResult.payload.content[0]?.type === "text" ? toolResult.payload.content[0].text : "",
+      /not registered/,
+    );
+  }
+});
+
+test("a throwing tool records an error result and the loop continues", async (context) => {
+  const registry = new ToolRegistry();
+  registry.register({
+    name: "echo",
+    description: "always fails",
+    inputSchema: {},
+    execute: () => Promise.reject(new Error("disk on fire")),
+  });
+  const port = makePort([callTool("call-1", {}), say("noted")]);
+  const { session } = await makeSession(context, port, registry);
+
+  const result = await session.runTurn([{ type: "text", text: "go" }]);
+  const toolResult = result.events.find((event) => event.type === "tool.result");
+  assert.equal(toolResult?.type === "tool.result" && toolResult.payload.isError, true);
+  assert.equal(result.stopReason, "stop");
+});
+
+test("model failures land as an error assistant message without corrupting the log", async (context) => {
+  const failing: ModelPort = {
+    stream: () => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.reject(new Error("connection reset")),
+      }),
+    }),
+  };
+  const { session, path } = await makeSession(context, failing);
+  const result = await session.runTurn([{ type: "text", text: "hi" }]);
+  assert.equal(result.stopReason, "error");
+  const assistant = result.events[1];
+  if (assistant?.type === "assistant.message") {
+    assert.match(assistant.payload.errorMessage ?? "", /connection reset/);
+  }
+  // Log remains valid and resumable.
+  const reopened = await AgentSession.open(path, sessionId, {
+    model: failing,
+    tools: new ToolRegistry(),
+    cwd: "/workspace",
+  });
+  await reopened.dispose();
+});
+
+test("a silently truncated stream becomes a loud error terminal", async (context) => {
+  const truncated: ModelPort = {
+    stream: async function* () {
+      yield { type: "text_delta", text: "cut " } as const;
+    },
+  };
+  const { session } = await makeSession(context, truncated);
+  const result = await session.runTurn([{ type: "text", text: "hi" }]);
+  assert.equal(result.stopReason, "error");
+  const assistant = result.events[1];
+  if (assistant?.type === "assistant.message") {
+    assert.match(assistant.payload.errorMessage ?? "", /without a terminal event/);
+    assert.deepEqual(assistant.payload.content, [{ type: "text", text: "cut " }]);
+  }
+});
+
+test("tool_use without a tool call stops loudly", async (context) => {
+  const port = makePort([[{ type: "completed", stopReason: "tool_use", usage }]]);
+  const { session } = await makeSession(context, port);
+  const result = await session.runTurn([{ type: "text", text: "broken response" }]);
+  assert.equal(result.stopReason, "error");
+  assert.equal(result.events.at(-1)?.type, "session.error");
+  await session.dispose();
+});
+
+test("interrupting during model output records an aborted turn cleanly", async (context) => {
+  const controller = new AbortController();
+  const port: ModelPort = {
+    stream: async function* () {
+      yield { type: "text_delta", text: "partial" } as const;
+      controller.abort();
+      throw new Error("socket closed mid-read");
+    },
+  };
+  const { session, path } = await makeSession(context, port);
+  const result = await session.runTurn([{ type: "text", text: "hi" }], controller.signal);
+  assert.equal(result.stopReason, "aborted");
+
+  const reread = await session.log.read();
+  SessionTree.fromEvents(sessionId, reread.events); // no corruption
+  assert.equal(path.length > 0, true);
+});
+
+test("interrupting during a tool stops after the paired result", async (context) => {
+  const controller = new AbortController();
+  const registry = new ToolRegistry();
+  registry.register({
+    name: "echo",
+    description: "aborts the session mid-flight",
+    inputSchema: {},
+    execute: () => {
+      controller.abort();
+      return Promise.resolve({ content: [{ type: "text", text: "done" }], isError: false });
+    },
+  });
+  const port = makePort([callTool("call-1", {})]); // a second model call would throw
+  const { session } = await makeSession(context, port, registry);
+
+  const result = await session.runTurn([{ type: "text", text: "go" }], controller.signal);
+  assert.equal(result.stopReason, "aborted");
+  assert.deepEqual(
+    result.events.map((event) => event.type),
+    ["user.message", "assistant.message", "tool.call", "tool.result"],
+  );
+  verifyToolCallIntegrity(SessionTree.fromEvents(sessionId, (await session.log.read()).events));
+});
+
+test("only one operation may mutate the branch at a time", async (context) => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const port: ModelPort = {
+    stream: async function* () {
+      await gate;
+      yield { type: "completed", stopReason: "stop", usage } as const;
+    },
+  };
+  const { session } = await makeSession(context, port);
+
+  const first = session.runTurn([{ type: "text", text: "one" }]);
+  await assert.rejects(session.runTurn([{ type: "text", text: "two" }]), OperationConflictError);
+  release?.();
+  assert.equal((await first).stopReason, "stop");
+});
+
+test("reopening a session projects history and appends no duplicate root", async (context) => {
+  const port = makePort([say("first"), say("second")]);
+  const { session, path } = await makeSession(context, port);
+  await session.runTurn([{ type: "text", text: "one" }]);
+  await session.dispose();
+
+  const reopened = await AgentSession.open(path, sessionId, {
+    model: port,
+    tools: new ToolRegistry(),
+    cwd: "/workspace",
+  });
+  await reopened.runTurn([{ type: "text", text: "two" }]);
+  const events = (await reopened.log.read()).events;
+  assert.equal(events.filter((event) => event.type === "session.created").length, 1);
+
+  // The second turn's model call saw the first turn's history.
+  const request = port.requests[1];
+  assert.equal(request?.messages.length, 3);
+  await reopened.dispose();
+});
+
+test("the turn model-call limit fails loudly", async (context) => {
+  const registry = new ToolRegistry();
+  const { tool } = echoTool();
+  registry.register(tool);
+  const endless = makePort([
+    callTool("call-1", {}),
+    callTool("call-2", {}),
+    callTool("call-3", {}),
+  ]);
+  const { session } = await makeSession(context, endless, registry, { maxModelCallsPerTurn: 2 });
+
+  const result = await session.runTurn([{ type: "text", text: "loop forever" }]);
+  assert.equal(result.stopReason, "error");
+  const last = result.events[result.events.length - 1];
+  assert.equal(last?.type, "session.error");
+  if (last?.type === "session.error") {
+    assert.equal(last.payload.code, "turn_model_call_limit");
+  }
+});
+
+test("the extension host seam activates and disposes with the session", async (context) => {
+  const lifecycle: string[] = [];
+  const port = makePort([]);
+  const directory = await mkdtemp(join(tmpdir(), "kepler-agent-session-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const session = await AgentSession.open(join(directory, "session.jsonl"), sessionId, {
+    model: port,
+    tools: new ToolRegistry(),
+    cwd: "/workspace",
+    extensionHost: {
+      activate: () => {
+        lifecycle.push("activate");
+      },
+      dispose: () => {
+        lifecycle.push("dispose");
+      },
+    },
+  });
+  await session.dispose();
+  assert.deepEqual(lifecycle, ["activate", "dispose"]);
+});

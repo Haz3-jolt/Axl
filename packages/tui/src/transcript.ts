@@ -1,0 +1,319 @@
+// SPDX-FileCopyrightText: 2026 Hari Srinivasan
+// SPDX-License-Identifier: Apache-2.0
+
+import type { ModelInfo } from "@kepler/ai";
+import type { CanonicalEvent } from "@kepler/protocol";
+
+import { renderMarkdown } from "./markdown.ts";
+import { sanitizeTerminalText, truncateToWidth, visibleWidth, wrapLine } from "./render.ts";
+import { renderToolCall, renderToolResult } from "./tool-display.ts";
+
+export interface Palette {
+  dim(text: string): string;
+  accent(text: string): string;
+  error(text: string): string;
+  border?(text: string): string;
+  success?(text: string): string;
+  warning?(text: string): string;
+  text?(text: string): string;
+  userMessage?(text: string): string;
+  diffAdded?(text: string): string;
+  diffRemoved?(text: string): string;
+  diffContext?(text: string): string;
+  thinking?(level: string, text: string): string;
+  mdHeading?(text: string): string;
+  mdCode?(text: string): string;
+  mdCodeBlockBorder?(text: string): string;
+  mdQuote?(text: string): string;
+  mdQuoteBorder?(text: string): string;
+  mdListBullet?(text: string): string;
+  keyword?(text: string): string;
+  literal?(text: string): string;
+}
+
+export const PLAIN_PALETTE: Palette = {
+  dim: (text) => text,
+  accent: (text) => text,
+  error: (text) => text,
+};
+
+export const ANSI_PALETTE: Palette = {
+  dim: (text) => `\x1b[2m${text}\x1b[22m`,
+  accent: (text) => `\x1b[36m${text}\x1b[39m`,
+  error: (text) => `\x1b[31m${text}\x1b[39m`,
+  border: (text) => `\x1b[90m${text}\x1b[39m`,
+  success: (text) => `\x1b[32m${text}\x1b[39m`,
+  warning: (text) => `\x1b[33m${text}\x1b[39m`,
+  diffAdded: (text) => `\x1b[32m${text}\x1b[39m`,
+  diffRemoved: (text) => `\x1b[31m${text}\x1b[39m`,
+  diffContext: (text) => `\x1b[2m${text}\x1b[22m`,
+};
+
+function textOf(content: readonly { type: string; text?: string }[]): string {
+  return sanitizeTerminalText(
+    content
+      .filter((item) => item.type === "text")
+      .map((item) => item.text ?? "")
+      .join(""),
+  );
+}
+
+function compactNumber(value: number): string {
+  if (value >= 10_000_000) return `${Math.round(value / 1_000_000)}M`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 10_000) return `${Math.round(value / 1_000)}k`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
+export type ThinkingDisplay = "show" | "compact" | "hide";
+export type ToolOutputDisplay = "compact" | "full";
+
+/** Pure event-to-terminal projection. The daemon remains the source of truth. */
+export class SessionView {
+  palette: Palette;
+  private width: number;
+  private readonly models: readonly ModelInfo[];
+  model: string | undefined;
+  thinking: string | undefined;
+  sandbox: string | undefined;
+  working = false;
+  thinkingDisplay: ThinkingDisplay = "compact";
+  toolOutputDisplay: ToolOutputDisplay = "compact";
+  totalTokens = 0;
+  inputTokens = 0;
+  outputTokens = 0;
+  cacheReadTokens = 0;
+  cacheWriteTokens = 0;
+  contextTokens = 0;
+  cacheHitPercent: number | undefined;
+  totalCostUsd = 0;
+  tokensPerSecond: number | undefined;
+  elapsedSeconds = 0;
+  private responseStartedAt: number | undefined;
+
+  constructor(width: number, palette: Palette = PLAIN_PALETTE, models: readonly ModelInfo[] = []) {
+    this.width = width;
+    this.palette = palette;
+    this.models = models;
+  }
+
+  setWidth(width: number): void {
+    this.width = Math.max(1, width);
+  }
+
+  cycleThinkingDisplay(): ThinkingDisplay {
+    this.thinkingDisplay =
+      this.thinkingDisplay === "compact"
+        ? "show"
+        : this.thinkingDisplay === "show"
+          ? "hide"
+          : "compact";
+    return this.thinkingDisplay;
+  }
+
+  toggleToolOutput(): ToolOutputDisplay {
+    this.toolOutputDisplay = this.toolOutputDisplay === "compact" ? "full" : "compact";
+    return this.toolOutputDisplay;
+  }
+
+  beginResponse(): void {
+    this.responseStartedAt = performance.now();
+    this.tokensPerSecond = undefined;
+  }
+
+  frameBorder(text: string): string {
+    return (
+      this.palette.thinking?.(this.thinking ?? "off", text) ??
+      this.palette.border?.(text) ??
+      this.palette.dim(text)
+    );
+  }
+
+  usageLabel(): string {
+    const parts: string[] = [];
+    if (this.inputTokens) parts.push(`↑${compactNumber(this.inputTokens)}`);
+    if (this.outputTokens) parts.push(`↓${compactNumber(this.outputTokens)}`);
+    if (this.cacheReadTokens) parts.push(`R${compactNumber(this.cacheReadTokens)}`);
+    if (this.cacheWriteTokens) parts.push(`W${compactNumber(this.cacheWriteTokens)}`);
+    if ((this.cacheReadTokens || this.cacheWriteTokens) && this.cacheHitPercent !== undefined) {
+      parts.push(`CH${this.cacheHitPercent.toFixed(1)}%`);
+    }
+    if (this.totalCostUsd) parts.push(`$${this.totalCostUsd.toFixed(3)}`);
+
+    const model = this.models.find((candidate) => candidate.modelId === this.model);
+    const percent =
+      model === undefined || this.contextTokens === 0
+        ? "?"
+        : `${((this.contextTokens / model.contextWindow) * 100).toFixed(1)}%`;
+    parts.push(`${percent}/${model ? compactNumber(model.contextWindow) : "?"} (auto)`);
+    return parts.join(" ");
+  }
+
+  modelLabel(): string {
+    const model = this.model ?? "no-model";
+    const info = this.models.find((candidate) => candidate.modelId === model);
+    if (info && !info.reasoning) return model;
+    return `${model} • ${this.thinking === "off" ? "thinking off" : (this.thinking ?? "?")}`;
+  }
+
+  tpsLabel(): string {
+    return this.tokensPerSecond === undefined ? "" : `${this.tokensPerSecond.toFixed(1)} tok/s`;
+  }
+
+  apply(event: CanonicalEvent): string[] {
+    const { dim, error } = this.palette;
+    switch (event.type) {
+      case "session.created":
+        return this.wrap(dim(`· session started in ${sanitizeTerminalText(event.payload.cwd)}`));
+      case "session.resumed":
+        return this.wrap(dim("· session resumed"));
+      case "user.message":
+        return this.userMessage(textOf(event.payload.content));
+      case "assistant.message": {
+        const usage = event.payload.usage;
+        if (usage !== undefined) {
+          this.inputTokens += usage.inputTokens;
+          this.outputTokens += usage.outputTokens;
+          this.cacheReadTokens += usage.cacheReadTokens;
+          this.cacheWriteTokens += usage.cacheWriteTokens;
+          this.totalTokens += usage.inputTokens + usage.outputTokens;
+          const promptTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+          this.contextTokens = promptTokens;
+          this.cacheHitPercent =
+            promptTokens > 0 ? (usage.cacheReadTokens / promptTokens) * 100 : undefined;
+          const cost = this.models.find((candidate) => candidate.modelId === this.model)?.cost;
+          this.totalCostUsd +=
+            usage.costUsd ??
+            (cost === undefined
+              ? 0
+              : (cost.inputUsdPerMTok * usage.inputTokens +
+                  cost.outputUsdPerMTok * usage.outputTokens +
+                  (cost.cacheReadUsdPerMTok ?? 0) * usage.cacheReadTokens +
+                  (cost.cacheWriteUsdPerMTok ?? 0) * usage.cacheWriteTokens) /
+                1_000_000);
+          if (this.responseStartedAt !== undefined && usage.outputTokens > 0) {
+            const elapsedMs = performance.now() - this.responseStartedAt;
+            this.tokensPerSecond =
+              elapsedMs > 0 ? (usage.outputTokens * 1_000) / elapsedMs : undefined;
+          }
+          this.responseStartedAt = undefined;
+        }
+        const lines: string[] = [];
+        for (const item of event.payload.content) {
+          if (item.type === "thinking") {
+            const thought = sanitizeTerminalText(item.text);
+            if (this.thinkingDisplay === "show") {
+              lines.push(this.frameBorder("∴ Thinking"), ...this.wrap(dim(thought)));
+            } else if (this.thinkingDisplay === "compact") {
+              const count = thought.split("\n").length;
+              lines.push(this.frameBorder(`∴ Thinking · ${count} line${count === 1 ? "" : "s"}`));
+            }
+          } else if (item.type === "text") {
+            lines.push(
+              ...renderMarkdown(sanitizeTerminalText(item.text), this.width, this.palette),
+            );
+          }
+        }
+        if (event.payload.stopReason === "error") {
+          lines.push(
+            ...this.wrap(
+              error(`✖ ${sanitizeTerminalText(event.payload.errorMessage ?? "model error")}`),
+            ),
+          );
+        } else if (event.payload.stopReason === "aborted") {
+          lines.push(...this.wrap(dim("■ interrupted")));
+        }
+        return lines;
+      }
+      case "tool.call":
+        return renderToolCall(event.payload.name, event.payload.input, this.width, this.palette);
+      case "tool.result": {
+        const lines = renderToolResult({
+          name: event.payload.name,
+          text: textOf(event.payload.content),
+          isError: event.payload.isError,
+          width: this.width,
+          mode: this.toolOutputDisplay,
+          palette: this.palette,
+        });
+        if (this.working) this.beginResponse();
+        return lines;
+      }
+      case "session.error":
+        return this.wrap(
+          error(
+            `✖ ${sanitizeTerminalText(event.payload.code)}: ${sanitizeTerminalText(event.payload.message)}`,
+          ),
+        );
+      case "config.model":
+        this.model = sanitizeTerminalText(event.payload.modelId);
+        return this.wrap(dim(`· model ${event.payload.modelId}`));
+      case "config.thinking": {
+        const { requested, effective, clamped } = event.payload;
+        this.thinking = effective;
+        return this.wrap(
+          dim(
+            clamped
+              ? `· thinking ${effective} (clamped from ${requested})`
+              : `· thinking ${effective}`,
+          ),
+        );
+      }
+      case "config.dialect": {
+        const { dialectId, rosterFingerprint, reason } = event.payload;
+        return this.wrap(dim(`· tools ${dialectId} @${rosterFingerprint.slice(0, 8)} (${reason})`));
+      }
+      case "sandbox.configured":
+        this.sandbox = event.payload.enforced ? event.payload.provider : "unenforced";
+        return this.wrap(dim(`· sandbox ${this.sandbox}`));
+      case "context.injected":
+        return this.wrap(dim(`+ context [${sanitizeTerminalText(event.payload.source)}]`));
+      default:
+        return [];
+    }
+  }
+
+  statusLine(sessionId: string, spinner?: string, queued = 0): string {
+    const activity = this.working
+      ? `${spinner ?? "⠿"} working… ${this.elapsedSeconds}s${queued ? ` +${queued}` : ""}`
+      : queued
+        ? `idle +${queued}`
+        : "idle";
+    const full = `${activity} · session ${sessionId.slice(0, 8)} · model ${this.model ?? "?"} · thinking ${this.thinking ?? "?"} · sandbox ${this.sandbox ?? "none"}`;
+    return this.palette.dim(truncateToWidth(full, this.width, ""));
+  }
+
+  private userMessage(text: string): string[] {
+    if (this.width < 8) return this.wrap(text);
+    const border = this.palette.border ?? this.palette.dim;
+    const background = this.palette.userMessage ?? ((value: string) => value);
+    const contentWidth = Math.max(1, this.width - 4);
+    const blank = background(`${border("│")} ${" ".repeat(contentWidth)} ${border("│")}`);
+    const body = text
+      .split("\n")
+      .flatMap((line) => wrapLine(line, contentWidth))
+      .map((line) => {
+        const padding = " ".repeat(Math.max(0, contentWidth - visibleWidth(line)));
+        return background(
+          `${border("│")} ${(this.palette.text ?? ((value: string) => value))(line)}${padding} ${border("│")}`,
+        );
+      });
+    const title = " user ";
+    const top = `${border("╭")}${this.palette.accent(title)}${border(
+      `${"─".repeat(Math.max(0, this.width - 2 - title.length))}╮`,
+    )}`;
+    return [
+      "",
+      background(top),
+      blank,
+      ...body,
+      blank,
+      background(border(`╰${"─".repeat(this.width - 2)}╯`)),
+    ];
+  }
+
+  private wrap(line: string): string[] {
+    return line.split("\n").flatMap((part) => wrapLine(part, this.width));
+  }
+}

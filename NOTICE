@@ -1,0 +1,24 @@
+Kepler
+Copyright 2026 Hari Srinivasan
+
+This product includes material adapted from Pi (https://github.com/earendil-works/pi),
+Copyright (c) 2025 Mario Zechner, MIT License (see LICENSES/MIT.txt), at commit
+6c87d9a026677b601e8278030dcf1ad97fe0bd86:
+
+- packages/ai/src/thinking.ts: thinking-level support and clamping semantics,
+  default thinking-token budgets, and answer-room reservation, adapted from
+  pi-ai's models.ts and api/simple-options.ts.
+- packages/ai/src/openai-responses.ts: OpenAI Responses API stream-event
+  mapping, cached-token usage accounting, and the minimum output-token floor,
+  adapted from pi-ai's api/openai-responses-shared.ts.
+- packages/ai/src/azure-openai.ts: Azure OpenAI base-URL normalization, the
+  AZURE_OPENAI_* environment contract, and the deployment-name map format,
+  adapted from pi-ai's api/azure-openai-responses.ts.
+
+Kepler uses the official Model Context Protocol TypeScript SDK,
+Copyright (c) Anthropic, PBC, under the MIT License (see LICENSES/MIT.txt).
+
+Kepler uses yaml, Copyright (c) 2018 Eemeli Aro,
+under the ISC License (see LICENSES/ISC.txt).
+
+The reference projects and exact commits inspected during development are recorded in docs/architecture/decisions.md. Future copied or adapted material must be recorded here before distribution.

@@ -1,0 +1,115 @@
+<!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# Contributing to Kepler
+
+Contributions to code, tests, documentation, and design are welcome. Read the [Code of Conduct](CODE_OF_CONDUCT.md), [AI Policy](AI_POLICY.md), and [development guide](AGENTS.md) before contributing.
+
+## Prerequisites
+
+- Node.js `^22.19.0` or `>=24.0.0`
+- pnpm `10.34.4`
+- Git
+- Python `3.11+`, `uv`, and REUSE `6.2.0` for local license checks
+- pre-commit for local hooks
+
+## Fork and clone
+
+Fork the canonical repository, clone your fork, and add the canonical repository as `upstream`.
+
+```bash
+git clone <your-fork-url>
+cd kepler
+git remote add upstream <canonical-repository-url>
+```
+
+## Run locally
+
+```bash
+pnpm install --frozen-lockfile
+pnpm check
+```
+
+Kepler has no runnable agent or CLI in Phase 0. See [SETUP.md](SETUP.md) for the complete current setup.
+
+## Find and claim work
+
+Search existing issues first. Discuss changes to kernel guarantees, event formats, the extension API, or the wire protocol before implementation. Those changes require an RFC under `docs/rfcs/`.
+
+## Make changes
+
+### Branch names
+
+Use a short descriptive branch name such as `feature/event-schema`, `fix/log-recovery`, or `docs/setup`.
+
+Never commit directly to `main`.
+
+### Code style
+
+```bash
+pnpm format
+pnpm lint
+pnpm typecheck
+```
+
+Use TypeScript for application code. Prefer Node.js built-ins to new dependencies. Ask before adding a production dependency.
+
+### Package boundaries
+
+- `packages/protocol` has no runtime dependencies.
+- `packages/kernel` may depend only on `packages/protocol` and Node.js built-ins.
+- Extensions use only public package exports and never import kernel source paths.
+- Mobile clients, when added, import only their generated SDK.
+
+`pnpm check:boundaries` enforces these rules.
+
+### Generated files
+
+Do not edit generated files. Change their source or generator and regenerate. Generated TypeScript files must use the `*.generated.ts` suffix, name their generator in the required header, and pass `pnpm check:generated`.
+
+### SPDX and provenance
+
+Every file must carry SPDX copyright and license information. Files that cannot contain comments are covered by `REUSE.toml`. Follow [docs/provenance.md](docs/provenance.md) for external material.
+
+```bash
+reuse lint
+```
+
+### Tests
+
+Add the smallest runnable test that would fail if non-trivial behavior regressed. Run the focused test first, then broader checks when risk warrants it.
+
+```bash
+pnpm test
+pnpm check
+```
+
+### Commit messages and DCO
+
+Use concise conventional commit subjects. Sign off every commit to certify the [Developer Certificate of Origin](https://developercertificate.org/):
+
+```bash
+git commit --signoff -m "feat(protocol): add event version"
+```
+
+### Changelog
+
+Add user-visible changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md).
+
+## Submit a pull request
+
+1. Update your branch from `upstream/main`.
+2. Review the complete diff.
+3. Run the relevant checks and record their results.
+4. Complete the pull request template, including AI assistance and external provenance.
+5. Resolve all review and CI findings.
+
+Keep each pull request focused on one concern. Kernel and security-boundary changes require two reviewers. Other changes require one maintainer.
+
+## Report issues
+
+Use the issue forms for bugs, feature requests, and adoption targets. Report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+## License
+
+Contributions are accepted under Apache-2.0 through DCO sign-off. Kepler does not require a contributor license agreement or copyright assignment.

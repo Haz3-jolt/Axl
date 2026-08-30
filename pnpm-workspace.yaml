@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Hari Srinivasan
+# SPDX-License-Identifier: Apache-2.0
+
+packages:
+  - packages/*
+  - packages/extensions/*
+  - apps/*

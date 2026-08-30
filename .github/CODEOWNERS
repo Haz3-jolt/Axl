@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 Hari Srinivasan
+# SPDX-License-Identifier: Apache-2.0
+
+* @Haz3-jolt
+
+/.github/ @Haz3-jolt
+/docs/security/ @Haz3-jolt
+/packages/kernel/ @Haz3-jolt
+/packages/protocol/ @Haz3-jolt
+/SECURITY.md @Haz3-jolt

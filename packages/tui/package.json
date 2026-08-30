@@ -1,0 +1,34 @@
+{
+  "name": "@kepler/tui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Interactive terminal client for the Kepler daemon",
+  "license": "Apache-2.0",
+  "bin": {
+    "kepler": "./dist/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json --force",
+    "test": "pnpm --filter @kepler/protocol build && pnpm --filter @kepler/kernel build && pnpm --filter @kepler/ai build && pnpm --filter @kepler/daemon build && node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@kepler/ai": "workspace:*",
+    "@kepler/daemon": "workspace:*",
+    "@kepler/extension-mcp": "workspace:*",
+    "@kepler/extension-skills": "workspace:*",
+    "@kepler/kernel": "workspace:*",
+    "@kepler/protocol": "workspace:*",
+    "@kepler/sandbox": "workspace:*"
+  }
+}
