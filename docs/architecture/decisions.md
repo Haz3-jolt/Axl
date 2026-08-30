@@ -3,51 +3,51 @@
 
 # Foundation decisions
 
-These decisions establish the Phase 0 package and compatibility boundaries.
+These decisions set the package and compatibility boundaries established during Phase 0.
 
-## Package names
+## Names
 
-`Kepler`, `@kepler/*`, and the future `kepler` executable are private working names. No package is publishable yet. Naming will be revisited before the first public package release.
+`Kepler`, the `@kepler/*` scope, and the `kepler` executable are working names. Packages remain private until naming is reviewed for the first public release.
 
-## Dependency direction
+## Dependencies
 
 `packages/protocol` owns shared event and RPC definitions and has no runtime dependencies.
 
-`packages/kernel` will own the event log, agent loop, tool execution, cancellation, policy enforcement, extension-host lifecycle, client attachment, and worker lifecycle. It may import `packages/protocol` and Node.js built-ins. It will have no third-party runtime dependencies.
+`packages/kernel` owns the event log, agent loop, tool execution, cancellation, policy enforcement, extension-host lifecycle, client attachment, and worker lifecycle. It may import only `packages/protocol` and Node.js built-ins.
 
-Other packages may depend on the kernel only through its public exports. Extensions may not import private kernel paths.
+Other packages use the kernel through public exports. Extensions cannot import private kernel paths.
 
-This is stricter than both references inspected for Phase 0:
+These rules are stricter than the reference projects inspected for Phase 0:
 
-- Pi at `6c87d9a026677b601e8278030dcf1ad97fe0bd86`: its agent package has third-party runtime dependencies, and its protocol package depends on TypeBox.
-- DSH at `cd5ef8148158c3a752a658978873241fdf8e2bbc`: its agent loop composes multiple workspace packages and has a Schemastery runtime dependency.
+- Pi at `6c87d9a026677b601e8278030dcf1ad97fe0bd86` has third-party runtime dependencies in its agent package and uses TypeBox in its protocol package.
+- DSH at `cd5ef8148158c3a752a658978873241fdf8e2bbc` builds its loop from several workspace packages and uses Schemastery at runtime.
 
-Kepler uses those projects as behavioral references, not as dependency-layout requirements.
+Kepler uses both projects as behavioral references, not as package-layout templates.
 
 ## Event identity
 
-Event, session, and operation identifiers are opaque lowercase RFC 9562 UUIDs. The component creating an identifier uses its platform cryptographic UUID generator. Every event carries its session ID and parent event ID; operation IDs are present only for events owned by an operation.
+Event, session, and operation IDs are opaque lowercase RFC 9562 UUIDs. Their owning component uses the platform's cryptographic UUID generator. Every event includes its session ID and parent event ID. Events include an operation ID only when an operation owns them.
 
 ## Versioning
 
-- The first at-rest JSONL event format version is `1`.
+- The first JSONL event format version is `1`.
 - The first local wire protocol version is `1`.
-- Before the first stable release, readers and clients accept only the exact supported version. Unsupported versions fail with an explicit error. Compatibility ranges may be introduced only with the client protocol work.
+- Before the first stable release, readers and clients accept only an exact supported version. Later client-protocol work may introduce compatibility ranges.
 
 ## Event-log durability and redaction
 
-Each session has one in-process append queue. An append writes one complete newline-terminated event, synchronizes the file, and rolls back to the prior byte length if writing or synchronization fails. Startup preserves every valid complete line, discards only an unterminated final line, and reports malformed complete lines as corruption.
+Each session has one serialized append queue. An append writes a complete newline-terminated event, syncs the file, and restores the previous length if either step fails. Startup keeps every valid complete line, removes an unfinished final line, and reports malformed complete lines as corruption.
 
-Redaction runs before serialization. Version 1 masks known credential field names in structured data and replaces configured secret values throughout event payload strings. Tool input schemas retain secret-looking property names because those names describe data rather than contain credentials.
+Redaction happens before serialization. Version 1 masks known credential fields and replaces configured secret values in payload strings. Tool schemas keep property names that resemble secrets because those names describe fields rather than contain credentials.
 
 ## Extension isolation
 
-Third-party extensions are isolated by default. Trusted in-process execution is not permitted unless a later reviewed decision explicitly introduces it.
+Third-party extensions start in isolation. Trusted in-process execution requires a later reviewed decision.
 
 ## First model provider
 
-Decided 2026-08-29: the first real provider adapter targets Azure OpenAI through the Responses API with API-key authentication. The OpenAI tool dialect is the first provider dialect Kepler implements. The deterministic fake provider, not Azure, remains the substrate for tests. Broader authentication and provider support wait for later slices.
+Decision from 2026-08-29: the first production adapter uses Azure OpenAI's Responses API with API-key authentication. The OpenAI tool dialect is the first provider dialect. Tests continue to use the deterministic fake provider. Broader provider and authentication support belongs to later phases.
 
 ## Generated files
 
-Generated TypeScript files use the `*.generated.ts` suffix and start with `@generated by <generator>; do not edit.` The generator must be a TypeScript script that supports `--check`; `pnpm check:generated` runs that check. Generated output is changed through its source and generator only.
+Generated TypeScript files use the `*.generated.ts` suffix and begin with `@generated by <generator>; do not edit.` Their TypeScript generator must support `--check`, which `pnpm check:generated` runs. Edit the source and regenerate instead of changing generated output directly.

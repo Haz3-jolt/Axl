@@ -1,197 +1,192 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kepler: Open Source Plan
+# Kepler open source plan
 
-Status: Working plan. Companion to [HARNESS_PLAN.md](HARNESS_PLAN.md).
+Status: working plan. This document accompanies [HARNESS_PLAN.md](HARNESS_PLAN.md).
 
 Updated: 2026-08-28
 
-## 1. Why open source is load-bearing
+## 1. Why Kepler is open source
 
-For most products, open source is a distribution choice. For Kepler it is a structural requirement, because every promise in the product plan is a promise about trust:
+Kepler asks users to trust it with source code, credentials, commands, and local configuration. Its core claims need to be inspectable.
 
-- The adoption compiler converts other people's setups and asks them to run the result. Nobody runs converted code from a black box. The converter, the provenance format, and the verification pipeline must be inspectable or adoption is dead on arrival.
-- The sandbox and permission model claim to be non-bypassable. A closed-source security boundary is a marketing claim; an open one is a checkable one.
-- The learning loop edits instructions on the user's machine based on the user's behavior. That is either transparent or creepy, and the difference is source access.
-- The thesis itself — "adapts to you instead of you adapting to it" — is an anti-lock-in position. It is incoherent to argue against lock-in from behind a proprietary license.
+- The adoption compiler converts existing setups into code that runs on the user's machine. Users must be able to inspect the converter, provenance records, and verification process.
+- The sandbox and permission system claims to enforce real boundaries. Those claims should be open to review.
+- The learning loop changes local instructions based on user behavior. Source access makes those changes understandable and auditable.
+- A product built around avoiding lock-in should not create a new proprietary lock-in.
 
-So openness is not a value statement appended to the project. It is the mechanism by which the product's claims become believable.
+Open source is part of Kepler's trust model as well as its distribution model.
 
 ## 2. License
 
-**Apache-2.0, everything.** The kernel, the clients, the adoption compiler, the extension API, the mobile apps, the cloud adapters. One license, no split, no protective carve-outs, no dual licensing.
+All Kepler code is licensed under Apache-2.0. This includes the kernel, clients, adoption compiler, extension API, mobile apps, and cloud adapters. The project will not use an open-core split, feature paywalls, or dual licensing.
 
-Why Apache-2.0 over MIT:
+Apache-2.0 provides an explicit patent grant and clear contribution terms. Those protections matter for infrastructure that may attract corporate contributors. The contribution terms also let Kepler use DCO sign-offs instead of a contributor license agreement.
 
-- The explicit patent grant. Kepler sits in a space where large vendors are filing aggressively; contributors and adopters get a defensive floor MIT does not provide.
-- It is the license serious infrastructure converges on when it expects corporate contributors, and Kepler's compatibility catalog (section 9) explicitly wants plugin vendors in its CI.
-- Apache-2.0's explicit contribution terms (section 5 of the license) do the legal work a CLA would otherwise exist for, which is what lets us not have one (section 4).
+Third-party work carries its original obligations:
 
-Why no open-core split: a project whose pitch is "keep your stuff, no lock-in" cannot have a paywall in its own repository without the pitch curdling. Every feature in HARNESS_PLAN.md lands under Apache-2.0.
+- Pi is MIT-licensed. Any approved adaptation keeps the original copyright notice and license text, records its provenance, and credits Pi in the README and `NOTICE`. The same rule applies to `pi-web-access` and other adopted implementations.
+- Every adapted file records the source project, source commit, and nature of the changes in its header.
+- Every file has SPDX copyright and license information. `REUSE.toml` covers files that cannot hold comments, and CI runs REUSE checks.
 
-Third-party reuse obligations:
+## 3. Governance
 
-- Pi is MIT-licensed and Kepler reuses its agent loop, compaction, and session format by design (HARNESS_PLAN.md sections 14, 15.6). MIT folds into an Apache-2.0 project cleanly; original copyright notices and license text are preserved in the source tree and in a NOTICE file, with attribution beyond the legal minimum — named credit in the README. The same applies to `pi-web-access` and any other adopted implementation.
-- Every vendored or adapted file records its origin in the file header: source project, commit, and what was changed. This is the same provenance discipline the adoption compiler applies to user packages (HARNESS_PLAN.md section 4.4), applied to ourselves. A project built on an adoption compiler does not get to be vague about what it adopted.
-- **REUSE compliance from the first commit**: SPDX copyright and license identifiers on every file, a `LICENSES/` directory, and `REUSE.toml` for the files that cannot carry headers — machine-checkable licensing, enforced in pre-commit, matching the practice already proven on Observal. When every file states its license, the NOTICE obligations above stop being a diligence exercise and become a grep.
+Kepler uses a BDFL and area-maintainer model.
 
-## 3. Governance: BDFL and maintainers
+The BDFL owns the kernel guarantees, event format, child contract, extension API, and final architectural decisions. The role exists to settle questions that cannot reach consensus. It should not block routine work.
 
-Kepler is an opinionated design — one voice, deliberate disagreements with DSH and Pi, a small kernel that is explicitly not a democracy. The governance model matches the design rather than pretending otherwise.
+Area maintainers own defined parts of the project, including the adoption compiler, terminal and web clients, mobile clients, protocol and SDKs, sandbox providers, and documentation. They may merge changes within their areas. Cross-area changes need review from each affected area, while kernel changes also need BDFL review.
 
-**The BDFL** owns architecture: the kernel guarantees, the event format, the child contract, the extension API surface, and final say when consensus fails. This is written down precisely so it is bounded — the BDFL role is a tiebreaker and a coherence-keeper, not a bottleneck through which all work flows.
+Changes to a kernel guarantee, event format, extension API, or protocol require a short RFC in the repository. An RFC should explain the problem, proposed design, alternatives, and compatibility impact. Other changes use the normal pull request process.
 
-**Area maintainers** own bounded surfaces with real authority inside them: the adoption compiler, the terminal client, the web client, the mobile clients, the protocol and SDKs, sandbox providers, docs. A maintainer merges within their area without BDFL sign-off. Cross-area changes need the affected maintainers; kernel changes need the BDFL.
+Maintainers are nominated after sustained, high-quality contributions and sound review work in an area. Existing maintainers approve the nomination. Inactive maintainers may step down and return later through the same process.
 
-**RFCs, lightweight.** Changes that alter a kernel guarantee, the event format, the extension API, or the protocol require a short written proposal in the repo — problem, design, alternatives, compatibility impact — open for comment before implementation. Everything else is a pull request. The RFC bar is deliberately placed at "things that are expensive to reverse" and nowhere lower; process weight is a tax on contributors and we keep it minimal.
-
-**Becoming a maintainer** is earned in public: sustained quality contributions to an area, judgment visible in reviews, and a nomination by an existing maintainer with no maintainer objecting. Maintainership lapses after extended inactivity — quietly and without ceremony, reversible the same way.
-
-**Succession**: if the BDFL steps away, the maintainers select a successor from among themselves. This sentence exists so the question has an answer before it is ever asked.
+If the BDFL leaves, the maintainers choose a successor from among themselves.
 
 ## 4. Contributions
 
-**DCO, not CLA.** Contributors sign off commits (`Signed-off-by`) certifying they have the right to submit the work under Apache-2.0. No contributor license agreement, no copyright assignment, ever. CLAs are friction and an asymmetry — the project would hold rights contributors do not — and the projects Kepler most respects do without them. Apache-2.0's own contribution clause plus DCO covers what a CLA would. This is a deliberate divergence from Observal, which runs a CLA: OpenSSF Gold accepts either, the legal function a CLA serves in the AI policy — an accountable human asserting rights — is served equally by the sign-off, and for a project whose thesis is anti-lock-in, not holding rights contributors don't hold is the consistent choice.
+### DCO instead of a CLA
 
-**AI-assisted contributions are normal and stated plainly**, governed by an `AI_POLICY.md` carried over from the one already battle-tested on Observal (itself adapted from AnkiDroid's, with attribution). Kepler is built with agents (HARNESS_PLAN.md, "How is Kepler built?"), and it would be absurd to hold contributors to a purity standard the maintainers do not meet. The policy is about accountability, not tooling:
+Every commit must include a matching `Signed-off-by` trailer. The sign-off certifies that the contributor has the right to submit the work under Apache-2.0. Kepler does not require a contributor license agreement or copyright assignment.
 
-- **Unattended agents cannot contribute.** The line is meaningful human authorship: an accountable person who directed the work, reviewed the complete change, can explain it, and explicitly authorized publication. This is a legal position as much as a quality one — the DCO sign-off asserts rights to the contribution, and an unattended submission has no human who can truthfully make that assertion or keep the Apache-2.0 license chain sound.
-- The contributor owns what they submit. "The agent wrote it" is not a defense for a broken patch, an unverified claim, or license-laundered code — the sign-off means a human stands behind the change.
-- The pull request template asks whether AI tooling co-authored the change and whether the output was reviewed and tested — disclosure as routine hygiene, not confession.
-- What is not welcome is unattended volume: auto-generated pull requests, drive-by agent output with no human who can answer questions about it, and issue spam. These are closed without ceremony.
+### AI-assisted work
 
-**Review discipline scales with what the change touches.** Kernel and security-boundary changes get two reviewers, one of whom is the area maintainer or BDFL, plus the behavior-test suite. Everything else needs one maintainer. Tests accompany behavior changes; the Pi-fixture compatibility suites (HARNESS_PLAN.md section 14) are the regression floor and never go red on main.
+AI-assisted contributions are welcome. The accountable contributor must direct the work, review the complete change, understand it, and authorize publication. The pull request template records the tool and model used, along with the review and test work performed.
 
-**Good first contributions are curated, not scavenged.** The adoption compiler generates a natural stream of well-bounded work — each ecosystem quirk, each conversion gap, each catalog failure is an issue with a reproduction attached. Labeling that stream honestly is the onboarding program.
+Unattended pull requests, bulk-generated patches without human ownership, and issue spam are closed. See [AI_POLICY.md](AI_POLICY.md) for the full policy.
 
-## 5. Relationship to the ecosystems Kepler adopts
+### Review requirements
 
-Kepler's core feature is converting resources from Pi, OpenCode, DSH, and Claude Code. That relationship can be parasitic or symbiotic, and the difference is behavior:
+Kernel and security-boundary changes require two reviewers, including the relevant area maintainer or BDFL. Other changes require one maintainer. Behavior changes include tests, and the Pi compatibility fixtures remain part of the regression floor.
 
-- **Upstream first.** Bugs found in adopted code get reported upstream, with fixes offered where we have them. The adoption compiler's job is conversion, not forking; a fix that belongs upstream goes upstream.
-- **Never scrape-and-strand.** Adoption preserves provenance, license, and notices for every converted package (HARNESS_PLAN.md section 4.4). The original author's name travels with the conversion. A plugin author should discover their work runs on Kepler and feel credited, not strip-mined.
-- **The conformance suite is shared infrastructure.** Plugin authors can run Kepler's compatibility checks in their own CI (HARNESS_PLAN.md section 17.2) — the catalog is a service to the ecosystems, not a scorecard against them.
-- **Respect the licenses, including the inconvenient ones.** A plugin whose license does not permit conversion is not converted. The compiler checks; the answer is sometimes no.
-- **No adversarial framing.** Kepler's competitors are also its upstreams and its adoption targets. Public communication does not dunk on the projects whose users we hope to serve. The pitch is "keep everything, gain a runtime" — it only works if the projects being adopted from would grudgingly agree the behavior is fair.
+The adoption compiler should produce useful starter issues. Each issue should cover one ecosystem quirk, conversion gap, or catalog failure and include a reproduction.
 
-## 6. Project structure
+## 5. Working with other ecosystems
 
-- **One monorepo**, mirroring the package layout that already works for Pi: kernel, protocol, clients, compiler, providers as packages with clear boundaries. The mobile apps live in the same repo — a protocol change and the client updates it forces belong in one review. The full layout, the argument for including the apps, and the CI and release mechanics are specified in [CODE_STRUCTURE.md](CODE_STRUCTURE.md).
-- **The plan documents live in the repo**, not in a wiki. HARNESS_PLAN.md and this document are versioned artifacts; changing the plan is a pull request with review, like changing code.
-- **Issues are the coordination surface.** No private roadmap that contradicts the public one. Maintainer discussion happens in issues, RFCs, and a public chat channel; decisions made in private channels get written back into the public record or they did not happen.
-- **Releases** follow semver with a changelog written for users, not generated from commit subjects. Pre-1.0, minor versions may break; the changelog says so loudly (fail-loudly applies to release notes too). The protocol and event format carry their own versioning per HARNESS_PLAN.md open decision 5, independent of the release train. Release mechanics — signing, attestation, verification, idempotent publishing — are specified in section 7.2.
-- **CI is part of the product's quality bar, not scaffolding.** The merge queue and its gates (section 7.4) are how main stays green; coverage is measured and visible; the test suite runs parallel by default because a slow suite is a suite people learn to skip. Automated review tooling may assist, but a bot's approval satisfies no review requirement — the review counts in section 4 are counts of humans.
+Kepler converts resources from Pi, OpenCode, DSH, Claude Code, and open standards. It should help those communities rather than strip value from them.
+
+- Report upstream bugs and offer fixes when possible.
+- Preserve authorship, licenses, notices, and provenance during conversion.
+- Let plugin authors run Kepler's compatibility tests in their own CI.
+- Do not convert packages whose licenses forbid it.
+- Describe compatibility accurately and avoid hostile comparisons with other projects.
+
+The public message is simple: users keep their existing setup and gain another runtime.
+
+## 6. Project organization
+
+- Keep the kernel, protocol, clients, compiler, providers, and apps in one monorepo. [CODE_STRUCTURE.md](CODE_STRUCTURE.md) explains the boundaries and CI layout.
+- Keep plans in the repository so changes go through normal review.
+- Use issues, RFCs, and public chat for decisions. Summarize any private discussion in the public record.
+- Follow semantic versioning. Before 1.0, minor releases may break compatibility, and the changelog must say so clearly.
+- Treat CI as part of the product. Automated review can help, but it does not replace a human approval.
 
 ## 7. Security engineering
 
-Kepler establishes concrete repository and supply-chain controls from the first commit. Formal OpenSSF Best Practices certification, Scorecard automation, OSS-Fuzz integration, public score targets, and badges are deferred to the release-hardening phase in `IMPLEMENTATION_PLAN.md`. They should measure a mature project rather than drive the bootstrap.
+Kepler establishes repository and supply-chain controls from the start. OpenSSF certification, Scorecard automation, OSS-Fuzz integration, public targets, and badges arrive during release hardening, after the underlying controls exist.
 
-A harness that executes model-chosen commands is supply-chain-critical software. Deferring OpenSSF work does not defer the security boundaries, pinned dependencies, least-privilege workflows, or fail-closed behavior required by the product plan.
+A tool that runs model-selected commands is security-sensitive. The project does not defer sandboxing, pinned dependencies, least-privilege workflows, or fail-closed behavior.
 
 ### 7.1 Supply chain
 
-- **Everything pinned by immutable digest.** Every GitHub Action is pinned to a full 40-character commit SHA with the human-readable version as a trailing comment — tags are mutable, and an action runs with repository tokens. Container base images are pinned to multi-arch manifest digests. Lockfiles are the only dependency authority; no unversioned requirement files, no `curl | sh` anywhere in scripts or docs — including the install instructions.
-- **Scoped tokens.** Workflow token permissions default to read-only at the workflow level, with per-job elevation only where a job provably needs it.
-- **Dependency gates.** Dependency review on every pull request, automated advisory alerts triaged on a clock, and lockfile audits in CI. A known-vulnerable transitive dependency is a red build, not a backlog item.
-- **SBOMs** generated and published per release.
+- Pin GitHub Actions to full commit SHAs and include the readable version in a comment.
+- Pin container images to multi-platform manifest digests.
+- Treat lockfiles as the dependency authority. Do not use unversioned requirement files or `curl | sh` install steps.
+- Default workflow tokens to read-only and raise permissions only for jobs that need them.
+- Run dependency review on every pull request and audit lockfiles in CI.
+- Publish an SBOM with each release.
 
-### 7.2 Signed, verifiable releases
+### 7.2 Signed and verifiable releases
 
-- Artifacts carry **keyless Sigstore provenance attestations** from the release workflow's OIDC identity — no long-lived release key to leak. Release tags are **gitsign-signed** by the same identity.
-- The release pipeline **verifies its own attestations** before publishing, pinned to the canonical workflow identity, so a compromised job that cannot produce a valid certificate cannot ship.
-- A published **release verification document** walks users through checking digests, artifact provenance (`gh attestation verify`), and tag signatures — the counterpart of asking users to verify images (HARNESS_PLAN.md section 11.4).
-- Publish jobs are **resume-safe and idempotent**, and release automation resolves tags to SHAs at the start so nothing depends on a mutable ref mid-run. Boring, and the difference between a rerun and an incident.
+- Produce keyless Sigstore provenance attestations with the release workflow's OIDC identity.
+- Sign release tags with gitsign under the same identity.
+- Verify attestations before publishing artifacts.
+- Resolve tags to commit SHAs at the start of release jobs.
+- Make publish jobs safe to resume.
+- Publish clear instructions for checking digests, artifact provenance, and tag signatures.
 
 ### 7.3 Continuous verification
 
-- **OpenSSF Scorecard** is introduced during release hardening, then runs weekly and on every push to main, publishing results and uploading SARIF to code scanning.
-- **CodeQL on everything**: no path filters, including docs and config changes, and coverage of merge-queue candidates via `merge_group` triggers.
-- **Continuous fuzzing via OSS-Fuzz** is introduced during release hardening after the trust-boundary parsers exist. Targets include adoption package inspectors, session-import parsers, tool-dialect renderers, and the event-log reader. Fuzz oracles mirror the production ingest paths.
-- **Secret hygiene in depth**: Gitleaks in CI (including merge-queue candidates), private-key and secret detection in pre-commit, and deliberately fake credential fixtures for tests so scanners never learn to ignore matches.
-- **Workflow linting** (actionlint) and container linting in pre-commit, so the CI definition itself is held to CI standards.
+- Add OpenSSF Scorecard during release hardening, run it weekly and on pushes to `main`, and publish the results.
+- Run CodeQL without path filters, including for merge-queue candidates.
+- Add OSS-Fuzz once trust-boundary parsers are ready. Targets include adoption inspectors, session imports, dialect renderers, and the event-log reader.
+- Run Gitleaks in CI and secret checks in pre-commit. Test fixtures must use obviously fake credentials.
+- Lint workflows and container definitions in pre-commit.
 
 ### 7.4 Branch protection and merge queue
 
-- Main takes changes only through pull requests, through a **merge queue**, with linear history. Every gate — CI, CodeQL, dependency review, secret scanning — runs on the queued merge candidate, not just the PR head, so what lands is what was tested.
-- Two-person review for kernel and security-boundary changes stands (section 4); no maintainer, BDFL included, pushes directly to main.
-- Maintainer accounts require **2FA**; release and publishing rights are held by the workflow identity, not by humans with tokens.
+- Changes reach `main` through pull requests and a merge queue with linear history.
+- CI, CodeQL, dependency review, and secret scanning run against the queued merge candidate.
+- Kernel and security-boundary changes retain the two-reviewer rule.
+- Maintainer accounts require two-factor authentication.
+- Release credentials belong to the workflow identity rather than individual maintainers.
 
 ### 7.5 Disclosure and assurance
 
-- `SECURITY.md` with GitHub Private Vulnerability Reporting as the preferred channel, plus email, and committed windows: acknowledgement in 48 hours, assessment in 7 days, resolution target 30 days. Sandbox escapes, permission bypasses, and credential leaks are severity-one regardless of how theoretical the exploit looks.
-- Security fixes may be developed in private and land with disclosure after release — the one sanctioned exception to develop-in-public. Reporters are credited in release notes unless they prefer otherwise.
-- A published **security assurance case**: claim, assets, threat actors and assumptions, trust boundaries, security requirements with arguments, common-weakness mitigations, residual risks, and a maintenance commitment. For Kepler this is where the sandbox's promises are stated against named attackers (HARNESS_PLAN.md sections 2.6, 10) — a security claim that cannot survive being written in this format is not made.
-- **Secure defaults are a Gold criterion and already Kepler's design**: loopback-only port publishing, deny-by-default egress, credential agility (file-backed secrets, no algorithm or key baked in without a transition path). The plan and the badge requirements agree; the assurance case documents where.
-- Hardening claims invite verification: seccomp profiles, egress rules, and extension isolation are in-tree, and external audit findings — formal or drive-by — get severity-one triage.
+- `SECURITY.md` lists private reporting channels and response targets of 48 hours for acknowledgement, 7 days for assessment, and 30 days for resolution.
+- Sandbox escapes, permission bypasses, and credential exposure are severity-one issues.
+- Security fixes may be developed privately and disclosed after release. Reporters receive credit unless they decline it.
+- The security assurance case records claims, assets, attackers, trust boundaries, requirements, mitigations, residual risks, and maintenance commitments.
+- Security controls such as seccomp profiles, egress rules, and extension isolation live in the repository and remain open to audit.
 
-## 8. Repository documents: port the Observal set
+## 8. Repository documents
 
-Observal's contributor-facing documents were iterated through 1,700 pull requests and an OpenSSF Gold audit; they encode judgment Kepler should inherit, not rediscover. The policy is **port, don't rewrite**: each document starts as a near-identical copy, adapted only where Kepler genuinely differs — DCO instead of CLA, TypeScript instead of Python, a harness instead of a registry. Divergence beyond those is a deliberate decision recorded in the porting commit, not drift.
+Each contributor document has a specific job:
 
-The set, file by file:
+| File | Purpose |
+| --- | --- |
+| `AI_POLICY.md` | Sets the human-review and disclosure requirements for AI-assisted work. |
+| `.github/pull_request_template.md` | Collects purpose, approach, tests, provenance, and AI-assistance details. |
+| `CONTRIBUTING.md` | Explains setup, development, testing, licensing, commits, and review. |
+| `AGENTS.md` | Gives coding agents the same repository rules contributors follow. |
+| `SETUP.md` | Covers installation, provider setup, first use, and development commands. |
+| `.github/CODEOWNERS` | Maps default, security, and release ownership. |
+| `.github/ISSUE_TEMPLATE/` | Provides forms for bugs, features, and adoption targets. |
+| `SECURITY.md` | Lists private reporting channels and response times. |
+| `docs/security/assurance-case.md` | States the current security argument and residual risks. |
+| `docs/security/release-verification.md` | Explains how to verify release artifacts and tags. |
+| `CODE_OF_CONDUCT.md` | Defines expected community behavior. |
+| `ROADMAP.md` and `CHANGELOG.md` | Show current plans and user-visible changes. |
+| Repository policy and workflow files | Enforce licensing, secret scanning, review, and CI rules. |
 
-| Kepler file | Ported from | What changes in the port |
-| --- | --- | --- |
-| `AI_POLICY.md` | Observal `AI_POLICY.md` | Near-identical: the unattended-agent prohibition, "explain every line", full-diff self-review, compile-and-test, AI labeling with tool version. The CLA-based legal argument is re-grounded in the DCO sign-off (section 4). |
-| `.github/pull_request_template.md` | Observal PR template | Same sections in the same order: Purpose, Fixes, Approach, How Has This Been Tested, Learning, Checklist, the commented-out Licenses table for new external resources, AI Assistance disclosure, optional Discord username. "UI changes" checklist item covers the web and mobile clients. |
-| `CONTRIBUTING.md` | Observal `CONTRIBUTING.md` | Same skeleton: prerequisites, fork-and-clone, running locally, claiming issues, branch naming, code style, SPDX headers, testing, commit messages, changelog, submitting, reporting. The CLA section becomes the DCO section; tooling swaps to the TypeScript stack. |
-| `AGENTS.md` | Observal `AGENTS.md` | Same role — the development guide written for agent-assisted work: what the project is, architecture at a glance, preferred coding patterns, commands, test invocation, and the AI contribution policy pointer. For Kepler this file is also dogfood: it is exactly the instruction format the harness itself consumes (HARNESS_PLAN.md section 7.2), so the dev guide doubles as a living fixture. |
-| `SETUP.md` | Observal `SETUP.md` | Same numbered-steps shape: clone and configure, start, verify health, install the CLI, first session, run the tests, common operations, port conflicts. Content is Kepler's, structure is proven. |
-| `.github/CODEOWNERS` | Observal `CODEOWNERS` | Same two-tier pattern: default owners on `*`, with `/.github/`, release automation, and `SECURITY.md` requiring an admin owner. Populated from section 3's area-maintainer map so ownership in the file matches ownership in the governance doc. |
-| `.github/ISSUE_TEMPLATE/` | Observal's four templates + config | Bug report as a form, feature request, `config.yml` pointing questions at Discussions with blank issues enabled. Observal's `harness_support` template maps to Kepler's most important one: an **adoption-target request** — "convert my plugin/ecosystem", with fields for source runtime, package, and what broke. That template feeds the catalog (section 9) directly. |
-| `SECURITY.md` | Observal `SECURITY.md` | Near-identical: same channels, same 48h/7d/30d windows, same "report it anyway" posture, supported-versions table, assurance-case and release-verification links (section 7.5). |
-| `docs/security/assurance-case.md` | Observal assurance case | Same section skeleton (claim → assets → threat actors → trust boundaries → requirements and arguments → mitigations → residual risks → maintenance); Kepler's content per section 7.5. |
-| `docs/security/release-verification.md` | Observal release verification | Same four steps: download, check digests, verify artifact provenance, verify the tag. |
-| `CODE_OF_CONDUCT.md` | Contributor Covenant | Adopted as-is, both projects, no editing (section 10). |
-| `ROADMAP.md`, `CHANGELOG.md` | Observal's | Same conventions: a public roadmap that matches reality (section 6), a changelog written for users. |
-| `.pre-commit-config.yaml`, `.gitleaks.toml`, `REUSE.toml`, `.github/workflows/` | Observal's configs | The enforcement layer behind sections 2 and 7, ported with stack-appropriate substitutions (ruff/hadolint equivalents for the TypeScript toolchain), SHA-pinned from the first commit. |
+Documentation should describe controls that actually exist. CI checks claims such as SPDX coverage and DCO sign-offs where practical.
 
-Three rules govern the porting:
+## 9. Compatibility catalog
 
-- **Attribution is kept.** Observal's documents carry SPDX headers naming their authors; ported files preserve the lineage the same way Observal credits AnkiDroid in its AI policy. Both projects are Apache-2.0, so this is clean.
-- **The documents stay in sync deliberately, not automatically.** When Observal improves a policy, Kepler evaluates the change and ports it — or doesn't — as a reviewed commit. No blind mirroring: the two projects will diverge where their natures differ, and each divergence should be able to say why.
-- **Templates are enforced where they claim things.** A checklist item nobody checks is theater. The PR template's AI-assistance disclosure, SPDX headers, and sign-off are validated by CI and pre-commit (sections 4, 7.3), so the documents describe the machine, not a hope.
+The compatibility catalog is a public record of how real plugins, skills, and configurations behave under adoption.
 
-## 9. The compatibility catalog as a community program
-
-The catalog (HARNESS_PLAN.md section 17.2) is Kepler's most communal artifact: a published, continuously re-verified record of which real-world plugins, skills, and configurations adopt cleanly. As a community program:
-
-- Catalog runs are reproducible from the repo — anyone can re-run the conversion of any listed package and diff the result.
-- A failing catalog entry is an open issue with the reproduction attached, which makes the ecosystem's rough edges the project's contributor funnel.
-- Plugin authors can claim their entries: verify the conversion, mark caveats, wire the conformance suite into their CI. An author-verified entry outranks an automated one.
-- The catalog never editorializes. It reports conversion status, not quality judgments about other people's work.
+- Anyone can rerun a catalog conversion and compare the result.
+- A failing entry becomes an issue with a reproduction.
+- Plugin authors can verify their entries, record caveats, and run the conformance suite in their own CI.
+- The catalog reports compatibility without judging the quality of another project.
 
 ## 10. Community conduct
 
-- **Contributor Covenant**, adopted as-is rather than hand-rolled, enforced by the maintainers with the BDFL as escalation point. Boring and standard is the point.
-- The tone standard for maintainers is the tone of the plan documents: direct, technical, honest about tradeoffs, never contemptuous. How maintainers talk in reviews is the culture; no document overrides example.
-- English is the project language for durable artifacts; nobody is penalized for imperfect English, and review feedback addresses the patch, not the prose.
+Kepler follows its [Code of Conduct](CODE_OF_CONDUCT.md). Maintainers should be direct, technical, and respectful in reviews. English is the language for durable project artifacts, but contributors are not penalized for imperfect English.
 
 ## 11. Trademark and name
 
-Apache-2.0 licenses the code, not the name. "Kepler" and its mark are held by the project with a short, permissive trademark policy published in-repo: unmodified redistribution and truthful compatibility claims ("works with Kepler", "adopted for Kepler") are always fine; forks are welcome and encouraged under any name that does not claim to be the canonical Kepler. This is standard hygiene, stated up front so it never surprises anyone later.
+Apache-2.0 covers the code, not the Kepler name or mark. A separate, permissive trademark policy will allow unmodified redistribution and truthful compatibility claims such as "works with Kepler." Forks are welcome under names that do not claim to be the canonical Kepler project.
 
-## 12. What this document refuses
+## 12. Constraints
 
-Mirroring the product plan's non-goals (HARNESS_PLAN.md section 19):
-
-- No CLA and no copyright assignment.
-- No open-core split, no feature paywalls, no "enterprise edition" carve-out in this repository.
-- No private roadmap that contradicts the public one.
-- No governance theater: no boards, committees, or working groups until the contributor base is large enough that their absence hurts.
-- No adversarial marketing against the ecosystems Kepler adopts from.
-- No purity rules about AI-assisted contributions that the maintainers themselves could not pass.
+- No CLA or copyright assignment.
+- No open-core split or feature paywall in this repository.
+- No private roadmap that conflicts with the public plan.
+- No committees or working groups until the contributor base needs them.
+- No hostile marketing against the ecosystems Kepler supports.
+- No AI-assistance rules that project maintainers cannot meet themselves.
 
 ## 13. Success criteria
 
-The open-source posture is working when:
+This plan is working when:
 
-1. A contributor's first pull request lands within days, reviewed by a maintainer, without the BDFL involved.
-2. A plugin author from an adopted ecosystem verifies their own catalog entry unprompted.
-3. An upstream project accepts a fix that originated from Kepler's adoption pipeline.
-4. A fork exists, is compliant with the trademark policy, and nobody considers it a crisis.
-5. A kernel RFC is rejected — proof the process is real and not a rubber stamp.
-6. A security researcher reports privately, the fix ships inside the committed window, and the disclosure is published without drama.
-7. Someone becomes a maintainer whom none of the founding ten has ever met.
-8. During release hardening, the OpenSSF Best Practices Gold badge and a sustained 9+ Scorecard become public and verifiable.
+1. A contributor's first pull request lands within days without requiring BDFL involvement.
+2. A plugin author independently verifies a catalog entry.
+3. An upstream project accepts a fix found through Kepler's adoption work.
+4. A compliant fork exists without causing a governance dispute.
+5. The project has rejected at least one kernel RFC on its merits.
+6. A private security report is fixed and disclosed within the published timeline.
+7. A maintainer joins who did not know the founding team before contributing.
+8. The project earns the OpenSSF Best Practices Gold badge and sustains a Scorecard of 9 or higher during release hardening.

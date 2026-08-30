@@ -3,4 +3,4 @@
 
 # `@kepler/kernel`
 
-Kepler's deterministic core: crash-safe JSONL history, tree reconstruction, replay, the agent loop, canonical tools, prompt construction, redaction, and path policy. Runtime dependencies are limited to `@kepler/protocol` and Node.js built-ins.
+This package contains Kepler's deterministic core: append-only JSONL history, session trees, replay, the agent loop, canonical tools, prompt construction, redaction, and path policy. Its only dependencies are `@kepler/protocol` and Node.js built-ins.

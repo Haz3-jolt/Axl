@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kepler Development Guide
+# Kepler development guide
 
 ## Scope
 
@@ -18,18 +18,15 @@ Read these documents before changing architecture or sequencing work:
 - `HARNESS_PLAN.md`: product behavior and invariants
 - `CODE_STRUCTURE.md`: repository and package boundaries
 - `OPEN_SOURCE.md`: licensing, governance, security, and release requirements
-- `IMPLEMENTATION_PLAN.md`: local ordered execution plan, intentionally globally ignored
+- `IMPLEMENTATION_PLAN.md`: ordered execution plan
 
 When documents conflict, stop and surface the conflict instead of silently choosing one.
 
 ## Reference implementations
 
-Pi and DSH are read-only references:
+Pi and DSH are read-only references. Local checkout paths belong in developer-specific configuration, not this repository.
 
-- Pi: `/home/haz3/code/pi`
-- DSH: `/home/haz3/code/dsh`
-
-Study their behavior, contracts, tests, and architecture. Write independent Kepler-native implementations. Do not copy source, port files, or translate implementations line by line. Do not modify either reference repository. Flag any unavoidable derivative use before writing it so licensing and attribution can be decided explicitly.
+Study their behavior, contracts, tests, and architecture. Write independent Kepler implementations. Do not copy source or translate implementations line by line. Do not modify a reference checkout. Flag unavoidable derivative use before writing it so licensing and attribution can be decided first.
 
 ## Architecture invariants
 
@@ -52,6 +49,10 @@ Study their behavior, contracts, tests, and architecture. Write independent Kepl
 Follow `IMPLEMENTATION_PLAN.md`. Build phases 0 through 4 with a stable harness. Begin dogfooding only after Kepler can safely edit its own disposable worktree, run tests inside Bubblewrap, survive daemon restart, and replay the session deterministically.
 
 Build the smallest complete vertical slice. Do not scaffold later phases or add speculative abstractions.
+
+## Writing style
+
+Write plainly and directly. Prefer short sentences and concrete verbs. Do not use em dashes, canned contrasts, marketing language, or repetitive claims about what a feature is not. Keep technical requirements precise.
 
 ## Coding rules
 

@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-## Purpose / Description
+## Purpose
 
-_Describe the problem or feature and its motivation._
+_What problem or feature does this change address, and why does it matter?_
 
 ## Fixes
 
@@ -13,7 +13,7 @@ Fixes #
 
 _How does this change address the problem? Note any compatibility or security impact._
 
-## How Has This Been Tested?
+## How was this tested?
 
 _List every command run, its result, and anything that could not be verified._
 
@@ -39,7 +39,7 @@ _Optional research, references, or reusable lessons._
 | Example | URL or commit | SPDX identifier | Description |
 -->
 
-## AI Assistance
+## AI assistance
 
 - [ ] Generative AI materially assisted this change. Tool and model/version:
 - [ ] I manually reviewed, understood, and tested the generated work.

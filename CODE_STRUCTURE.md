@@ -1,116 +1,126 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kepler: Code Structure
+# Kepler code structure
 
-Status: Working plan. Companion to [HARNESS_PLAN.md](HARNESS_PLAN.md) and [OPEN_SOURCE.md](OPEN_SOURCE.md).
+Status: working plan. This document accompanies [HARNESS_PLAN.md](HARNESS_PLAN.md) and [OPEN_SOURCE.md](OPEN_SOURCE.md).
 
 Updated: 2026-08-28
 
-## 1. One repository, including the apps
+## 1. Keep everything in one repository
 
-Everything lives in one monorepo: kernel, protocol, adoption compiler, terminal client, web client, the Android and iOS apps, extensions, docs, and the plan documents themselves.
+The kernel, protocol, adoption compiler, clients, extensions, documentation, and plans all belong in one monorepo.
 
-This is a considered position, because the open-source precedent leans the other way — Signal, Element, Zulip, Mattermost, and Tailscale all keep mobile in separate repositories. Those projects made the right call for their architecture: their mobile apps are fat clients with their own state machines, storage, and crypto, coupled to the backend only through a stable API. Kepler's clients are the opposite by design — projections with almost no business logic (HARNESS_PLAN.md section 15.3), where the entire coupling is the protocol and the client SDKs are code generated from one schema (section 15.5). For fat clients, a repo boundary sits at a natural seam. For Kepler, it would sit in the middle of the hottest coupling in the system, turning every protocol change into a multi-repo release dance during exactly the period — the first year — when the protocol churns most.
+Many open source projects keep their mobile apps in separate repositories. That works for products such as Signal, Element, Zulip, Mattermost, and Tailscale because their mobile apps own substantial state, storage, and cryptographic logic.
 
-Three further reasons, specific to this project:
+Kepler clients are much thinner. They display state owned by the daemon and communicate through one protocol. A repository boundary would cut across the part of the system that changes most often during early development.
 
-- **The compliance surface stays singular.** OpenSSF Scorecard and the Best Practices badge are per-repository (OPEN_SOURCE.md section 7). One repo means one merge queue, one CODEOWNERS, one security posture, one badge to keep gold. Three repos means three of everything, maintained by the same ten people.
-- **Atomic protocol changes are the point.** A change to the event schema regenerates the TypeScript, Swift, and Kotlin SDKs and updates every client in one reviewed, revertable commit. Cross-repo, the same change is three PRs, a version dance, and a window where clients disagree about the protocol — the exact class of bug the one-daemon architecture exists to prevent.
-- **The asymmetry of regret.** Splitting a monorepo later is cheap — the apps depend only on their generated SDK and their own directory, so extraction is `git filter-repo` plus a package dependency. Merging separate repos later loses history, issues, and cross-references. When one direction of mistake is recoverable and the other is not, choose the recoverable one.
+A monorepo gives Kepler three practical benefits:
 
-The costs are real and CI-shaped, and section 8 pays them explicitly: path-gated jobs so a docs change never waits on an Xcode build, and store release trains decoupled from the package release train (section 9).
+- **One compliance surface.** The project has one merge queue, one `CODEOWNERS` file, one security policy, and one set of OpenSSF checks.
+- **Atomic protocol changes.** A single reviewed commit can update the TypeScript protocol, each client, and any generated SDKs that exist later.
+- **An easy escape route.** Splitting an app into a separate repository later is straightforward because it depends only on the protocol SDK. Combining repositories later would lose history and cross-references.
 
-For contrast: Codex keeps its open CLI and Rust core in one repo, with its desktop app closed-source elsewhere and mobile folded into the ChatGPT app. Kepler's structure is the statement that the *whole* product — apps included — is the open artifact.
+The tradeoff is heavier CI. Section 8 limits that cost with path-based jobs, while section 9 keeps app-store releases separate from package releases.
+
+Codex offers a useful contrast. Its CLI and Rust core share a repository, while its desktop and mobile products live elsewhere. Kepler keeps the whole product open, including its apps.
 
 ## 2. Languages
 
-- **TypeScript** for the kernel, protocol, daemon, adoption compiler, terminal client, web client, and extensions. This is inherited, not chosen fresh: Kepler reuses Pi's loop, compaction, and provider API (HARNESS_PLAN.md section 14), and the ecosystems it adopts from are TypeScript. A rewrite in a faster language is exactly the kind of work the plan defers until felt absence demands it.
-- **Kotlin (Jetpack Compose)** for Android, **Swift (SwiftUI)** for iOS — native per platform, per HARNESS_PLAN.md section 15.3, with the protocol client generated, not hand-written.
-- **No third application language.** Tooling scripts are TypeScript or POSIX shell. A contributor who knows TypeScript can read every part of Kepler except the two app shells.
+- Use **TypeScript** for the kernel, protocol, daemon, adoption compiler, terminal client, web client, and extensions. It matches the ecosystems Kepler integrates with and the Pi components used as references.
+- Use **Kotlin with Jetpack Compose** for Android and **Swift with SwiftUI** for iOS. Choose protocol code generation when the first of these clients is built.
+- Do not add another application language. Tooling should use TypeScript or POSIX shell.
 
-## 3. Layout
+## 3. Repository layout
 
 ```text
 kepler/
   packages/
-    kernel/            # event log, agent loop, tool protocol, policy — the guarantees (HP §2.3)
-    protocol/          # the schema: events, RPCs, capability negotiation — source of all codegen
-    ai/                # provider adapters, tool dialects, thinking levels (HP §2.7, 7.4, 7.6)
-    compiler/          # adoption compiler: inspectors, converters, verifiers (HP §4)
-    daemon/            # session daemon, placements, pooling (HP §13, 14, 15)
-    sandbox/           # OS providers + OCI runtime (HP §10, 11)
+    kernel/            # event log, agent loop, tool protocol, and policy (HP §2.3)
+    protocol/          # authoritative TypeScript event, RPC, and capability contracts
+    ai/                # provider adapters, tool dialects, and thinking levels (HP §2.7, 7.4, 7.6)
+    compiler/          # adoption inspectors, converters, and verifiers (HP §4)
+    daemon/            # sessions, placements, and pooling (HP §13, 14, 15)
+    sandbox/           # operating-system providers and OCI runtime (HP §10, 11)
     tui/               # terminal client
     web/               # web client
-    sdk/               # generated TS client; the reference for all generated SDKs
-    extensions/        # every shipped feature, one package each (HP §2.9)
+    sdk/               # public client SDK when an external consumer needs it
+    extensions/        # first-party extensions, one package per feature (HP §2.9)
   apps/
-    android/           # Gradle project; consumes generated Kotlin SDK
-    ios/               # Xcode project; consumes generated Swift SDK
-  fuzz/                # fuzz targets + oracles (OS §7.3)
-  docs/                # user docs, security/ (assurance case, release verification), rfcs/
-  plan/                # HARNESS_PLAN.md, OPEN_SOURCE.md, this file
-  .github/             # workflows, templates, CODEOWNERS (OS §8)
+    android/           # Gradle project using the generated Kotlin SDK
+    ios/               # Xcode project using the generated Swift SDK
+  fuzz/                # fuzz targets and oracles (OS §7.3)
+  docs/                # user docs, security material, and RFCs
+  plan/                # product and project plans
+  .github/             # workflows, templates, and CODEOWNERS (OS §8)
 ```
 
-Rules that keep the layout honest:
+These rules keep package ownership clear:
 
-- **`packages/protocol` has no runtime dependencies. `packages/kernel` may depend only on `packages/protocol` and Node.js built-ins.** The kernel has no third-party runtime dependencies. Enforced in CI, not by convention.
-- **`packages/extensions/*` use only the public extension API.** First-party features get no private imports (HARNESS_PLAN.md section 2.9) — the build fails if one reaches into kernel internals. This rule is the API's test suite.
-- **`packages/protocol` is the only source of wire truth.** Generated SDK code is never edited by hand; generated files are marked, and CI regenerates and diffs them so drift is impossible.
-- **`apps/*` may import only their generated SDK.** No app imports a `packages/*` internal. This is the boundary that keeps future extraction cheap (section 1) and keeps the apps honest as projections.
+- `packages/protocol` has no runtime dependencies.
+- `packages/kernel` depends only on `packages/protocol` and Node.js built-ins.
+- First-party extensions use the same public extension API as third-party extensions.
+- `packages/protocol` is the only source of wire-format truth. TypeScript definitions stay authoritative until a non-TypeScript client creates a real need for generation.
+- Apps use the public protocol SDK rather than package internals.
 
-## 4. The protocol seam
+CI enforces these boundaries.
 
-The protocol package is the load-bearing wall of the repo, treated with corresponding ceremony:
+## 4. Protocol boundary
 
-- The schema is the artifact; TypeScript, Swift, and Kotlin clients are outputs of one generator (HARNESS_PLAN.md section 15.5). Adding a platform means adding a generator target, not a client team.
-- Schema changes are the RFC trigger (OPEN_SOURCE.md section 3) and require the compatibility notes the protocol's versioning demands (HARNESS_PLAN.md open decision 5).
-- The generated SDKs ship as packages too — npm, Maven, Swift Package Manager — because external tools building on the daemon protocol (HARNESS_PLAN.md section 15.4) should consume the same artifact the in-tree apps do.
+The protocol package owns the contract between the daemon and every client.
 
-## 5. Where Pi lives in the tree
+- TypeScript definitions are authoritative while all clients use TypeScript.
+- A schema change requires an RFC and compatibility notes.
+- The first Swift or Kotlin client triggers a decision on the schema language and generator.
+- Generated SDKs then ship through their native package systems so external and in-tree clients use the same contract.
 
-Reused Pi code is adapted into the packages it belongs to — the loop and compaction into `kernel`, the provider API into `ai` — not vendored as a frozen `third_party/` snapshot. The provenance obligations travel per file: SPDX headers recording origin, commit, and modifications (OPEN_SOURCE.md section 2), plus behavior tests against Pi fixtures (HARNESS_PLAN.md section 14) pinned in the kernel test suite. A `third_party/` directory exists only for genuinely unmodified imports.
+## 5. Using Pi as a reference
 
-## 6. Build tooling
+Kepler studies Pi's loop, compaction, provider behavior, and session format, then implements the required behavior in the appropriate Kepler package. It does not keep a modified copy of Pi under `third_party/`.
 
-- **pnpm workspaces** for package management; a task runner with remote caching for orchestration. Not Bazel: Codex's Bazel migration solves a scale problem Kepler does not have, and Bazel's contributor tax is exactly the onboarding friction OPEN_SOURCE.md section 4 tries to eliminate. Revisit if the repo earns it.
-- **Gradle and Xcode stay native.** The JS toolchain does not wrap or invoke mobile builds; CI orchestrates all three build systems as peers. An Android contributor uses normal Android tooling in `apps/android` and touches Node only if they cross the SDK boundary.
-- **One version policy for internal packages**: everything in `packages/` versions together and releases together (section 9). Apps carry their own store versions.
+Any approved adaptation records its source, commit, and changes in an SPDX header. Behavior tests pin compatibility where needed. The `third_party/` directory is reserved for unmodified imported material.
+
+## 6. Build tools
+
+- Use pnpm workspaces for package management. Add a task runner with remote caching only when repository scale justifies it.
+- Keep Gradle and Xcode native. CI coordinates the build systems but the JavaScript toolchain does not wrap them.
+- Version packages in `packages/` together. Mobile apps keep their own store versions.
+
+Bazel would add more contributor cost than value at the current scale.
 
 ## 7. Tests
 
-- **Unit tests** live beside their package.
-- **Behavior tests** — the Pi compatibility fixtures, the child-contract suite, permission-policy cases — live in the package that makes the promise, and are the merge-queue floor (OPEN_SOURCE.md section 4).
-- **Fuzz targets** live in `fuzz/`, with oracles that mirror the real ingest paths (OPEN_SOURCE.md section 7.3) — targets for the adoption inspectors, session import, dialect renderers, and log reader.
-- **End-to-end tests** drive the real daemon with real clients in a sandboxed workspace; the catalog runs (OPEN_SOURCE.md section 9) are e2e by nature and run on their own schedule, not in the merge queue.
-- **Replay is a test primitive**: recorded sessions replay deterministically (HARNESS_PLAN.md section 17.3), so regression fixtures are captured sessions, not hand-built mocks.
+- Unit tests live with the package they cover.
+- Behavior tests live with the package that makes the promise. This includes Pi compatibility fixtures, child-contract tests, and permission-policy cases.
+- Fuzz targets live in `fuzz/` and exercise the same input paths as production.
+- End-to-end tests drive real clients against the real daemon in a sandboxed workspace. Catalog runs use their own schedule rather than blocking the merge queue.
+- Recorded sessions serve as deterministic replay fixtures.
 
-## 8. CI shape
+## 8. CI layout
 
-The merge queue (OPEN_SOURCE.md section 7.4) stays fast because jobs are path-gated with the standard trick: every required check always reports, but a check whose paths are untouched reports success from a trivial gate job instead of running the build. Concretely:
+Every required check reports a result. Path filters decide whether the full job runs or a small gate job reports that no relevant files changed.
 
-- Kernel, protocol, or SDK changes run everything — including both app builds, because the seam moved.
-- App-only changes run that app plus lint; a Compose refactor does not build the compiler.
-- Docs and plan changes run linkcheck, REUSE, and formatting only.
-- Security scans (CodeQL, Gitleaks, dependency review) are never path-gated — they run on every candidate, per OPEN_SOURCE.md section 7.3.
+- Kernel, protocol, and SDK changes run all builds, including both mobile apps.
+- App-only changes run that app and lint checks.
+- Documentation and plan changes run formatting, link checking, and REUSE checks.
+- CodeQL, Gitleaks, and dependency review run for every merge candidate.
 
-macOS runners are the scarce resource; they run only when iOS paths or the protocol are touched. If mobile CI cost ever dominates anyway, that is the signal to revisit section 1's decision — with the extraction path already cheap by construction.
+macOS runners are reserved for iOS and protocol changes. If mobile CI becomes a persistent burden, the project can revisit the monorepo decision without changing app architecture.
 
-## 9. Release trains
+## 9. Release schedules
 
-Three trains, one repo:
+The repository has three release schedules:
 
-- **Packages and binaries**: the npm packages, the CLI binary, and container images release together under one version, with the signing and attestation pipeline of OPEN_SOURCE.md section 7.2.
-- **Android**: its own tag series and store cadence — Play review timelines must never block a CLI release. F-droid distribution builds from the repo subdirectory.
-- **iOS**: likewise, on the App Store's clock.
+- Packages, CLI binaries, and container images share one version and release pipeline.
+- Android has its own tags and Play Store schedule. F-Droid builds from the Android subdirectory.
+- iOS follows its own tags and App Store schedule.
 
-Apps declare the protocol version range they support (capability negotiation, HARNESS_PLAN.md section 15.5), so a user on last month's app against today's daemon degrades loudly, not mysteriously.
+Clients declare the protocol versions they support. An older app should report an unsupported capability or version clearly instead of failing in an unclear way.
 
-## 10. What this structure refuses
+## 10. Constraints
 
-- No second repository until CI cost or contributor friction demonstrates the need — and no first-party code outside the monorepo, period. A satellite repo nobody watches is where standards go to die.
-- No hand-edited generated code, no unmarked generated files.
-- No `utils/` package. Shared code either belongs to a real package or gets promoted deliberately into one with an owner.
-- No private imports across the extension API boundary, first-party included.
-- No build tool the median contributor has to learn before their first patch.
+- Keep first-party code in this repository until CI cost or contributor friction proves that a split is worthwhile.
+- Never edit generated code by hand or commit generated files without the required marker.
+- Do not create a generic `utils` package. Shared code needs a clear owner.
+- Do not use private imports across the extension boundary.
+- Do not add a build tool that contributors must learn before making a small change.

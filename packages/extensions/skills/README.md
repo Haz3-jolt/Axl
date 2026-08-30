@@ -3,13 +3,13 @@
 
 # `@kepler/extension-skills`
 
-Native support for the [Agent Skills specification](https://agentskills.io/specification).
+This package implements the [Agent Skills specification](https://agentskills.io/specification).
 
-Kepler discovers skills from:
+Kepler looks for skills in:
 
 1. `~/.kepler/skills/<name>/SKILL.md`
 2. `<workspace>/.kepler/skills/<name>/SKILL.md`
 
-A project skill replaces a global skill with the same name. Invalid skills fail session startup with the file and field identified. YAML frontmatter supports the required `name` and `description` fields and the optional `license`, `compatibility`, string-valued `metadata`, and experimental `allowed-tools` fields.
+A project skill replaces a global skill with the same name. Invalid skills stop session startup with an error that names the file and field. Frontmatter supports the required `name` and `description` fields plus `license`, `compatibility`, string-valued `metadata`, and the experimental `allowed-tools` field.
 
-Only skill metadata enters the stable startup prompt. The model uses the fixed `skill` tool to load a matching `SKILL.md`, then reads referenced text files on demand. Resource paths are canonicalized and cannot escape the skill directory through `..` or symlinks. `allowed-tools` is reported as metadata and never widens Kepler policy.
+The startup prompt contains only skill metadata. The model uses the `skill` tool to load full instructions and reads referenced text files when needed. Canonical path checks prevent `..` and symlink escapes from the skill directory. `allowed-tools` is metadata and cannot widen Kepler's policy.

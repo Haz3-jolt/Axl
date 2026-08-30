@@ -1,34 +1,34 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# AI Policy
+# AI policy
 
-Kepler welcomes AI-assisted development and rejects unreviewed, low-effort output.
+AI tools are welcome in Kepler development. Unreviewed output is not.
 
-This policy implements the contribution requirements in `OPEN_SOURCE.md`.
+This policy applies the contribution rules in [OPEN_SOURCE.md](OPEN_SOURCE.md).
 
-## Human authorship is required
+## A person must own the work
 
-Unattended agents may not independently choose work and publish contributions. An accountable human must direct the work, review the complete change, understand it, and explicitly authorize publication.
+An unattended agent may not choose work and publish a contribution on its own. A named contributor must direct the work, review the full change, understand it, and approve publication.
 
-The contributor owns the submitted result. “The agent wrote it” does not excuse defects, unverified claims, or copied material. A DCO sign-off asserts that the contributor has the right to submit the work under Apache-2.0.
+The contributor is responsible for the result. Blaming an agent does not excuse defects, unsupported claims, or copied material. A DCO sign-off confirms that the contributor has the right to submit the change under Apache-2.0.
 
-## Requirements
+## Before submitting
 
-For any material AI-assisted contribution:
+For any material AI-assisted change:
 
 - Read and understand the complete diff.
-- Be able to explain every changed line.
-- Run the relevant build, type-check, lint, and tests.
-- Check generated output, licenses, and external provenance.
-- Disclose the AI tool and model or version in the pull request.
-- Manually review every GitHub comment, review reply, and pull request body before publication.
-- Include screenshots for user-interface changes.
+- Be ready to explain every changed line.
+- Run the relevant build, type check, lint, and tests.
+- Check generated files, licenses, and external provenance.
+- Name the AI tool and model or version in the pull request.
+- Review every GitHub comment, review response, and pull request description before publishing it.
+- Include screenshots when the change affects the interface.
 
-## Not accepted
+## Contributions we will close
 
-- Unattended or bulk-generated pull requests without accountable human review
-- Contributions the submitter cannot explain
-- Unverified generated code or claims
-- Unattributed copied or substantially reproduced code
-- Placeholder text, fabricated APIs, or repeated low-quality output
+- Unattended or bulk-generated pull requests without a responsible human reviewer
+- Changes the contributor cannot explain
+- Generated code or claims that nobody verified
+- Copied or substantially reproduced work without attribution
+- Placeholder text, invented APIs, or repeated low-quality output

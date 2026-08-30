@@ -5,52 +5,56 @@
 
 ## Claim
 
-Kepler will run model-selected actions only under explicit, enforceable policy and will preserve a redacted canonical record. Phase 0 establishes repository controls only. It does not yet claim runtime isolation.
+Kepler runs model-selected actions under an enforceable local policy and keeps a redacted canonical record. The current implementation provides the Phase 4 sandbox and session controls. Later phases will add stronger isolation, remote workers, and release verification.
 
 ## Assets
 
-- Credentials and provider authorization
-- Session events, prompts, tool inputs, outputs, and artifacts
-- User workspaces and host files
+Kepler protects:
+
+- Provider credentials and authorization state
+- Session events, prompts, tool inputs, tool outputs, and artifacts
+- User workspaces and other host files
 - Extension and adopted-package source
 - Release artifacts and the software supply chain
 
-## Threat actors and assumptions
+## Threat model
 
-Repository content, tool output, web content, extension packages, imported logs, and model output are untrusted. Maintainers and the local host administrator are trusted to protect repository settings, signing identities, and development machines.
+Treat repository content, tool output, web content, extensions, MCP servers, imported logs, and model output as untrusted. Maintainers and the local machine administrator are trusted to protect repository settings, signing identities, and development systems.
 
 ## Trust boundaries
 
-1. Untrusted data entering protocol parsers
-2. Model-selected tool requests entering the kernel
-3. Kernel execution entering operating-system or OCI isolation
+1. Protocol parsers receiving untrusted data
+2. The kernel receiving model-selected tool calls
+3. Tool processes entering operating-system or OCI isolation
 4. Extensions entering the extension host
 5. Credentials entering provider adapters
 6. Clients attaching to the daemon
 7. Source entering CI and release workflows
 
-## Phase 0 controls
+## Current controls
 
-- Apache-2.0 and REUSE license validation
-- DCO sign-off checks
-- Locked dependencies and lockfile auditing
-- Package dependency checks
-- Generated-file checks
-- Gitleaks, dependency review, CodeQL, and actionlint workflows
+- Runtime validation for canonical events and local wire messages
+- Redaction before canonical event-log writes
+- Canonical path checks and symlink-escape rejection
+- Bubblewrap confinement on Linux and Seatbelt profiles on macOS
+- Fail-closed startup when required isolation is unavailable
+- Sandboxed stdio MCP servers with limited environment variables and no network
+- Explicit approval for MCP tools, sampling, OAuth browser launches, and elicitation
+- Restricted credential, OAuth, task, and blob storage permissions
+- Append-only JSONL sessions with torn-write recovery
+- DCO, REUSE, dependency, package-boundary, generated-file, and secret checks
 - SHA-pinned GitHub Actions with read-only default permissions
-- Documented private vulnerability reporting and response targets
+- Private vulnerability-reporting guidance and response targets
 
-## Required runtime controls
+## Remaining risks
 
-Later phases must validate untrusted input, redact credentials before log writes, canonicalize paths, reject symlink escapes, enforce sandbox requirements below extensions, and fail closed when requested isolation is unavailable.
-
-## Residual risks
-
-- No runtime, sandbox, credential store, daemon, or release artifact exists in Phase 0.
-- GitHub branch protection and Private Vulnerability Reporting require repository administration outside this source tree.
-- CI depends on GitHub-hosted runners and the explicitly pinned actions recorded in workflow files.
-- Development dependencies execute on contributor machines only after explicit installation.
+- Bubblewrap shares the host kernel and exposes a read-only view of most host files outside protected paths.
+- Seatbelt does not provide Linux-style namespaces.
+- Windows sandboxing and OCI isolation are not implemented yet.
+- Streamable HTTP MCP servers run remotely and must be trusted with requests sent to them.
+- GitHub branch protection and Private Vulnerability Reporting depend on repository settings outside this tree.
+- No signed release artifacts exist yet.
 
 ## Maintenance
 
-Review this document whenever authentication, authorization, logging, sandboxing, extension isolation, release signing, or another trust boundary changes. Security findings may invalidate a claim and must update this case after remediation.
+Review this document whenever a change affects authentication, authorization, logging, sandboxing, extension isolation, remote execution, or release signing. Update any claim invalidated by a security finding as part of the fix.

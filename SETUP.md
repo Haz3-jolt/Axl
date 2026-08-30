@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Setup guide
+# Set up Kepler
 
 ## Requirements
 
@@ -9,53 +9,60 @@
 - pnpm `10.34.4`
 - Git
 - Bubblewrap on Linux for agent shell commands
-- Optional: Python 3.11+, uv, and pre-commit for local license hooks
+- Python 3.11+, uv, and pre-commit if you want to run local license hooks
 
-## Install and verify
+## Install and check the repository
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm check
 ```
 
-For license verification:
+To run the license check locally:
 
 ```bash
 uv tool install reuse==6.2.0
 reuse lint
 ```
 
-## Install the local CLI
+## Install the CLI
 
 ```bash
 pnpm run install:cli
 ```
 
-Configure the first provider through the environment:
+Set the Azure OpenAI credentials in your shell:
 
 ```bash
 export AZURE_OPENAI_API_KEY=...
 export AZURE_OPENAI_BASE_URL=https://your-resource.openai.azure.com/
 ```
 
-Optional Azure settings are `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_RESOURCE_NAME`, and `AZURE_OPENAI_DEPLOYMENT_NAME_MAP`. Exported endpoint, API-version, and deployment settings override values saved by an earlier interactive login. A stored API key still takes precedence over `AZURE_OPENAI_API_KEY`, matching Pi.
+You can also set `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_RESOURCE_NAME`, and `AZURE_OPENAI_DEPLOYMENT_NAME_MAP`. Exported endpoint, API-version, and deployment settings override values saved by an earlier interactive login. A stored API key still takes precedence over `AZURE_OPENAI_API_KEY`, which matches Pi's credential behavior.
 
-Run a session:
+Start a new session or resume an existing one:
 
 ```bash
 kepler
 kepler <session-id>
 ```
 
-The client connects to `~/.kepler/kepler.sock` and starts a detached local daemon if none is running. Run `kepler daemon` to keep the daemon in the foreground for diagnostics.
+The client uses `~/.kepler/kepler.sock`. It starts a detached local daemon when one is not already running. Use `kepler daemon` to keep the daemon in the foreground for troubleshooting. Restart an existing daemon after changing exported environment variables because a running process cannot inherit later shell changes.
 
-## Agent Skills
+## Add Agent Skills
 
-Install Agent Skills in `~/.kepler/skills/<name>/SKILL.md` or `<workspace>/.kepler/skills/<name>/SKILL.md`. Project skills override global skills with the same name. Kepler validates the complete [Agent Skills format](https://agentskills.io/specification), advertises metadata at session start, and loads instructions or referenced files only when the `skill` tool requests them.
+Put skills in either location:
 
-## MCP servers
+```text
+~/.kepler/skills/<name>/SKILL.md
+<workspace>/.kepler/skills/<name>/SKILL.md
+```
 
-Configure MCP servers in `~/.kepler/mcp.json` or `<workspace>/.kepler/mcp.json`. Kepler supports MCP `2025-11-25` over stdio and Streamable HTTP, including OAuth. See [`packages/extensions/mcp/README.md`](packages/extensions/mcp/README.md) for the configuration schema and security behavior.
+A project skill overrides a global skill with the same name. Kepler validates the [Agent Skills format](https://agentskills.io/specification), adds skill metadata to the startup prompt, and loads full instructions only when the model selects that skill.
+
+## Add MCP servers
+
+Put global MCP configuration in `~/.kepler/mcp.json` or project configuration in `<workspace>/.kepler/mcp.json`. Kepler supports MCP `2025-11-25` over stdio and Streamable HTTP, including OAuth. See [`packages/extensions/mcp/README.md`](packages/extensions/mcp/README.md) for the schema and security rules.
 
 ## Development commands
 
@@ -71,4 +78,4 @@ pnpm check:generated
 pnpm audit --audit-level high
 ```
 
-After a canonical GitHub remote exists, apply [docs/repository-settings.md](docs/repository-settings.md).
+Once the canonical GitHub repository exists, apply the settings in [docs/repository-settings.md](docs/repository-settings.md).

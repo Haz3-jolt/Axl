@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kepler Implementation Plan
+# Kepler implementation plan
 
-Status: Local execution plan. This file orders the features described in `HARNESS_PLAN.md`, `CODE_STRUCTURE.md`, and `OPEN_SOURCE.md`. It does not replace those product documents.
+Status: local execution plan. This file is the current source of truth for build order. `HARNESS_PLAN.md`, `CODE_STRUCTURE.md`, and `OPEN_SOURCE.md` describe the product, repository, and project policies.
 
 ## 1. Delivery rules
 
@@ -16,6 +16,8 @@ Status: Local execution plan. This file orders the features described in `HARNES
 7. Keep the kernel limited to the guarantees listed in `HARNESS_PLAN.md` section 2.3.
 8. Add one focused runnable check for every non-trivial behavior.
 9. Do not implement a later phase merely to prepare for hypothetical use. Preserve the seam and stop.
+10. Complete security prerequisites before activating the feature that depends on them.
+11. Keep the TypeScript protocol definitions authoritative until a second implementation language creates a real code-generation need.
 
 ## 2. Foundational dependency decisions
 
@@ -28,7 +30,9 @@ Resolve these before implementation because they affect irreversible boundaries.
 - [x] Define the first local wire protocol version as `1`, with exact-version compatibility before the first stable release.
 - [x] Confirm Apache-2.0 for Kepler and establish the attribution process for behavior or fixtures derived from external projects.
 - [x] Record Pi and DSH reference commits used during implementation.
-- [x] Keep third-party extensions isolated in the first release unless a later reviewed decision explicitly permits trusted in-process execution.
+- [x] Keep third-party extensions out of the daemon process in v1. Only trusted first-party extensions may run in process.
+- [x] Keep capability search local and lexical. V1 uses BM25, not embeddings or provider-native tool search.
+- [x] Keep TypeScript definitions authoritative until the first non-TypeScript client requires code generation.
 
 Decisions that can wait are listed in the phase where they become necessary.
 
@@ -40,7 +44,7 @@ Build this before product code so security and license hygiene do not become a r
 
 - [x] Initialize the monorepo.
 - [x] Configure pnpm workspaces and TypeScript.
-- [x] Add packages only as they receive working code. Phase 0 starts with `protocol`; `kernel`, `ai`, `sandbox`, `daemon`, and the minimal CLI wait for their working slices.
+- [x] Add packages only when they receive working code. Phase 0 starts with `protocol`. `kernel`, `ai`, `sandbox`, `daemon`, and the minimal CLI wait for their working slices.
 - [x] Establish package-boundary checks.
 - [x] Prohibit private kernel imports from extensions.
 - [x] Prohibit hand-edited generated code.
@@ -131,7 +135,7 @@ Adapt Pi's provider architecture as a Kepler-native contract. Do not create anot
 
 - [x] Store credential references separately from provider and session configuration.
 - [x] Support environment, file-backed, OAuth, ambient, and keyless-local authentication shapes without exposing values to extensions.
-- [x] Ensure credentials never enter prompts, events, generated artifacts, or diagnostics. Resolved auth exposes `secretValues` for log-redaction registration; session wiring lands with the daemon and is re-verified at the dogfood gate.
+- [x] Keep credentials out of prompts, events, generated artifacts, and diagnostics. Resolved authentication exposes `secretValues` for log redaction. Session wiring lands with the daemon and is checked again at the dogfood gate.
 - [x] Implement explicit login, logout, refresh, and invalid-auth states.
 
 ### Models and thinking
@@ -140,14 +144,14 @@ Adapt Pi's provider architecture as a Kepler-native contract. Do not create anot
 - [x] Implement `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` thinking levels.
 - [x] Implement per-model thinking maps and visible clamping.
 - [x] Support token-budget reasoning providers while reserving answer space.
-- [x] Log model and thinking changes as configuration events. Clamping returns the exact `config.thinking` payload; session-side logging lands with the kernel loop.
+- [x] Log model and thinking changes as configuration events. Clamping returns the `config.thinking` payload, and the kernel loop records it.
 - [x] Track input, output, cache, reasoning, and cost usage.
 
 ### Initial adapters
 
 - [x] Implement only the provider adapter required for the first dogfood sessions. Decided and built: Azure OpenAI over the Responses API.
-- [x] Add generic OpenAI-compatible support only if the selected first provider needs it. `OpenAiResponsesProvider` is the generic layer; Azure is one endpoint policy on top.
-- [x] Defer the broad provider catalog until the core stream contract is stable. Honored: no other adapters ship in this phase.
+- [x] Add generic OpenAI-compatible support only when the first provider needs it. `OpenAiResponsesProvider` supplies the shared layer, and Azure adds its endpoint policy.
+- [x] Keep provider breadth deferred until the stream contract is stable. Azure exposes Pi's full Azure OpenAI model catalog, but no other provider adapters ship in this phase.
 
 ### Tool dialect foundation
 
@@ -168,13 +172,13 @@ The fake provider and one real provider produce identical canonical stream shape
 - [x] Implement tool execution dispatch and tool call/result pairing.
 - [x] Implement cancellation and operation ownership so only one operation mutates a branch at a time.
 - [x] Implement extension-host lifecycle as an empty seam, not a full extension system yet.
-- [x] Keep provider-specific logic outside the kernel. The kernel consumes an injected `ModelPort`; canonical stream/message types moved to `@kepler/protocol`.
+- [x] Keep provider-specific logic outside the kernel. The kernel consumes an injected `ModelPort`, while `@kepler/protocol` owns canonical stream and message types.
 
 ### Prompt behavior
 
 - [x] Build the stable prompt from identity, working directory, active tools, applicable `AGENTS.md`, and essential constraints.
 - [x] Preserve an append-only prompt-cache prefix.
-- [x] Append skills, context, steering, and injected instructions rather than rewriting prior content.
+- [x] Append loaded skills, context, steering, and injected instructions rather than rewriting prior content.
 - [x] Exclude subagent instructions and tools by default.
 - [x] Add the minimal profile with only shell and editing capabilities.
 
@@ -204,9 +208,9 @@ This is the final phase built primarily with the stable external harness.
 ### Minimal client
 
 - [x] Build a plain terminal or headless client.
-- [x] Show streamed text, tool activity, errors, model, thinking level, and sandbox status. Text arrives at event granularity; token-delta streaming over the wire lands with the Phase 9 protocol work.
+- [x] Show streamed text, tool activity, errors, model, thinking level, and sandbox status. Text currently arrives one event at a time. Phase 9 adds token-delta streaming over the wire.
 - [x] Support send, interrupt, detach, reconnect, and resume.
-- [x] Defer the polished TUI and public SDK at the Phase 4 gate. The TUI work below was later pulled forward by explicit direction; the public SDK remains deferred.
+- [x] Defer the polished TUI and public SDK at the Phase 4 gate. The TUI work below was later brought forward. The public SDK remains deferred.
 
 ### Minimum enforceable sandbox
 
@@ -223,14 +227,26 @@ This is the final phase built primarily with the stable external harness.
 
 Switch to Kepler building Kepler when all of the following pass:
 
-- [x] Kepler edits its own source in a disposable worktree. Verified live 2026-08-30, session 378d8028 on Azure gpt-5.6-sol: read → edit `packages/protocol/src/version.ts` → verified.
-- [x] Kepler runs the smallest relevant test inside Bubblewrap. `node --test scripts/check-boundaries.test.ts` passed inside the sandbox.
-- [x] The complete interaction survives daemon termination and resume. Resumed under a fresh daemon with full history; follow-up turn completed.
-- [x] Interrupting during model output and during a tool does not corrupt the branch. Live Ctrl+C mid-turn recorded `aborted`; tool interruption covered by kernel tests; integrity checks pass after both.
-- [x] Credentials and secret fixtures are absent from the event log. The real API key (and fragments) appear nowhere in the session log.
-- [x] Deterministic replay reproduces the session. Byte-identical replay of all 30 events, including error and aborted turns.
+- [x] Kepler edits its own source in a disposable worktree using Azure OpenAI.
+- [x] Kepler runs the smallest relevant test inside Bubblewrap.
+- [x] A fresh daemon restores the full session history and completes another turn.
+- [x] Interrupting model output or a tool records an aborted turn without corrupting the branch.
+- [x] Credentials and secret fixtures are absent from the event log.
+- [x] Deterministic replay reproduces the complete session byte for byte.
 
 After this gate, use Kepler for ordinary development. Continue independent review of kernel and security-boundary changes.
+
+### Dogfood follow-up
+
+The Phase 4 gate still stands, but several current paths need replacement before dogfooding expands:
+
+- [ ] Replace the prompt-wide skill catalog with BM25 selection before each user turn.
+- [ ] Replace the generic MCP invocation path with turn-selected, provider-native tool schemas and frozen per-turn bindings.
+- [ ] Add `ask_user_question` to interactive sessions and verify that it is absent from goals and headless runs.
+- [ ] Add blind credential brokering before dogfooding credentialed third-party extensions or local MCP servers.
+- [ ] Keep the current fail-closed sandbox default. Test `--unsafe` separately when that explicit mode is implemented.
+
+These are the next dogfood prerequisites. They take priority over the remaining Phase 5 convenience work.
 
 ## Phase 5: Productive single-session development
 
@@ -264,6 +280,9 @@ The checked TUI items in this phase were pulled forward as an explicit exception
 ### Session controls
 
 - [x] Add model and thinking-level switching.
+- [ ] Add `ask_user_question` as a typed tool in interactive terminal, web, IDE, and mobile sessions.
+- [ ] Remove the tool and its prompt text from goals, headless runs, and unattended automation.
+- [ ] When a goal needs missing information, record a reversible assumption or emit a visible blocker and pause.
 - [ ] Add context, token, cache, latency, and cost visibility.
 - [ ] Add token, cost, and wall-clock budgets with safe-boundary pauses.
 - [ ] Implement steer, follow-up, and interrupt semantics.
@@ -298,16 +317,17 @@ Build this before adding most first-party features so those features prove the p
 
 ### Extension API
 
-- [ ] Implement `registerTool`, `registerCommand`, `registerProvider`, `registerSkill`, `registerHook`, `registerTheme`, `registerRenderer`, `registerWebPanel`, and `on`.
+- [ ] Start with `registerTool`, `registerCommand`, `registerSkill`, and `on`.
 - [ ] Return a disposer from every registration.
+- [ ] Add `registerProvider`, `registerHook`, `registerTheme`, `registerRenderer`, and `registerWebPanel` only when the first working consumer needs each API.
 - [ ] Require an explicit capability manifest before activation.
 - [ ] Keep arbitrary kernel internals inaccessible.
-- [ ] Enforce that first-party extensions use only the public extension API.
+- [ ] Make first-party extensions use only the public extension API once that API exists.
 - [ ] Ensure disabling a feature removes its prompt tokens, UI, and background work.
 
 ### Resource formats
 
-The checked standards items were pulled forward by explicit direction. They do not complete the Phase 6 extension API.
+The checked standards items were brought forward by request. They do not complete the Phase 6 extension API. The current prompt-wide skill catalog and generic MCP gateway are temporary and must be replaced by the BM25 and direct-tool path below.
 
 - [ ] Support native extensions, skills, hooks, prompt templates, themes, MCP servers, and `AGENTS.md`.
 - [x] Implement MCP natively against protocol version `2025-11-25`.
@@ -317,12 +337,41 @@ The checked standards items were pulled forward by explicit direction. They do n
 
 ### Progressive capability discovery
 
-- [ ] Build a compact capability index from extension manifests, skills, and agent definitions.
-- [ ] Add on-demand skill and schema loading as appended events.
-- [ ] Keep the provider-visible base tool list fixed with discovery and generic invoke tools.
-- [ ] Validate every discovered invocation against the registry and policy.
-- [ ] Exclude disabled capabilities entirely from discovery.
+- [ ] Build one disposable BM25 index over enabled skill, tool, command, and agent metadata.
+- [ ] Store each capability's name, kind, description, aliases, path, and project or global scope.
+- [ ] Rank each user-authored turn before its first model request, with exact names and aliases first and project scope as the tie-breaker.
+- [ ] Apply a fixed relevance threshold and disclose no more than three matches.
+- [ ] Keep the stable prompt to a short statement that optional capabilities may be supplied with a request.
+- [ ] Append only compact metadata and a path for matching skills, commands, and agents. Let the model use the normal read tool to load full bodies.
+- [ ] Let explicit user requests such as `/skill:pull-request` bypass ranking and load the named capability.
+- [ ] Expose a matching executable tool through its complete provider-native schema before inference, then dispatch it directly.
+- [ ] Freeze the selected tool roster and implementation bindings through every continuation in that turn.
+- [ ] Recompute the roster only at the next user-turn boundary and validate input again at dispatch.
+- [ ] Record every disclosed capability in the canonical log.
+- [ ] Remove disabled, unavailable, and untrusted capabilities before ranking. Discovery does not grant authority.
+- [ ] Do not add embeddings, a vector database, provider-native `tool_search`, or generic untyped invocation for normal tool execution.
 - [ ] Add a scoped harness-control capability for daemon RPCs.
+
+### Blind credential foundation
+
+- [ ] Represent every Kepler-managed credential with an opaque identifier outside the secrets layer.
+- [ ] Give each sandbox a per-session sentinel instead of the real credential.
+- [ ] Keep real credentials in a broker outside the sandbox.
+- [ ] Have the egress proxy validate the destination and requested credential scope before substituting a real value.
+- [ ] Support bearer-token and basic-auth flows first.
+- [ ] Reject authentication schemes that cannot be brokered safely instead of passing plaintext to an extension.
+- [ ] Keep log redaction as a second layer of protection.
+- [ ] Verify that managed credentials never enter model context or persistent session logs.
+
+### Executable activation boundary
+
+- [ ] Build a process host for third-party and adopted executable extensions before allowing them to activate.
+- [ ] Run those processes under the selected sandbox and expose only capability RPC.
+- [ ] Give untrusted processes bounded filesystem and network access plus credential handles, never raw managed credentials.
+- [ ] Fail activation when required isolation is unavailable.
+- [ ] Keep third-party in-process promotion out of v1.
+- [x] Allow declarative skills before the executable process host exists.
+- [x] Run local stdio MCP servers as sandboxed child processes.
 
 ### Initial first-party extensions
 
@@ -333,16 +382,20 @@ The checked standards items were pulled forward by explicit direction. They do n
 
 ### Exit gate
 
-Every feature outside the kernel is installable and removable through the public API, and disabling one leaves no prompt, UI, or background trace.
+The initial public registrations have real first-party consumers, each registration returns a disposer, disabled features leave no prompt, UI, or background work, and untrusted executable extensions cannot run in the daemon process.
 
 ## Phase 7: Complete permission and isolation system
 
 ### Permission profiles
 
 - [ ] Implement `direct`, `auto`, `manual`, and `deny`.
-- [ ] Default to `direct` only when the requested sandbox controls are enforced.
-- [ ] Default to `auto` when the session is unsandboxed and announce that state.
-- [ ] Require approval for every unsandboxed execution, including from `direct`.
+- [ ] Use `direct` by default only when the requested operating-system sandbox is active.
+- [ ] Fail startup when the requested sandbox is unavailable.
+- [ ] Add `kepler --unsafe` as the only way to start without operating-system isolation.
+- [ ] Default an unsafe session to `auto`, show the unsafe state in every client, and record it in the session log.
+- [ ] Allow users to choose a stricter permission level while unsafe.
+- [ ] Treat bypassing an active sandbox as a separate action that always requires approval.
+- [ ] Do not present the classifier as a security boundary or use deterministic command rules in place of isolation.
 - [ ] Show concise consequences for manual approvals.
 - [ ] Build structured classifier input from resolved paths, domains, requested capability changes, and sandbox state.
 - [ ] Constrain classifier output to policy-precomputed options.
@@ -367,12 +420,11 @@ Every feature outside the kernel is installable and removable through the public
 - [ ] Add loopback-only port publishing by default.
 - [ ] Add per-site explicit opt-in for authenticated browsing.
 
-### Extension isolation
+### Extension isolation hardening
 
-- [ ] Run untrusted and adopted extensions outside the daemon process.
-- [ ] Expose only capability RPC to extension processes.
-- [ ] Prevent extension code from enumerating credentials or bypassing sandbox policy through host APIs.
-- [ ] Decide whether reviewed extensions may ever be promoted to trusted in-process execution.
+- [ ] Add resource limits and lifecycle supervision to the Phase 6 extension process host.
+- [ ] Verify that extension processes cannot bypass filesystem, network, or credential policy through host APIs.
+- [ ] Keep trusted in-process execution limited to first-party extensions throughout v1.
 
 ### OCI runtime
 
@@ -476,10 +528,11 @@ Do not build public or multi-language SDKs before this phase. The second real cl
 
 ### SDK
 
-- [ ] Generate the TypeScript SDK from the protocol schema.
-- [ ] Make in-tree clients consume the generated SDK.
-- [ ] Add SDK publication only when an external consumer exists.
-- [ ] Defer Swift and Kotlin generation until mobile implementation begins.
+- [ ] Package the authoritative TypeScript protocol definitions as the TypeScript SDK without introducing a generator.
+- [ ] Make in-tree clients consume the public SDK surface.
+- [ ] Publish the SDK only when an external consumer exists.
+- [ ] Choose TypeSpec, Protobuf, or another generator only when the first non-TypeScript client creates a concrete need.
+- [ ] Keep Swift and Kotlin generation in Phase 13 with mobile implementation.
 
 ### Web client
 
@@ -526,15 +579,16 @@ Implement the unified child mechanism and extension isolation before model-drive
 ### Conversion pipeline
 
 - [ ] Fetch and lock source by immutable version or commit.
-- [ ] Inspect packages without execution.
-- [ ] Identify extension surfaces and build a conversion plan.
-- [ ] Run only independent conversion surfaces in parallel.
-- [ ] Restrict workers to source reads, staging writes, no network, and no host credentials.
+- [ ] Inspect packages without executing them.
+- [ ] Give the source and target extension contract directly to the conversion model.
+- [ ] Generate native output in a staging directory with no network or host credentials.
 - [ ] Treat package instructions as untrusted data.
-- [ ] Combine output and run a read-only final verifier.
-- [ ] Typecheck and test in isolation.
-- [ ] Present permissions and unsupported behavior.
-- [ ] Activate atomically after approval.
+- [ ] Typecheck and run available upstream tests in isolation.
+- [ ] Allow one repair prompt when validation fails, then stop.
+- [ ] Let generated tests supplement upstream tests without treating them as proof of semantic equivalence.
+- [ ] Do not build feature-mapping rules, type-equivalence machinery, mutation analysis, differential fuzzing, or a custom semantic verifier for v1.
+- [ ] Present the complete diff, requested permissions, unsupported behavior, and the checks that actually ran.
+- [ ] Activate atomically only after approval.
 
 ### Compatibility behavior
 
@@ -598,10 +652,13 @@ A real third-party package from each initial ecosystem is adopted without modify
 
 ### Tier 1 instructions
 
+- [ ] Keep tier 1 automatic by default while tiers 2 and 3 remain manual.
 - [ ] Modify only the managed global `AGENTS.md` block.
 - [ ] Enforce line and byte budgets, deduplication, conflict detection, locks, atomic writes, revisions, and rollback.
 - [ ] Keep project-derived rules project-scoped.
 - [ ] Require user-originated evidence before global promotion.
+- [ ] Announce every automatic change immediately in every attached client with the rule, target file, evidence summary, diff command, and rollback command.
+- [ ] Persist notifications when no client is attached and show them on the next attachment.
 
 ### Tiers 2 and 3
 
@@ -789,7 +846,7 @@ Resolve each decision only before its dependent phase:
 | --- | --- |
 | Package namespace and executable name | Phase 0 |
 | Event and protocol versioning | Phase 1 |
-| First real model provider | Phase 2 — resolved 2026-08-29: Azure OpenAI |
+| First real model provider | Phase 2, resolved 2026-08-29: Azure OpenAI |
 | Trusted in-process extension promotion | Phase 7 |
 | Initial ecosystem compatibility promise | Phase 10 |
 | Global and project learning budgets | Phase 11 |
@@ -800,9 +857,10 @@ Resolve each decision only before its dependent phase:
 
 ## 5. Immediate next slice
 
-Implement only the first incomplete Phase 5 vertical slice:
+Complete these dogfood fixes before continuing Phase 5:
 
-1. Add the standard profile's `write` tool.
-2. Add `web_search` and `fetch_content` with keyless defaults and explicit optional providers.
-3. Enforce SSRF protection, content sanitization, and explicit third-party-fetch opt-in.
-4. Stop and verify before starting compaction or later Phase 5 work.
+1. Add interactive-only `ask_user_question` with visible blocker behavior for non-interactive goals.
+2. Build the local BM25 capability index and log the three-or-fewer records disclosed for each user turn.
+3. Replace the generic MCP gateway with selected provider-native tool schemas and frozen per-turn dispatch bindings.
+4. Add the bearer-token and basic-auth credential broker before using credentialed third-party processes in dogfood sessions.
+5. Stop and verify these paths before returning to web access or compaction.

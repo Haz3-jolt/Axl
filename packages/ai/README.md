@@ -3,4 +3,4 @@
 
 # `@kepler/ai`
 
-Provider-specific behavior outside the kernel: provider and model contracts, credential resolution, thinking levels, tool dialect rendering, deterministic fake models, and the bootstrap Azure OpenAI Responses adapter.
+This package keeps provider-specific behavior outside the kernel. It defines provider and model contracts, credential lookup, thinking levels, tool dialects, deterministic test models, and the Azure OpenAI Responses adapter with Pi's full Azure model catalog.

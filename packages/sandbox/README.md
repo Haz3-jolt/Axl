@@ -3,6 +3,6 @@
 
 # `@kepler/sandbox`
 
-OS sandbox providers. Shell commands run confined — Bubblewrap namespaces on Linux (read-only root, workspace-scoped writes, masked Kepler home, no network, cleared environment) or Seatbelt profiles on macOS (`sandbox-exec`: default-allow with write, network, and protected-path denies, environment rebuilt from an allowlist). In-process tools enforce the same policy through the kernel's canonical path checks, and a session that requires the sandbox fails to start when no provider is available — there is no unsandboxed fallback.
+This package provides operating-system sandbox adapters. Linux uses Bubblewrap with a read-only root, writable workspace, hidden Kepler state, isolated networking, and a cleared environment. macOS uses Seatbelt to restrict writes, network access, protected paths, and environment variables. In-process tools apply the same workspace policy through the kernel's canonical path checks.
 
-Each provider reports the exact controls it enforces in the `sandbox.configured` event; Seatbelt has no namespace equivalent and says so. `detectPlatformSandbox()` picks the host's provider. Landlock, seccomp, Windows, and the OCI runtime are Phase 7 scope.
+A session that requires isolation will not start without a suitable provider. Each provider records the controls it actually enforces in `sandbox.configured`. Seatbelt reports that it cannot provide Linux-style namespaces. Landlock, seccomp, Windows support, and the OCI runtime remain Phase 7 work.

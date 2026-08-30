@@ -3,7 +3,7 @@
 
 # `@kepler/extension-mcp`
 
-Native Kepler host integration for Model Context Protocol version `2025-11-25`, built on the pinned official TypeScript SDK.
+This package connects Kepler to Model Context Protocol servers using protocol version `2025-11-25` and the official TypeScript SDK.
 
 ## Configuration
 
@@ -32,12 +32,12 @@ Configure global servers in `~/.kepler/mcp.json` or project servers in `<workspa
 }
 ```
 
-Environment and header values are references to environment variable names, never literal credentials. HTTP requires HTTPS except for loopback development servers. OAuth uses protected-resource and authorization-server discovery, PKCE, dynamic or configured client registration, a loopback callback, and mode-`0600` persisted tokens. The TUI displays the full authorization URL and requires consent before opening it.
+Environment and header entries refer to environment variable names, so credentials do not appear in configuration. HTTP URLs must use HTTPS unless they point to the local machine. OAuth supports protected-resource and authorization-server discovery, PKCE, dynamic or configured client registration, a loopback callback, and token files with mode `0600`. The TUI shows the full authorization URL and asks before opening it.
 
 Local stdio servers run through Kepler's required OS sandbox with a read-only host, workspace-scoped writes, protected Kepler state, a cleared environment, and no network. `roots` are opt-in and must resolve inside the active workspace.
 
 ## Capabilities
 
-The fixed model-visible `mcp` gateway supports tools, resources and subscriptions, prompts, argument completion, logging, opaque cursor pagination, progress, cancellation, and experimental tasks. Server requests for roots, sampling with tools, form elicitation, and URL elicitation are implemented. MCP tool calls and both sides of sampling require explicit TUI approval. Form elicitation rejects secret-like fields, and URL elicitation is never prefetched or opened without approval.
+The model uses one `mcp` gateway for tools, resources and subscriptions, prompts, argument completion, logs, pagination, progress, cancellation, and experimental tasks. Servers may request roots, model sampling with tools, forms, and browser-based input. The TUI asks before each MCP tool call and before both producing and sharing a sampled response. It rejects forms that appear to request secrets and does not fetch or open a URL without approval.
 
-Binary MCP content is content-addressed under `~/.kepler/blobs` and represented in the canonical log by a SHA-256 blob reference. MCP errors fail loudly; unsupported media input to the active model is never silently converted.
+Binary content is stored by SHA-256 digest under `~/.kepler/blobs`, and the event log contains only the reference. Kepler reports MCP errors directly. If the active model cannot accept a requested media type, the sampling request fails instead of converting or dropping the input.

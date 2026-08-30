@@ -30,7 +30,7 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Kepler has no runnable agent or CLI in Phase 0. See [SETUP.md](SETUP.md) for the complete current setup.
+See [SETUP.md](SETUP.md) for provider configuration and local CLI usage.
 
 ## Find and claim work
 

@@ -3,26 +3,26 @@
 
 # Security policy
 
-Kepler's initial [security assurance case](docs/security/assurance-case.md) records its assets, trust boundaries, current controls, and residual risks. There are no release artifacts to verify yet; [release verification](docs/security/release-verification.md) states the required future process.
+The [security assurance case](docs/security/assurance-case.md) lists Kepler's assets, trust boundaries, current controls, and known limits. Kepler has not published release artifacts yet. [Release verification](docs/security/release-verification.md) defines what must be in place before that happens.
 
 ## Supported versions
 
-Kepler has not published a release. Only the current `main` branch receives security fixes during pre-release development.
+Kepler is still in pre-release development, so only the current `main` branch receives security fixes.
 
 ## Report a vulnerability
 
-Do not open a public issue for a suspected vulnerability.
+Please do not open a public issue for a suspected vulnerability.
 
-Use GitHub Private Vulnerability Reporting in the canonical repository when available. If that channel is unavailable, email `harisrini21@gmail.com`.
+Use GitHub Private Vulnerability Reporting in the canonical repository when it is available. Otherwise, email `harisrini21@gmail.com`.
 
-Include the impact, affected revision, reproduction steps, and any suggested remediation. Do not include live credentials or private user data.
+Include the affected revision, expected impact, reproduction steps, and any suggested fix. Do not send live credentials or private user data.
 
 ## Response targets
 
-- Acknowledgement within 48 hours
-- Initial assessment within 7 days
-- Resolution target within 30 days for a confirmed vulnerability, subject to complexity
+- Acknowledge the report within 48 hours
+- Provide an initial assessment within 7 days
+- Aim to resolve a confirmed issue within 30 days, depending on complexity
 
-Sandbox escapes, permission bypasses, and credential exposure are severity-one issues. If uncertain, report the issue privately.
+Sandbox escapes, permission bypasses, and credential exposure are severity-one issues. When in doubt, report privately.
 
-Reporters of valid vulnerabilities will be credited in release notes unless they prefer otherwise.
+Release notes will credit valid reports unless the reporter asks to remain anonymous.
