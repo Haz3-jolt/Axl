@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,8 +13,18 @@ function escapeRegularExpression(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function commitExists(repository: string, revision: string): boolean {
+  const result = spawnSync("git", ["-C", repository, "cat-file", "-e", `${revision}^{commit}`], {
+    encoding: "utf8",
+  });
+  if (result.error) throw result.error;
+  if (result.status === 0) return true;
+  if (result.status === 128) return false;
+  throw new Error(result.stderr.trim() || `git cat-file exited with status ${result.status}`);
+}
+
 export function checkDco(repository: string, base: string, head: string): string[] {
-  const range = /^0+$/.test(base) ? head : `${base}..${head}`;
+  const range = /^0+$/.test(base) || !commitExists(repository, base) ? head : `${base}..${head}`;
   const commits = git(repository, "rev-list", "--reverse", range).split("\n").filter(Boolean);
   const errors: string[] = [];
 

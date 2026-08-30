@@ -29,6 +29,7 @@ test("rejects an unsigned commit and accepts a matching sign-off", () => {
   git(root, "commit", "--quiet", "-am", "unsigned");
   let head = git(root, "rev-parse", "HEAD");
   assert.equal(checkDco(root, base, head).length, 1);
+  assert.equal(checkDco(root, "f".repeat(40), head).length, 1);
 
   git(root, "commit", "--quiet", "--amend", "--signoff", "--no-edit");
   head = git(root, "rev-parse", "HEAD");
