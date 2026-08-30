@@ -18,7 +18,4 @@ Copyright (c) 2025 Mario Zechner, MIT License (see LICENSES/MIT.txt), at commit
 Kepler uses the official Model Context Protocol TypeScript SDK,
 Copyright (c) Anthropic, PBC, under the MIT License (see LICENSES/MIT.txt).
 
-Kepler uses yaml, Copyright (c) 2018 Eemeli Aro,
-under the ISC License (see LICENSES/ISC.txt).
-
 The reference projects and exact commits inspected during development are recorded in docs/architecture/decisions.md. Future copied or adapted material must be recorded here before distribution.

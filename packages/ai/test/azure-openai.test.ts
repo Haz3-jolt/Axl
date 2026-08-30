@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   AuthError,
   type AuthContext,
+  azureOpenAiAuthMethod,
   collectModelStream,
   createAzureOpenAiProvider,
   FakeModelProvider,
@@ -101,6 +102,33 @@ test("normalizes Azure base URLs and passes gateways through", () => {
     "https://gateway.example.com/azure",
   );
   assert.throws(() => normalizeAzureBaseUrl("not a url"), AuthError);
+});
+
+test("exported Azure settings override values saved by interactive login", async () => {
+  const resolved = await azureOpenAiAuthMethod.resolve({
+    context: makeContext({
+      AZURE_OPENAI_BASE_URL: "https://exported.openai.azure.com",
+      AZURE_OPENAI_API_VERSION: "2026-01-01",
+      AZURE_OPENAI_DEPLOYMENT_NAME_MAP: "gpt-5=exported",
+    }),
+    credential: {
+      type: "api_key",
+      key: "stored-key",
+      env: {
+        AZURE_OPENAI_BASE_URL: "https://stored.openai.azure.com",
+        AZURE_OPENAI_API_VERSION: "2025-01-01",
+        AZURE_OPENAI_DEPLOYMENT_NAME_MAP: "gpt-5=stored",
+      },
+    },
+    signal: new AbortController().signal,
+  });
+
+  assert.equal(resolved?.auth.apiKey, "stored-key");
+  assert.deepEqual(resolved?.env, {
+    AZURE_OPENAI_BASE_URL: "https://exported.openai.azure.com/openai/v1",
+    AZURE_OPENAI_API_VERSION: "2026-01-01",
+    AZURE_OPENAI_DEPLOYMENT_NAME_MAP: "gpt-5=exported",
+  });
 });
 
 test("parses the model-to-deployment map format", () => {

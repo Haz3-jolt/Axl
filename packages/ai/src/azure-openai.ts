@@ -70,9 +70,11 @@ export function parseDeploymentMap(value: string | undefined): Readonly<Record<s
 export const azureOpenAiAuthMethod: ApiKeyAuthMethod = {
   displayName: "Azure OpenAI API key",
   resolve: async ({ context, credential }) => {
-    const env = (name: string): string | undefined => credential?.env?.[name] ?? context.env(name);
+    // Match Pi's provider behavior: exported Azure configuration is live and
+    // takes precedence over values captured by an earlier interactive login.
+    const env = (name: string): string | undefined => context.env(name) || credential?.env?.[name];
     const key = credential?.key ?? context.env("AZURE_OPENAI_API_KEY");
-    if (key === undefined) return undefined;
+    if (!key) return undefined;
 
     const explicitBase = env("AZURE_OPENAI_BASE_URL");
     const resourceName = env("AZURE_OPENAI_RESOURCE_NAME");
