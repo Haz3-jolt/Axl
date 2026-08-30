@@ -4,7 +4,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PLAIN_PALETTE, renderToolCall, renderToolResult } from "../src/index.ts";
+import {
+  PLAIN_PALETTE,
+  renderToolCall,
+  renderToolResult,
+  THEMES,
+  visibleWidth,
+} from "../src/index.ts";
 
 test("edit calls render adaptive unified and split previews", () => {
   const input = {
@@ -13,15 +19,26 @@ test("edit calls render adaptive unified and split previews", () => {
     newText: "const value = 2;\nreturn value;",
   };
   const unified = renderToolCall("edit", input, 80, PLAIN_PALETTE);
-  assert.deepEqual(unified.slice(0, 3), [
-    "edit src/app.ts",
-    "  - const value = 1;",
-    "  + const value = 2;",
-  ]);
-  assert.match(unified.at(-1) ?? "", /return value/);
+  assert.equal(unified[0], "edit src/app.ts (2 lines)");
+  assert.match(unified[1] ?? "", /↳ diff \+1 -1 unified \[━{2}\]/);
+  assert.match(unified[2] ?? "", /^─+$/);
+  assert.match(unified[3] ?? "", /1 -│ const value = 1;/);
+  assert.match(unified[4] ?? "", /1 \+│ const value = 2;/);
+  assert.match(unified.at(-1) ?? "", /2 {2}│ return value/);
 
   const split = renderToolCall("edit", input, 140, PLAIN_PALETTE);
-  assert.match(split[1] ?? "", /- const value = 1;\s+│ \+ const value = 2;/);
+  assert.match(split[1] ?? "", /↳ diff \+1 -1 split \[━{2}\]/);
+  assert.match(split[3] ?? "", /old\s+│ new/);
+  assert.match(split[4] ?? "", /1 -│ const value = 1;\s+│ 1 \+│ const value = 2;/);
+
+  const theme = THEMES.dark;
+  assert.ok(theme);
+  const rich = renderToolCall("edit", input, 80, theme);
+  assert.equal(rich.join("\n").includes("\x1b[48;2;"), true);
+  assert.equal(
+    rich.every((line) => visibleWidth(line) <= 80),
+    true,
+  );
 });
 
 test("tool results hide reads and bound shell output", () => {
@@ -57,5 +74,5 @@ test("tool output cannot inject terminal control sequences", () => {
     mode: "full",
     palette: PLAIN_PALETTE,
   });
-  assert.deepEqual(output, ["│ safe text!"]);
+  assert.deepEqual(output, ["safe text!"]);
 });

@@ -196,6 +196,15 @@ export class DifferentialScreen {
     }
   }
 
+  /** Forget cursor and line state after the terminal has been cleared externally. */
+  reset(width = this.width): void {
+    this.width = Math.max(1, width);
+    this.previous = [];
+    this.forceFull = false;
+    this.placedRow = null;
+    this.placedColumn = 0;
+  }
+
   invalidate(): void {
     this.forceFull = true;
   }

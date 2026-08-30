@@ -21,7 +21,7 @@ export const DIALOG_MAX_WIDTH = 76;
 
 /** Inner content width for a dialog at the given terminal width. */
 export function dialogInnerWidth(width: number): number {
-  return Math.max(20, Math.min(DIALOG_MAX_WIDTH, width - 4) - 4);
+  return Math.max(1, Math.min(DIALOG_MAX_WIDTH, width - 4) - 4);
 }
 
 /** Renders a dialog to lines. Content column starts at terminal column 2. */

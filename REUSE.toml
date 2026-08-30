@@ -24,9 +24,3 @@ SPDX-License-Identifier = "Apache-2.0"
 path = ["packages/*/dist/**", "packages/extensions/*/dist/**"]
 SPDX-FileCopyrightText = "2026 Hari Srinivasan"
 SPDX-License-Identifier = "Apache-2.0"
-
-# Screenshots are rendered terminal captures of Kepler itself.
-[[annotations]]
-path = "docs/screenshots/**"
-SPDX-FileCopyrightText = "2026 Hari Srinivasan"
-SPDX-License-Identifier = "Apache-2.0"

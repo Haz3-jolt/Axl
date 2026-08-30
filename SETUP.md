@@ -49,6 +49,17 @@ kepler <session-id>
 
 The client uses `~/.kepler/kepler.sock`. It starts a detached local daemon when one is not already running. Use `kepler daemon` to keep the daemon in the foreground for troubleshooting. Restart an existing daemon after changing exported environment variables because a running process cannot inherit later shell changes.
 
+## Global and project configuration
+
+Kepler reads global configuration from `~/.kepler`:
+
+- `AGENTS.md` for global instructions
+- `skills/<name>/SKILL.md` for global Agent Skills
+- `mcp.json` for global MCP servers
+- `credentials.json` for credentials managed by `kepler login`
+
+It also reads `AGENTS.md`, `.kepler/skills`, and `.kepler/mcp.json` from the workspace root. A project skill or MCP server replaces the global entry with the same name. Reload the session after changing instructions, skills, or MCP configuration.
+
 ## Add Agent Skills
 
 Put skills in either location:

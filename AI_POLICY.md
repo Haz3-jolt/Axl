@@ -23,7 +23,7 @@ For any material AI-assisted change:
 - Check generated files, licenses, and external provenance.
 - Name the AI tool and model or version in the pull request.
 - Review every GitHub comment, review response, and pull request description before publishing it.
-- Include screenshots when the change affects the interface.
+- Attach screenshots to the pull request when the change affects the interface. Do not commit screenshots to the repository.
 
 ## Contributions we will close
 

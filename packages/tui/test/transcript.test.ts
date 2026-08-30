@@ -70,7 +70,7 @@ test("shows tool activity compactly and errors loudly", () => {
         isError: false,
       }),
     ),
-    ["│ a", "│ b", "│ c", "│ d", "│ e", "│ f"],
+    ["a", "b", "c", "d", "e", "f"],
   );
   assert.deepEqual(
     view.apply(

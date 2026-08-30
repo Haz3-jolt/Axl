@@ -21,16 +21,24 @@ function foreground(hex: string): (text: string) => string {
   return (text) => `\x1b[38;2;${color}m${text}\x1b[39m`;
 }
 
+function background(hex: string): (text: string) => string {
+  const color = rgb(hex);
+  return (text) => `\x1b[48;2;${color}m${text}\x1b[49m`;
+}
+
 function foregroundOn(fg: string, bg: string): (text: string) => string {
   const foregroundColor = rgb(fg);
   const backgroundColor = rgb(bg);
   return (text) => `\x1b[38;2;${foregroundColor};48;2;${backgroundColor}m${text}\x1b[39;49m`;
 }
 
+const bold = sgr("1", "22");
+
 const kepler: Palette = {
   dim: sgr("2", "22"),
   accent: sgr("36", "39"),
   error: sgr("31", "39"),
+  bold,
   border: sgr("90", "39"),
   success: sgr("32", "39"),
   warning: sgr("33", "39"),
@@ -46,6 +54,7 @@ const ember: Palette = {
   dim: fg256(243),
   accent: fg256(214),
   error: fg256(203),
+  bold,
   border: fg256(243),
   success: fg256(114),
   warning: fg256(220),
@@ -61,6 +70,7 @@ const ocean: Palette = {
   dim: fg256(245),
   accent: fg256(75),
   error: fg256(210),
+  bold,
   border: fg256(245),
   success: fg256(79),
   warning: fg256(221),
@@ -76,6 +86,7 @@ const grove: Palette = {
   dim: fg256(244),
   accent: fg256(142),
   error: fg256(167),
+  bold,
   border: fg256(244),
   success: fg256(108),
   warning: fg256(180),
@@ -108,14 +119,18 @@ const dark: Palette = {
   dim: foreground(gruvbox.gray),
   accent: foreground(gruvbox.orange),
   error: foreground(gruvbox.red),
+  bold,
   border: foreground(gruvbox.bg4),
   success: foreground(gruvbox.green),
   warning: foreground(gruvbox.yellow),
   text: foreground(gruvbox.fg1),
   userMessage: foregroundOn(gruvbox.fg1, gruvbox.bg0Hard),
+  toolBackground: background("#202324"),
   diffAdded: foreground(gruvbox.green),
   diffRemoved: foreground(gruvbox.red),
   diffContext: foreground(gruvbox.gray),
+  diffAddedBackground: background("#24332b"),
+  diffRemovedBackground: background("#35282c"),
   mdHeading: foreground(gruvbox.yellow),
   mdCode: foreground(gruvbox.aqua),
   mdCodeBlockBorder: foreground(gruvbox.bg4),
@@ -142,10 +157,11 @@ const plain: Palette = {
   dim: (text) => text,
   accent: (text) => text,
   error: (text) => text,
+  bold: (text) => text,
 };
 
 export const THEMES: Readonly<Record<string, Palette>> = {
-  "dark": dark,
+  dark,
   kepler,
   ember,
   ocean,

@@ -6,9 +6,9 @@
 // against the live Azure endpoint before anything claims success.
 
 import {
+  type AuthContext,
   AZURE_OPENAI_PROVIDER_ID,
   azureOpenAiAuthMethod,
-  type AuthContext,
   type CredentialStore,
   login,
   normalizeAzureBaseUrl,
@@ -57,8 +57,8 @@ export class LoginDialog {
     this.options = options;
   }
 
-  render(): string[] {
-    const { palette, width } = this.options;
+  render(width = this.options.width): string[] {
+    const { palette } = this.options;
     const { dim, accent, error } = palette;
     const rows: string[] = [
       dim("Saved to ~/.kepler/credentials.json (0600), redacted from logs."),

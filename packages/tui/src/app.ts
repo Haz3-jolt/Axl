@@ -7,11 +7,11 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import {
-  supportedThinkingLevels,
-  THINKING_LEVELS,
   type AuthContext,
   type CredentialStore,
   type ModelInfo,
+  supportedThinkingLevels,
+  THINKING_LEVELS,
 } from "@kepler/ai";
 import type { DaemonClient, SessionSnapshot } from "@kepler/daemon";
 import type {
@@ -29,8 +29,11 @@ import {
   type Component,
   type CursorPlacement,
   DifferentialScreen,
+  SYNC_BEGIN,
+  SYNC_END,
   truncateToWidth,
   visibleWidth,
+  wrapLine,
 } from "./render.ts";
 import { DEFAULT_THEME, THEMES, themeNames } from "./themes.ts";
 import { PLAIN_PALETTE, SessionView } from "./transcript.ts";
@@ -207,6 +210,7 @@ const KEY_HELP: readonly string[] = [
 interface OutputStream {
   write(data: string): unknown;
   columns?: number;
+  rows?: number;
   on?(event: "resize", listener: () => void): unknown;
   off?(event: "resize", listener: () => void): unknown;
 }
@@ -241,19 +245,25 @@ export interface KeplerAppOptions {
 }
 
 interface Modal {
-  render(): string[];
+  render(width: number): string[];
   handleKey(data: string): void;
   cursor?(): CursorPlacement | undefined;
 }
+
+type TranscriptEntry =
+  | { readonly kind: "event"; readonly event: CanonicalEvent }
+  | { readonly kind: "lines"; readonly lines: readonly string[] };
 
 /** A terminal projection over one daemon-owned Kepler session. */
 export class KeplerApp {
   readonly sessionId: string;
   private readonly options: KeplerAppOptions;
   private readonly screen: DifferentialScreen;
-  private readonly view: SessionView;
+  private view: SessionView;
   private readonly editor = new LineEditor();
   private width: number;
+  private height: number;
+  private readonly transcript: TranscriptEntry[] = [];
   private notice: string | undefined;
   private modal: Modal | null = null;
   private stopped = false;
@@ -277,22 +287,32 @@ export class KeplerApp {
 
   private readonly resizeListener = (): void => {
     const width = this.detectWidth();
-    if (width === this.width) return;
+    const height = this.detectHeight();
+    const widthChanged = width !== this.width;
+    const heightChanged = height !== this.height;
+    if (!widthChanged && !heightChanged) return;
     this.width = width;
-    this.screen.setWidth(width);
-    this.view.setWidth(width);
-    this.redraw();
+    this.height = height;
+    if (widthChanged || (heightChanged && process.env.TERMUX_VERSION === undefined)) {
+      this.rebuildAfterResize();
+    } else {
+      this.screen.setWidth(width);
+      this.view.setWidth(width);
+      this.redraw();
+    }
   };
 
   private constructor(
     options: KeplerAppOptions,
     sessionId: string,
     width: number,
+    height: number,
     branch: string | undefined,
   ) {
     this.options = options;
     this.sessionId = sessionId;
     this.width = width;
+    this.height = height;
     this.screen = new DifferentialScreen(width);
     this.branch = branch;
     this.currentTheme = options.color === false ? "plain" : (options.theme ?? DEFAULT_THEME);
@@ -323,7 +343,14 @@ export class KeplerApp {
 
     const width =
       options.output.columns && options.output.columns > 0 ? options.output.columns : 80;
-    const app = new KeplerApp(options, snapshot.sessionId, width, await readGitBranch(options.cwd));
+    const height = options.output.rows && options.output.rows > 0 ? options.output.rows : 24;
+    const app = new KeplerApp(
+      options,
+      snapshot.sessionId,
+      width,
+      height,
+      await readGitBranch(options.cwd),
+    );
     app.commitLines(app.welcomeLines(options.cwd, options.sessionId !== undefined), false);
     for (const event of snapshot.events) app.commitEvent(event, false);
     const lastEventId = snapshot.events.at(-1)?.id;
@@ -364,6 +391,10 @@ export class KeplerApp {
       : 80;
   }
 
+  private detectHeight(): number {
+    return this.options.output.rows && this.options.output.rows > 0 ? this.options.output.rows : 24;
+  }
+
   private welcomeLines(cwd: string, resumed: boolean): string[] {
     const { accent, dim } = this.view.palette;
     return [
@@ -376,7 +407,7 @@ export class KeplerApp {
 
   private liveFrame(): { components: readonly Component[]; cursor?: CursorPlacement } {
     if (this.modal !== null) {
-      const lines = this.modal.render();
+      const lines = this.modal.render(this.width);
       const cursor = this.modal.cursor?.();
       return { components: [{ render: () => lines }], ...(cursor === undefined ? {} : { cursor }) };
     }
@@ -467,6 +498,7 @@ export class KeplerApp {
   private commitEvent(event: CanonicalEvent, redraw = true): void {
     if (this.seenEventIds.has(event.id)) return;
     this.seenEventIds.add(event.id);
+    this.transcript.push({ kind: "event", event });
     const lines = this.view.apply(event);
     if (event.type === "tool.result") void this.refreshBranch();
     if (event.type === "interaction.requested") {
@@ -483,7 +515,7 @@ export class KeplerApp {
         this.openNextInteraction();
       }
     }
-    if (lines.length > 0) this.commitLines(lines, false);
+    if (lines.length > 0) this.commitLines(lines, false, false);
     if (redraw) this.redraw();
   }
 
@@ -622,12 +654,33 @@ export class KeplerApp {
     void this.drainQueue();
   }
 
-  private commitLines(lines: readonly string[], redraw = true): void {
+  private commitLines(lines: readonly string[], redraw = true, remember = true): void {
     if (lines.length > 0) {
+      if (remember) this.transcript.push({ kind: "lines", lines: [...lines] });
       this.options.output.write(this.screen.clear());
       this.options.output.write(`${lines.join("\n")}\n`);
     }
     if (redraw) this.redraw();
+  }
+
+  private rebuildAfterResize(): void {
+    const previous = this.view;
+    const next = new SessionView(this.width, previous.palette, this.options.modelCatalog);
+    next.thinkingDisplay = previous.thinkingDisplay;
+    next.toolOutputDisplay = previous.toolOutputDisplay;
+    const lines: string[] = [];
+    for (const entry of this.transcript) {
+      if (entry.kind === "event") lines.push(...next.apply(entry.event));
+      else lines.push(...entry.lines.flatMap((line) => wrapLine(line, this.width)));
+    }
+    next.working = previous.working;
+    next.elapsedSeconds = previous.elapsedSeconds;
+    next.tokensPerSecond = previous.tokensPerSecond;
+    this.view = next;
+    this.screen.reset(this.width);
+    const history = lines.length === 0 ? "" : `${lines.join("\r\n")}\r\n`;
+    this.options.output.write(`${SYNC_BEGIN}\x1b[2J\x1b[H\x1b[3J${history}${SYNC_END}`);
+    this.redraw();
   }
 
   private selectTheme(name: string): void {

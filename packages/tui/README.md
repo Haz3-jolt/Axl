@@ -12,7 +12,7 @@ The TUI includes:
 - Searchable model, thinking-level, and theme selectors
 - Model and thinking changes recorded by the daemon
 - Queued follow-up prompts while a turn is running
-- Markdown, syntax highlighting, bordered prompts, compact tool output, bounded shell output, adaptive diffs, and labeled thinking blocks
+- Markdown, syntax highlighting, bordered prompts, compact tool output, bounded shell output, and line-numbered diffs that switch between unified and split views
 - A framed editor showing token use, cache rate, cost, context, model, effort, path, Git branch, and local throughput
 - The built-in `dark` theme
 - Responsive resizing, interruption, detach, reconnect, and resume

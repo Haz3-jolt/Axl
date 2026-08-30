@@ -12,14 +12,18 @@ export interface Palette {
   dim(text: string): string;
   accent(text: string): string;
   error(text: string): string;
+  bold?(text: string): string;
   border?(text: string): string;
   success?(text: string): string;
   warning?(text: string): string;
   text?(text: string): string;
   userMessage?(text: string): string;
+  toolBackground?(text: string): string;
   diffAdded?(text: string): string;
   diffRemoved?(text: string): string;
   diffContext?(text: string): string;
+  diffAddedBackground?(text: string): string;
+  diffRemovedBackground?(text: string): string;
   thinking?(level: string, text: string): string;
   mdHeading?(text: string): string;
   mdCode?(text: string): string;
@@ -35,12 +39,14 @@ export const PLAIN_PALETTE: Palette = {
   dim: (text) => text,
   accent: (text) => text,
   error: (text) => text,
+  bold: (text) => text,
 };
 
 export const ANSI_PALETTE: Palette = {
   dim: (text) => `\x1b[2m${text}\x1b[22m`,
   accent: (text) => `\x1b[36m${text}\x1b[39m`,
   error: (text) => `\x1b[31m${text}\x1b[39m`,
+  bold: (text) => `\x1b[1m${text}\x1b[22m`,
   border: (text) => `\x1b[90m${text}\x1b[39m`,
   success: (text) => `\x1b[32m${text}\x1b[39m`,
   warning: (text) => `\x1b[33m${text}\x1b[39m`,

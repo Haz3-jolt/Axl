@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test, { type TestContext } from "node:test";
 
-import { KeplerDaemon, DaemonClient, type SessionInteractionRequest } from "@kepler/daemon";
+import { DaemonClient, KeplerDaemon, type SessionInteractionRequest } from "@kepler/daemon";
 import { type ModelPort, ToolRegistry } from "@kepler/kernel";
 import type { JsonObject, ModelStreamEvent, Usage } from "@kepler/protocol";
 
@@ -65,9 +65,13 @@ async function startStack(
   return { socketPath, directory };
 }
 
-function captureOutput(): { output: PassThrough & { columns?: number }; text: () => string } {
-  const output = new PassThrough() as PassThrough & { columns?: number };
+function captureOutput(): {
+  output: PassThrough & { columns?: number; rows?: number };
+  text: () => string;
+} {
+  const output = new PassThrough() as PassThrough & { columns?: number; rows?: number };
   output.columns = 100;
+  output.rows = 24;
   let text = "";
   output.on("data", (chunk: Buffer) => {
     text += chunk.toString("utf8");
@@ -136,6 +140,35 @@ test("a full round trip: type, send, render the reply, detach, resume", async (c
   assert.match(resumed.text(), /│ hello kepler/);
   assert.match(resumed.text(), /the answer/);
   resumedApp.stop();
+});
+
+test("terminal resize clears and rebuilds the complete view", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await KeplerApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+  });
+
+  input.write("keep this\r");
+  await until(() => text().includes("the answer"), "assistant reply");
+  const beforeWidth = text().length;
+  output.columns = 60;
+  output.emit("resize");
+  const widthRender = text().slice(beforeWidth);
+  assert.equal(widthRender.includes("\x1b[2J\x1b[H\x1b[3J"), true);
+  assert.match(widthRender, /keep this/);
+  assert.match(widthRender, /the answer/);
+
+  const beforeHeight = text().length;
+  output.rows = 30;
+  output.emit("resize");
+  assert.equal(text().slice(beforeHeight).includes("\x1b[2J\x1b[H\x1b[3J"), true);
+  app.stop();
 });
 
 test("editing, /quit, and busy notices behave", async (context) => {

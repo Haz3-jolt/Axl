@@ -54,6 +54,14 @@ test("a width change forces a full repaint", () => {
   assert.equal(frame, `${SYNC_BEGIN}\x1b[1F\x1b[2Ksame\n${SYNC_END}`);
 });
 
+test("reset forgets stale terminal geometry after an external clear", () => {
+  const screen = new DifferentialScreen(80);
+  screen.frame(lines("old", "content"));
+  screen.reset(40);
+  assert.equal(screen.liveHeight, 0);
+  assert.equal(screen.frame(lines("new")), `${SYNC_BEGIN}\x1b[2Knew\n${SYNC_END}`);
+});
+
 test("wrapLine hard-wraps ANSI and Unicode text by terminal-cell width", () => {
   assert.deepEqual(wrapLine("abcdef", 3), ["abc", "def"]);
   assert.deepEqual(wrapLine("abc", 3), ["abc"]);
