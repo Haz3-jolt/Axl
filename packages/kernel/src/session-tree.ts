@@ -1,12 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  type CanonicalEvent,
-  type EventId,
-  type SessionId,
-  parseSessionId,
-} from "@kepler/protocol";
+import { type CanonicalEvent, type EventId, type SessionId, parseSessionId } from "@axl/protocol";
 
 export class SessionTreeIntegrityError extends Error {
   readonly index: number;

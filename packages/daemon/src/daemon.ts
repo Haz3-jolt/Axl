@@ -13,7 +13,7 @@ import {
   type ServerMessage,
   WIRE_PROTOCOL_VERSION,
   type WireRequest,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 import { DaemonError, SessionManager, type SessionManagerOptions } from "./session-manager.ts";
 
@@ -74,7 +74,7 @@ async function removeStaleSocket(path: string): Promise<void> {
 }
 
 /** The local daemon is the sole owner of session loops, logs, and operations. */
-export class KeplerDaemon {
+export class AxlDaemon {
   readonly sessions: SessionManager;
   private readonly socketPath: string;
   private server: Server | undefined;

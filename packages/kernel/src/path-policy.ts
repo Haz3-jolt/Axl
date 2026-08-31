@@ -25,7 +25,7 @@ export class SandboxViolationError extends Error {
 export interface WorkspacePolicy {
   /** Canonical workspace root; the only writable subtree. */
   readonly workspace: string;
-  /** Subtrees invisible to tools in both directions, e.g. `~/.kepler`. */
+  /** Subtrees invisible to tools in both directions, e.g. `~/.axl`. */
   readonly protectedPaths: readonly string[];
 }
 

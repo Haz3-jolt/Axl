@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import type { JsonObject } from "@kepler/protocol";
+import type { JsonObject } from "@axl/protocol";
 
 import { assertReadAllowed, type WorkspacePolicy } from "../path-policy.ts";
 import type { KernelTool, ToolExecutionResult } from "../tools.ts";

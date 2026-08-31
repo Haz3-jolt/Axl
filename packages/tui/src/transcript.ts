@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelInfo } from "@kepler/ai";
-import type { CanonicalEvent } from "@kepler/protocol";
+import type { ModelInfo } from "@axl/ai";
+import type { CanonicalEvent } from "@axl/protocol";
 
 import { renderMarkdown } from "./markdown.ts";
 import { sanitizeTerminalText, truncateToWidth, visibleWidth, wrapLine } from "./render.ts";

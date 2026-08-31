@@ -7,12 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import {
-  type JsonObject,
-  type ModelStreamEvent,
-  parseSessionId,
-  type Usage,
-} from "@kepler/protocol";
+import { type JsonObject, type ModelStreamEvent, parseSessionId, type Usage } from "@axl/protocol";
 
 import {
   AgentSession,
@@ -79,7 +74,7 @@ async function makeSession(
   tools = new ToolRegistry(),
   options: { system?: string; maxModelCallsPerTurn?: number } = {},
 ): Promise<{ session: AgentSession; path: string; tools: ToolRegistry }> {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-agent-session-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-agent-session-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "session.jsonl");
   const session = await AgentSession.open(path, sessionId, {
@@ -110,7 +105,7 @@ function callTool(callId: string, input: JsonObject): readonly ModelStreamEvent[
 test("runs a plain turn and persists the canonical events", async (context) => {
   const port = makePort([say("hello")]);
   const { session } = await makeSession(context, port, new ToolRegistry(), {
-    system: "You are Kepler.",
+    system: "You are Axl.",
   });
 
   const result = await session.runTurn([{ type: "text", text: "hi" }]);
@@ -127,7 +122,7 @@ test("runs a plain turn and persists the canonical events", async (context) => {
     ]);
     assert.deepEqual(assistant.payload.usage, usage);
   }
-  assert.equal(port.requests[0]?.system, "You are Kepler.");
+  assert.equal(port.requests[0]?.system, "You are Axl.");
   assert.equal(port.requests[0]?.messages.length, 1);
 
   const reread = await session.log.read();
@@ -360,7 +355,7 @@ test("the turn model-call limit fails loudly", async (context) => {
 test("the extension host seam activates and disposes with the session", async (context) => {
   const lifecycle: string[] = [];
   const port = makePort([]);
-  const directory = await mkdtemp(join(tmpdir(), "kepler-agent-session-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-agent-session-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const session = await AgentSession.open(join(directory, "session.jsonl"), sessionId, {
     model: port,

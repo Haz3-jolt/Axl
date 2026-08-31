@@ -15,7 +15,7 @@ import {
   parseEvent,
   parseEventId,
   parseSessionId,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 import { JsonlEventLog, SessionTree, SessionTreeIntegrityError } from "../src/index.ts";
 
@@ -158,7 +158,7 @@ test("fails loudly when querying an event outside the tree", () => {
 });
 
 test("rebuilds the identical tree from a persisted branched log", async (context: TestContext) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-session-tree-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-session-tree-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "session.jsonl");
 

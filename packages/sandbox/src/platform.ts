@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { KernelTool, ShellToolOptions, WorkspacePolicy } from "@kepler/kernel";
-import type { EventPayloadMap } from "@kepler/protocol";
+import type { KernelTool, ShellToolOptions, WorkspacePolicy } from "@axl/kernel";
+import type { EventPayloadMap } from "@axl/protocol";
 
 import {
   bubblewrapConfiguredPayload,

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import { type ModelStreamEvent, parseSessionId, type Usage } from "@kepler/protocol";
+import { type ModelStreamEvent, parseSessionId, type Usage } from "@axl/protocol";
 
 import {
   AgentSession,
@@ -49,7 +49,7 @@ function toolTurn(callId: string, name: string, input: object): readonly ModelSt
 }
 
 async function makeFixtureRepo(context: TestContext): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-phase3-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-phase3-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const repo = join(directory, "repo");
   await mkdir(repo, { recursive: true });
@@ -83,7 +83,7 @@ test("phase 3 exit gate: inspect, edit, run, and stop over a fixture repository"
     model: port,
     tools,
     cwd: repo,
-    system: "You are Kepler.",
+    system: "You are Axl.",
   });
   const result = await session.runTurn([
     { type: "text", text: "Change the greeting to hi and verify it." },

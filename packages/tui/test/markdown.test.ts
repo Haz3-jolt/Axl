@@ -39,7 +39,7 @@ test("long markdown lines hard-wrap to the viewport", () => {
 
 test("code fences syntax-highlight known languages", async () => {
   const { highlightLine, THEMES } = await import("../src/index.ts");
-  const palette = THEMES.kepler as NonNullable<(typeof THEMES)["kepler"]>;
+  const palette = THEMES.axl as NonNullable<(typeof THEMES)["axl"]>;
   const highlighted = highlightLine('const x = "hi"; // done', "ts", palette);
   assert.equal(highlighted.includes("const"), true);
   assert.notEqual(highlighted, 'const x = "hi"; // done'); // styling applied

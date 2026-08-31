@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Set up Kepler
+# Set up Axl
 
 ## Requirements
 
@@ -43,38 +43,38 @@ You can also set `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_RESOURCE_NAME`, and `
 Start a new session or resume an existing one:
 
 ```bash
-kepler
-kepler <session-id>
+axl
+axl <session-id>
 ```
 
-The client uses `~/.kepler/kepler.sock`. It starts a detached local daemon when one is not already running. Use `kepler daemon` to keep the daemon in the foreground for troubleshooting. Restart an existing daemon after changing exported environment variables because a running process cannot inherit later shell changes.
+The client uses `~/.axl/axl.sock`. It starts a detached local daemon when one is not already running. Use `axl daemon` to keep the daemon in the foreground for troubleshooting. Restart an existing daemon after changing exported environment variables because a running process cannot inherit later shell changes.
 
 ## Global and project configuration
 
-Kepler reads global configuration from `~/.kepler`:
+Axl reads global configuration from `~/.axl`:
 
 - `AGENTS.md` for global instructions
 - `skills/<name>/SKILL.md` for global Agent Skills
 - `mcp.json` for global MCP servers
-- `credentials.json` for credentials managed by `kepler login`
+- `credentials.json` for credentials managed by `axl login`
 - `settings.json` for the selected model, thinking level, and theme
 
-Credentials and settings apply in every workspace. Kepler also reads `AGENTS.md`, `.kepler/skills`, and `.kepler/mcp.json` from the workspace root. A project skill or MCP server replaces the global entry with the same name. Reload the session after changing instructions, skills, or MCP configuration.
+Credentials and settings apply in every workspace. Axl also reads `AGENTS.md`, `.axl/skills`, and `.axl/mcp.json` from the workspace root. A project skill or MCP server replaces the global entry with the same name. Reload the session after changing instructions, skills, or MCP configuration.
 
 ## Add Agent Skills
 
 Put skills in either location:
 
 ```text
-~/.kepler/skills/<name>/SKILL.md
-<workspace>/.kepler/skills/<name>/SKILL.md
+~/.axl/skills/<name>/SKILL.md
+<workspace>/.axl/skills/<name>/SKILL.md
 ```
 
-A project skill overrides a global skill with the same name. Kepler validates the [Agent Skills format](https://agentskills.io/specification), adds skill metadata to the startup prompt, and loads full instructions only when the model selects that skill.
+A project skill overrides a global skill with the same name. Axl validates the [Agent Skills format](https://agentskills.io/specification), adds skill metadata to the startup prompt, and loads full instructions only when the model selects that skill.
 
 ## Add MCP servers
 
-Put global MCP configuration in `~/.kepler/mcp.json` or project configuration in `<workspace>/.kepler/mcp.json`. Kepler supports MCP `2025-11-25` over stdio and Streamable HTTP, including OAuth. See [`packages/extensions/mcp/README.md`](packages/extensions/mcp/README.md) for the schema and security rules.
+Put global MCP configuration in `~/.axl/mcp.json` or project configuration in `<workspace>/.axl/mcp.json`. Axl supports MCP `2025-11-25` over stdio and Streamable HTTP, including OAuth. See [`packages/extensions/mcp/README.md`](packages/extensions/mcp/README.md) for the schema and security rules.
 
 ## Development commands
 

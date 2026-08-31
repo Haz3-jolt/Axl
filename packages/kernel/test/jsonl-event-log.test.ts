@@ -15,7 +15,7 @@ import {
   parseEvent,
   parseEventId,
   parseSessionId,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 import {
   EventLogCorruptionError,
@@ -51,7 +51,7 @@ async function openTemporaryLog(
   path: string;
   log: JsonlEventLog;
 }> {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-event-log-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-event-log-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "session.jsonl");
   const { log } = await JsonlEventLog.open(path, sessionId, options);

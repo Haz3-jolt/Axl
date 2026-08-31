@@ -1,16 +1,16 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# `@kepler/tui`
+# `@axl/tui`
 
-This package contains Kepler's interactive terminal client. Its rendering model follows behavior studied in Pi at commit `6c87d9a`, but the implementation is native to Kepler. Components produce lines, the differential renderer updates only the live tail, and completed output remains in normal terminal scrollback. The client does not use an alternate screen or curses library.
+This package contains Axl's interactive terminal client. Its rendering model follows behavior studied in Pi at commit `6c87d9a`, but the implementation is native to Axl. Components produce lines, the differential renderer updates only the live tail, and completed output remains in normal terminal scrollback. The client does not use an alternate screen or curses library.
 
 The TUI includes:
 
 - Unicode-aware multiline editing, soft wrapping, paste handling, history, word movement, undo, and a kill ring
 - Kitty keyboard support with fallbacks for older terminals
 - Full-width searchable model, thinking-level, and theme selectors
-- Global model, thinking, and theme preferences in `~/.kepler/settings.json`
+- Global model, thinking, and theme preferences in `~/.axl/settings.json`
 - Model and thinking changes recorded by the daemon
 - Queued follow-up prompts while a turn is running
 - Markdown, syntax highlighting, bordered prompts, compact tool output, bounded shell output, and line-numbered diffs that switch between unified and split views

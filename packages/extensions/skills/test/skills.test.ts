@@ -10,7 +10,7 @@ import test from "node:test";
 import { discoverSkills, loadSkill, makeSkillTool, SkillValidationError } from "../src/index.ts";
 
 async function fixture(name: string, source: string): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "kepler-skill-"));
+  const root = await mkdtemp(join(tmpdir(), "axl-skill-"));
   const directory = join(root, name);
   await mkdir(directory);
   await writeFile(join(directory, "SKILL.md"), source);
@@ -51,13 +51,13 @@ test("rejects invalid names and directory mismatches", async (context) => {
 });
 
 test("project skills override global skills and resources cannot escape", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "kepler-skills-"));
+  const root = await mkdtemp(join(tmpdir(), "axl-skills-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const global = join(root, "global");
   const project = join(root, "project");
   for (const [base, description] of [
     [global, "global instructions"],
-    [join(project, ".kepler", "skills"), "project instructions"],
+    [join(project, ".axl", "skills"), "project instructions"],
   ] as const) {
     const directory = join(base, "review");
     await mkdir(join(directory, "references"), { recursive: true });
@@ -69,7 +69,7 @@ test("project skills override global skills and resources cannot escape", async 
   }
   const outside = join(root, "outside.txt");
   await writeFile(outside, "outside");
-  await symlink(outside, join(project, ".kepler", "skills", "review", "references", "escape.md"));
+  await symlink(outside, join(project, ".axl", "skills", "review", "references", "escape.md"));
 
   const skills = await discoverSkills({ cwd: project, globalDirectory: global });
   assert.equal(skills.length, 1);
@@ -95,14 +95,14 @@ test("project skills override global skills and resources cannot escape", async 
 });
 
 test("discovery rejects skill-directory symlink escapes and invalid UTF-8", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "kepler-skills-"));
+  const root = await mkdtemp(join(tmpdir(), "axl-skills-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const project = join(root, "project");
   const outside = join(root, "escape");
-  await mkdir(join(project, ".kepler", "skills"), { recursive: true });
+  await mkdir(join(project, ".axl", "skills"), { recursive: true });
   await mkdir(outside);
   await writeFile(join(outside, "SKILL.md"), "---\nname: escape\ndescription: escaped\n---\n");
-  await symlink(outside, join(project, ".kepler", "skills", "escape"));
+  await symlink(outside, join(project, ".axl", "skills", "escape"));
   await assert.rejects(discoverSkills({ cwd: project }), /escapes its discovery root/);
 
   const invalid = join(root, "invalid");

@@ -7,7 +7,7 @@ These decisions set the package and compatibility boundaries established during 
 
 ## Names
 
-`Kepler`, the `@kepler/*` scope, and the `kepler` executable are working names. Packages remain private until naming is reviewed for the first public release.
+`Axl`, the `@axl/*` scope, and the `axl` executable are working names. Packages remain private until naming is reviewed for the first public release.
 
 ## Dependencies
 
@@ -22,7 +22,7 @@ These rules are stricter than the reference projects inspected for Phase 0:
 - Pi at `6c87d9a026677b601e8278030dcf1ad97fe0bd86` has third-party runtime dependencies in its agent package and uses TypeBox in its protocol package.
 - DSH at `cd5ef8148158c3a752a658978873241fdf8e2bbc` builds its loop from several workspace packages and uses Schemastery at runtime.
 
-Kepler uses both projects as behavioral references, not as package-layout templates.
+Axl uses both projects as behavioral references, not as package-layout templates.
 
 ## Event identity
 

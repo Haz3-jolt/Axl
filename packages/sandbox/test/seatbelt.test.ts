@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import type { WorkspacePolicy } from "@kepler/kernel";
+import type { WorkspacePolicy } from "@axl/kernel";
 
 import {
   buildSeatbeltArgv,
@@ -23,7 +23,7 @@ import {
 
 const policy: WorkspacePolicy = {
   workspace: "/Users/dev/repo",
-  protectedPaths: ["/Users/dev/.kepler"],
+  protectedPaths: ["/Users/dev/.axl"],
 };
 
 test("the profile allows by default and denies network, writes, and protected paths", () => {
@@ -36,8 +36,8 @@ test("the profile allows by default and denies network, writes, and protected pa
   assert.match(lines[4] ?? "", /^\(allow file-write\* \(subpath "\/Users\/dev\/repo"\)/);
   assert.match(lines[4] ?? "", /"\/private\/tmp"/);
   // Protected denies come last, so nothing re-allows them.
-  assert.equal(lines[5], '(deny file-write* (subpath "/Users/dev/.kepler"))');
-  assert.equal(lines[6], '(deny file-read* (subpath "/Users/dev/.kepler"))');
+  assert.equal(lines[5], '(deny file-write* (subpath "/Users/dev/.axl"))');
+  assert.equal(lines[6], '(deny file-read* (subpath "/Users/dev/.axl"))');
 });
 
 test("profile paths with quotes and backslashes are escaped", () => {
@@ -124,20 +124,20 @@ const darwin = await detectSeatbelt();
 const integration = { skip: darwin.available ? false : "seatbelt unavailable on this host" };
 
 async function makeLayout(context: TestContext) {
-  const root = await mkdtemp(join(tmpdir(), "kepler-seatbelt-"));
+  const root = await mkdtemp(join(tmpdir(), "axl-seatbelt-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, "workspace");
-  const keplerHome = join(root, "kepler-home");
+  const axlHome = join(root, "axl-home");
   await mkdir(workspace, { recursive: true });
-  await mkdir(keplerHome, { recursive: true });
-  await writeFile(join(keplerHome, "credentials.json"), '{"secret":"topsecret"}\n');
+  await mkdir(axlHome, { recursive: true });
+  await writeFile(join(axlHome, "credentials.json"), '{"secret":"topsecret"}\n');
   const tool = makeSeatbeltShellTool({
     cwd: workspace,
     overflowDirectory: join(root, "overflow"),
-    policy: { workspace, protectedPaths: [keplerHome] },
+    policy: { workspace, protectedPaths: [axlHome] },
     capabilities: darwin,
   });
-  return { root, workspace, keplerHome, tool };
+  return { root, workspace, axlHome, tool };
 }
 
 function text(result: { content: readonly { type: string; text?: string }[] }): string {
@@ -159,10 +159,10 @@ test(
   "seatbelt: protected paths are unreadable and network is denied",
   integration,
   async (context) => {
-    const { keplerHome, tool } = await makeLayout(context);
+    const { axlHome, tool } = await makeLayout(context);
     const signal = new AbortController().signal;
     const secret = await tool.execute(
-      { command: `cat ${join(keplerHome, "credentials.json")} || true` },
+      { command: `cat ${join(axlHome, "credentials.json")} || true` },
       signal,
     );
     assert.equal(text(secret).includes("topsecret"), false);

@@ -7,18 +7,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import { type ModelPort, ToolRegistry } from "@kepler/kernel";
+import { type ModelPort, ToolRegistry } from "@axl/kernel";
 import type {
   CanonicalEvent,
   ModelStreamEvent,
   SessionForkResult,
   SessionSummary,
   Usage,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 import {
   DaemonClient,
-  KeplerDaemon,
+  AxlDaemon,
   type SessionSnapshot,
   WireClientError,
   type WireEvent,
@@ -62,14 +62,14 @@ function hangingPort(): ModelPort {
 async function startDaemon(
   context: TestContext,
   port: ModelPort = replyPort(),
-): Promise<{ daemon: KeplerDaemon; socketPath: string; dataDirectory: string; cwd: string }> {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-daemon-"));
+): Promise<{ daemon: AxlDaemon; socketPath: string; dataDirectory: string; cwd: string }> {
+  const directory = await mkdtemp(join(tmpdir(), "axl-daemon-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
-  const socketPath = join(directory, "kepler.sock");
-  const daemon = new KeplerDaemon({
+  const socketPath = join(directory, "axl.sock");
+  const daemon = new AxlDaemon({
     socketPath,
     dataDirectory: join(directory, "data"),
-    runtime: () => ({ model: port, tools: new ToolRegistry(), system: "You are Kepler." }),
+    runtime: () => ({ model: port, tools: new ToolRegistry(), system: "You are Axl." }),
   });
   await daemon.start();
   context.after(() => daemon.stop());
@@ -119,7 +119,7 @@ test("a session survives daemon termination and resumes with full history", asyn
   await first.daemon.stop();
 
   // A new daemon over the same data directory owns the same sessions.
-  const daemon = new KeplerDaemon({
+  const daemon = new AxlDaemon({
     socketPath: first.socketPath,
     dataDirectory: first.dataDirectory,
     runtime: ({ cwd }) => {
@@ -204,7 +204,7 @@ test("lists, forks, clones, and resumes sessions", async (context) => {
 
   client.close();
   await first.daemon.stop();
-  const daemon = new KeplerDaemon({
+  const daemon = new AxlDaemon({
     socketPath: first.socketPath,
     dataDirectory: first.dataDirectory,
     runtime: () => ({ model: replyPort(), tools: new ToolRegistry() }),
@@ -347,7 +347,7 @@ test("dispose removes the session and errors surface typed codes", async (contex
 
 test("refuses to unlink a live daemon socket or a regular file", async (context) => {
   const first = await startDaemon(context);
-  const competing = new KeplerDaemon({
+  const competing = new AxlDaemon({
     socketPath: first.socketPath,
     dataDirectory: first.dataDirectory,
     runtime: () => ({ model: replyPort(), tools: new ToolRegistry() }),
@@ -356,7 +356,7 @@ test("refuses to unlink a live daemon socket or a regular file", async (context)
 
   const regularPath = join(first.cwd, "not-a-socket");
   await writeFile(regularPath, "keep me");
-  const regular = new KeplerDaemon({
+  const regular = new AxlDaemon({
     socketPath: regularPath,
     dataDirectory: first.dataDirectory,
     runtime: () => ({ model: replyPort(), tools: new ToolRegistry() }),
@@ -365,9 +365,9 @@ test("refuses to unlink a live daemon socket or a regular file", async (context)
 });
 
 test("routes runtime interaction requests to an attached client", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-daemon-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-daemon-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
-  const socketPath = join(directory, "kepler.sock");
+  const socketPath = join(directory, "axl.sock");
   let call = 0;
   const model: ModelPort = {
     stream() {
@@ -383,7 +383,7 @@ test("routes runtime interaction requests to an attached client", async (context
       })();
     },
   };
-  const daemon = new KeplerDaemon({
+  const daemon = new AxlDaemon({
     socketPath,
     dataDirectory: join(directory, "data"),
     runtime: ({ interact }) => {
@@ -445,11 +445,11 @@ test("routes runtime interaction requests to an attached client", async (context
 });
 
 test("configuration changes rebuild and log the selected model and thinking", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-daemon-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-daemon-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
-  const socketPath = join(directory, "kepler.sock");
+  const socketPath = join(directory, "axl.sock");
   const configured: Array<{ boundary: string; model?: string; thinking?: string }> = [];
-  const daemon = new KeplerDaemon({
+  const daemon = new AxlDaemon({
     socketPath,
     dataDirectory: join(directory, "data"),
     runtime: ({ boundary, selection }) => {
@@ -498,11 +498,11 @@ test("configuration changes rebuild and log the selected model and thinking", as
 });
 
 test("reload rebuilds the runtime as a logged boundary with live subscriptions", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-daemon-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-daemon-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
-  const socketPath = join(directory, "kepler.sock");
+  const socketPath = join(directory, "axl.sock");
   const boundaries: string[] = [];
-  const daemon = new KeplerDaemon({
+  const daemon = new AxlDaemon({
     socketPath,
     dataDirectory: join(directory, "data"),
     runtime: ({ boundary }) => {

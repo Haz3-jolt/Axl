@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Contributing to Kepler
+# Contributing to Axl
 
 Contributions to code, tests, documentation, and design are welcome. Read the [Code of Conduct](CODE_OF_CONDUCT.md), [AI Policy](AI_POLICY.md), and [development guide](AGENTS.md) before contributing.
 
@@ -19,7 +19,7 @@ Fork the canonical repository, clone your fork, and add the canonical repository
 
 ```bash
 git clone <your-fork-url>
-cd kepler
+cd axl
 git remote add upstream <canonical-repository-url>
 ```
 
@@ -112,4 +112,4 @@ Use the issue forms for bugs, feature requests, and adoption targets. Report sec
 
 ## License
 
-Contributions are accepted under Apache-2.0 through DCO sign-off. Kepler does not require a contributor license agreement or copyright assignment.
+Contributions are accepted under Apache-2.0 through DCO sign-off. Axl does not require a contributor license agreement or copyright assignment.

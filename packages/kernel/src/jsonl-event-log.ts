@@ -10,7 +10,7 @@ import {
   parseEvent,
   parseSessionId,
   ProtocolValidationError,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 import { redactEventForStorage } from "./redaction.ts";
 

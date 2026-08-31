@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import type { JsonObject } from "@kepler/protocol";
+import type { JsonObject } from "@axl/protocol";
 
 import { assertWriteAllowed, type WorkspacePolicy } from "../path-policy.ts";
 import type { KernelTool, ToolExecutionResult } from "../tools.ts";
@@ -91,7 +91,7 @@ export function makeEditTool(options: EditToolOptions): KernelTool {
       const updated = replaceAll
         ? content.split(oldText).join(newText)
         : content.replace(oldText, newText);
-      const temporary = `${path}.${randomUUID()}.kepler-tmp`;
+      const temporary = `${path}.${randomUUID()}.axl-tmp`;
       try {
         const mode = (await stat(path)).mode & 0o777;
         await writeFile(temporary, updated, { encoding: "utf8", mode });

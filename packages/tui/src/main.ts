@@ -21,10 +21,10 @@ import {
   nodeAuthContext,
   OPENAI_CHAT_TOOL_DIALECT,
   resolveProviderAuth,
-} from "@kepler/ai";
-import { DaemonClient, KeplerDaemon } from "@kepler/daemon";
-import { loadMcpConfig, McpManager, mcpSecretValues } from "@kepler/extension-mcp";
-import { discoverSkills, makeSkillTool, skillCatalogSection } from "@kepler/extension-skills";
+} from "@axl/ai";
+import { DaemonClient, AxlDaemon } from "@axl/daemon";
+import { loadMcpConfig, McpManager, mcpSecretValues } from "@axl/extension-mcp";
+import { discoverSkills, makeSkillTool, skillCatalogSection } from "@axl/extension-skills";
 import {
   buildStablePrompt,
   loadAgentsInstructions,
@@ -32,12 +32,12 @@ import {
   makeReadTool,
   ToolRegistry,
   type WorkspacePolicy,
-} from "@kepler/kernel";
-import type { ThinkingLevel } from "@kepler/protocol";
-import { detectPlatformSandbox, SandboxUnavailableError } from "@kepler/sandbox";
+} from "@axl/kernel";
+import type { ThinkingLevel } from "@axl/protocol";
+import { detectPlatformSandbox, SandboxUnavailableError } from "@axl/sandbox";
 
-import { KeplerApp } from "./app.ts";
-import { type KeplerSettings, readSettings, writeSettings } from "./settings.ts";
+import { AxlApp } from "./app.ts";
+import { type AxlSettings, readSettings, writeSettings } from "./settings.ts";
 import { runAzureSetup } from "./setup.ts";
 import { themeNames } from "./themes.ts";
 
@@ -110,7 +110,7 @@ function thinkingPayload(config: ActiveConfig) {
 
 /** The local-mode runtime: Azure OpenAI plus the sandboxed canonical tools over this cwd. */
 async function makeLocalDaemon(
-  keplerHome: string,
+  axlHome: string,
   socketPath: string,
   defaults: ActiveConfig,
   store: FileCredentialStore,
@@ -122,9 +122,9 @@ async function makeLocalDaemon(
     throw new SandboxUnavailableError(sandbox.reason ?? "unknown");
   }
   const provider = createAzureOpenAiProvider({ store, context: nodeAuthContext });
-  const daemon = new KeplerDaemon({
+  const daemon = new AxlDaemon({
     socketPath,
-    dataDirectory: keplerHome,
+    dataDirectory: axlHome,
     runtime: async ({ sessionId, cwd, boundary, selection, interact }) => {
       // Resolve once here so the session log can redact every secret value.
       const resolved = await resolveProviderAuth(
@@ -140,7 +140,7 @@ async function makeLocalDaemon(
       if (!AZURE_OPENAI_MODELS.some((model) => model.modelId === active.modelId)) {
         throw new Error(`Unknown Azure OpenAI model ${active.modelId}`);
       }
-      const policy: WorkspacePolicy = { workspace: cwd, protectedPaths: [keplerHome] };
+      const policy: WorkspacePolicy = { workspace: cwd, protectedPaths: [axlHome] };
       const model = modelPortForSession(provider, {
         modelId: active.modelId,
         thinkingLevel: thinkingPayload(active).effective,
@@ -149,7 +149,7 @@ async function makeLocalDaemon(
       tools.register(
         sandbox.makeShellTool({
           cwd,
-          overflowDirectory: join(keplerHome, "tool-output"),
+          overflowDirectory: join(axlHome, "tool-output"),
           policy,
         }),
       );
@@ -158,11 +158,11 @@ async function makeLocalDaemon(
 
       const skills = await discoverSkills({
         cwd,
-        globalDirectory: join(keplerHome, "skills"),
+        globalDirectory: join(axlHome, "skills"),
       });
       if (skills.length > 0) tools.register(makeSkillTool(skills));
 
-      const mcpServers = await loadMcpConfig({ cwd, globalDirectory: keplerHome });
+      const mcpServers = await loadMcpConfig({ cwd, globalDirectory: axlHome });
       const mcpSecrets = mcpSecretValues(mcpServers);
       const mcp =
         mcpServers.length === 0
@@ -171,8 +171,8 @@ async function makeLocalDaemon(
               servers: mcpServers,
               cwd,
               sessionId,
-              stateDirectory: join(keplerHome, "mcp"),
-              blobDirectory: join(keplerHome, "blobs"),
+              stateDirectory: join(axlHome, "mcp"),
+              blobDirectory: join(axlHome, "blobs"),
               model,
               modelId: active.modelId,
               secretValues: mcpSecrets,
@@ -188,7 +188,7 @@ async function makeLocalDaemon(
         instructions: [
           ...(await loadAgentsInstructions({
             cwd,
-            globalPath: join(keplerHome, "AGENTS.md"),
+            globalPath: join(axlHome, "AGENTS.md"),
           })),
           ...(skillSection === undefined ? [] : [skillSection]),
         ],
@@ -227,7 +227,7 @@ async function connectOrStartDaemon(input: {
     return await DaemonClient.connect(input.socketPath);
   } catch {
     const entry = process.argv[1];
-    if (entry === undefined) throw new Error("Cannot locate the Kepler executable");
+    if (entry === undefined) throw new Error("Cannot locate the Axl executable");
     const child = spawn(
       process.execPath,
       [
@@ -256,22 +256,22 @@ async function connectOrStartDaemon(input: {
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
     }
   }
-  throw new Error("Kepler daemon did not start", { cause: lastError });
+  throw new Error("Axl daemon did not start", { cause: lastError });
 }
 
 async function main(): Promise<void> {
   const cli = parseArguments(process.argv.slice(2));
-  const keplerHome = join(homedir(), ".kepler");
-  await mkdir(keplerHome, { recursive: true, mode: 0o700 });
-  const socketPath = cli.socket ?? join(keplerHome, "kepler.sock");
-  const store = new FileCredentialStore(join(keplerHome, "credentials.json"));
+  const axlHome = join(homedir(), ".axl");
+  await mkdir(axlHome, { recursive: true, mode: 0o700 });
+  const socketPath = cli.socket ?? join(axlHome, "axl.sock");
+  const store = new FileCredentialStore(join(axlHome, "credentials.json"));
 
   if (cli.command === "login") {
     await runAzureSetup(process.stdin, process.stdout, store, nodeAuthContext);
     process.exit(0);
   }
 
-  const settingsPath = join(keplerHome, "settings.json");
+  const settingsPath = join(axlHome, "settings.json");
   let settings = await readSettings(settingsPath);
   const active: ActiveConfig = {
     modelId: cli.model ?? settings.model ?? "gpt-5",
@@ -282,7 +282,7 @@ async function main(): Promise<void> {
     throw new Error(`Unknown theme ${selectedTheme} in ${settingsPath}`);
   }
   let settingsWrite = Promise.resolve();
-  const saveSettings = (update: KeplerSettings): Promise<void> => {
+  const saveSettings = (update: AxlSettings): Promise<void> => {
     settings = { ...settings, ...update };
     const snapshot = settings;
     const write = settingsWrite.then(() => writeSettings(settingsPath, snapshot));
@@ -292,7 +292,7 @@ async function main(): Promise<void> {
 
   if (cli.command === "daemon") {
     await ensureCredentials(store);
-    const daemon = await makeLocalDaemon(keplerHome, socketPath, active, store);
+    const daemon = await makeLocalDaemon(axlHome, socketPath, active, store);
     const stop = (): void => {
       void daemon.stop().finally(() => process.exit(0));
     };
@@ -314,7 +314,7 @@ async function main(): Promise<void> {
     });
   }
 
-  await KeplerApp.start({
+  await AxlApp.start({
     client,
     input: process.stdin,
     output: process.stdout,
@@ -334,6 +334,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`kepler: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.stderr.write(`axl: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(1);
 });

@@ -21,7 +21,7 @@ test("binds model choice and thinking level into kernel-shaped turns", async () 
 
   const events: ModelStreamEvent[] = [];
   for await (const event of modelPort.stream({
-    system: "You are Kepler.",
+    system: "You are Axl.",
     messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
     tools: [],
   })) {
@@ -33,7 +33,7 @@ test("binds model choice and thinking level into kernel-shaped turns", async () 
   const request = provider.requests[0];
   assert.equal(request?.modelId, "fake-model");
   assert.equal(request?.thinkingLevel, "high");
-  assert.equal(request?.system, "You are Kepler.");
+  assert.equal(request?.system, "You are Axl.");
 });
 
 test("normalization guarantees a terminal even when the provider misbehaves", async () => {

@@ -4,7 +4,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import type { JsonObject } from "@kepler/protocol";
+import type { JsonObject } from "@axl/protocol";
 
 import { assertReadAllowed, type WorkspacePolicy } from "../path-policy.ts";
 import type { KernelTool, ToolExecutionResult } from "../tools.ts";

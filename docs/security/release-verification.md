@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Verify a Kepler release
+# Verify an Axl release
 
-Kepler has not published a release. Source archives and local builds are not signed release artifacts.
+Axl has not published a release. Source archives and local builds are not signed release artifacts.
 
 Before the first release, the workflow must:
 

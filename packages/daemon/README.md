@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# `@kepler/daemon`
+# `@axl/daemon`
 
 The daemon owns sessions, agent loops, event logs, and active operations. Clients connect through a local Unix socket, receive a snapshot, and follow the live event stream. They do not keep their own copy of the agent loop.
 

@@ -1,13 +1,13 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kepler
+# Axl
 
-Kepler is an agent harness that works with existing tools, models, and client setups. A single daemon owns each session, while terminal and future clients render the same event stream.
+Axl, short for Axolotl, is an agent harness that works with existing tools, models, and client setups. A single daemon owns each session, while terminal and future clients render the same event stream.
 
 **Current status:** phases 0 through 4 of the [implementation plan](IMPLEMENTATION_PLAN.md) are complete. The TUI, Agent Skills, and MCP support were brought forward from later phases. Other later-phase work has not started.
 
-## Run Kepler locally
+## Run Axl locally
 
 You need:
 
@@ -17,27 +17,27 @@ You need:
 - An Azure OpenAI API key and endpoint
 
 ```bash
-git clone https://github.com/Haz3-jolt/Kepler
-cd Kepler
+git clone https://github.com/Haz3-jolt/Axl
+cd Axl
 pnpm install --frozen-lockfile
 pnpm run install:cli
 
 export AZURE_OPENAI_API_KEY=...
 export AZURE_OPENAI_BASE_URL=https://your-resource.openai.azure.com/
-kepler
+axl
 ```
 
-The `kepler` command connects to the local daemon and starts one in the background when necessary. Pass a session ID to resume earlier work:
+The `axl` command connects to the local daemon and starts one in the background when necessary. Pass a session ID to resume earlier work:
 
 ```bash
-kepler <session-id>
-kepler --cwd ~/code/project
-kepler daemon
+axl <session-id>
+axl --cwd ~/code/project
+axl daemon
 ```
 
 The TUI supports multiline editing, model and theme selection, queued prompts, compact tool output, session metrics, and terminal scrollback. Run `/help` for commands and keys. Run `/quit` to detach without stopping the session.
 
-Kepler will not run shell tools when the required sandbox is unavailable.
+Axl will not run shell tools when the required sandbox is unavailable.
 
 ## Packages
 
@@ -72,4 +72,4 @@ reuse lint
 
 ## License
 
-Kepler is licensed under Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Axl is licensed under Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

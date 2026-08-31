@@ -7,13 +7,13 @@
     "rewriteRelativeImportExtensions": true,
     "baseUrl": ".",
     "paths": {
-      "@kepler/ai": ["./packages/ai/src/index.ts"],
-      "@kepler/daemon": ["./packages/daemon/src/index.ts"],
-      "@kepler/extension-mcp": ["./packages/extensions/mcp/src/index.ts"],
-      "@kepler/extension-skills": ["./packages/extensions/skills/src/index.ts"],
-      "@kepler/kernel": ["./packages/kernel/src/index.ts"],
-      "@kepler/protocol": ["./packages/protocol/src/index.ts"],
-      "@kepler/sandbox": ["./packages/sandbox/src/index.ts"]
+      "@axl/ai": ["./packages/ai/src/index.ts"],
+      "@axl/daemon": ["./packages/daemon/src/index.ts"],
+      "@axl/extension-mcp": ["./packages/extensions/mcp/src/index.ts"],
+      "@axl/extension-skills": ["./packages/extensions/skills/src/index.ts"],
+      "@axl/kernel": ["./packages/kernel/src/index.ts"],
+      "@axl/protocol": ["./packages/protocol/src/index.ts"],
+      "@axl/sandbox": ["./packages/sandbox/src/index.ts"]
     },
     "lib": ["ES2023", "ESNext.Array"],
     "strict": true,

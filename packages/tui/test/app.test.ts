@@ -8,12 +8,12 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test, { type TestContext } from "node:test";
 
-import { AZURE_OPENAI_MODELS } from "@kepler/ai";
-import { DaemonClient, KeplerDaemon, type SessionInteractionRequest } from "@kepler/daemon";
-import { type ModelPort, ToolRegistry } from "@kepler/kernel";
-import type { JsonObject, ModelStreamEvent, Usage } from "@kepler/protocol";
+import { AZURE_OPENAI_MODELS } from "@axl/ai";
+import { DaemonClient, AxlDaemon, type SessionInteractionRequest } from "@axl/daemon";
+import { type ModelPort, ToolRegistry } from "@axl/kernel";
+import type { JsonObject, ModelStreamEvent, Usage } from "@axl/protocol";
 
-import { KeplerApp } from "../src/index.ts";
+import { AxlApp } from "../src/index.ts";
 
 const usage: Usage = { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
@@ -39,16 +39,16 @@ async function startStack(
     }>,
   ) => ToolRegistry = () => new ToolRegistry(),
 ) {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-tui-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-tui-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
-  const socketPath = join(directory, "kepler.sock");
-  const daemon = new KeplerDaemon({
+  const socketPath = join(directory, "axl.sock");
+  const daemon = new AxlDaemon({
     socketPath,
     dataDirectory: join(directory, "data"),
     runtime: ({ selection, interact }) => ({
       model,
       tools: makeTools(interact),
-      system: "You are Kepler.",
+      system: "You are Axl.",
       ...(selection.modelId === undefined ? {} : { configModel: { modelId: selection.modelId } }),
       ...(selection.thinkingLevel === undefined
         ? {}
@@ -101,7 +101,7 @@ test("a full round trip: type, send, render the reply, detach, resume", async (c
   const { output, text } = captureOutput();
   let exited = false;
 
-  const app = await KeplerApp.start({
+  const app = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -117,9 +117,9 @@ test("a full round trip: type, send, render the reply, detach, resume", async (c
   assert.match(text(), /\?\/\? \(auto\)/);
   assert.match(text(), /no-model/);
 
-  input.write("hello kepler\r");
+  input.write("hello axl\r");
   await until(() => text().includes("the answer"), "assistant reply");
-  assert.match(text(), /│ hello kepler/);
+  assert.match(text(), /│ hello axl/);
   assert.match(text(), /↑1 ↓1/);
   assert.match(text(), /tok\/s/);
 
@@ -129,7 +129,7 @@ test("a full round trip: type, send, render the reply, detach, resume", async (c
 
   const resumeInput = new PassThrough();
   const resumed = captureOutput();
-  const resumedApp = await KeplerApp.start({
+  const resumedApp = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input: resumeInput,
     output: resumed.output,
@@ -138,7 +138,7 @@ test("a full round trip: type, send, render the reply, detach, resume", async (c
     color: false,
   });
   assert.equal(resumedApp.sessionId, app.sessionId);
-  assert.match(resumed.text(), /│ hello kepler/);
+  assert.match(resumed.text(), /│ hello axl/);
   assert.match(resumed.text(), /the answer/);
   resumedApp.stop();
 });
@@ -147,7 +147,7 @@ test("fork, clone, and resume switch sessions through the daemon", async (contex
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
   const { output, text } = captureOutput();
-  const app = await KeplerApp.start({
+  const app = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -189,7 +189,7 @@ test("terminal resize clears and rebuilds the complete view", async (context) =>
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
   const { output, text } = captureOutput();
-  const app = await KeplerApp.start({
+  const app = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -220,7 +220,7 @@ test("editing, /quit, and busy notices behave", async (context) => {
   const { output, text } = captureOutput();
   let exited = false;
 
-  await KeplerApp.start({
+  await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -242,7 +242,7 @@ test("command completion shows the selected command and description", async (con
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
   const { output, text } = captureOutput();
-  const app = await KeplerApp.start({
+  const app = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -282,7 +282,7 @@ test("prompts entered while working queue in order", async (context) => {
   const { socketPath, directory } = await startStack(context, queuedPort);
   const input = new PassThrough();
   const { output, text } = captureOutput();
-  const app = await KeplerApp.start({
+  const app = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -370,7 +370,7 @@ test("MCP interactions block the operation until the user responds", async (cont
   });
   const input = new PassThrough();
   const { output, text } = captureOutput();
-  const app = await KeplerApp.start({
+  const app = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -384,7 +384,7 @@ test("MCP interactions block the operation until the user responds", async (cont
 
   const resumedInput = new PassThrough();
   const resumed = captureOutput();
-  const resumedApp = await KeplerApp.start({
+  const resumedApp = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input: resumedInput,
     output: resumed.output,
@@ -406,7 +406,7 @@ test("/model opens a selector and switches the model live", async (context) => {
   const { output, text } = captureOutput();
   const switched: string[] = [];
 
-  await KeplerApp.start({
+  await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -441,7 +441,7 @@ test("/model digit selection and Esc cancel behave", async (context) => {
   const { output, text } = captureOutput();
   const switched: string[] = [];
 
-  await KeplerApp.start({
+  await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -465,12 +465,12 @@ test("/model digit selection and Esc cancel behave", async (context) => {
 
 test("/login is a dialog: fields, masked key, live Azure verification", async (context) => {
   const { socketPath, directory } = await startStack(context);
-  const { FileCredentialStore } = await import("@kepler/ai");
+  const { FileCredentialStore } = await import("@axl/ai");
   const store = new FileCredentialStore(join(directory, "credentials.json"));
   const input = new PassThrough();
   const { output, text } = captureOutput();
 
-  await KeplerApp.start({
+  await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -502,7 +502,7 @@ test("/login is a dialog: fields, masked key, live Azure verification", async (c
 
 test("/login reuses a global stored key in another workspace", async (context) => {
   const { socketPath, directory } = await startStack(context);
-  const { FileCredentialStore } = await import("@kepler/ai");
+  const { FileCredentialStore } = await import("@axl/ai");
   const store = new FileCredentialStore(join(directory, "credentials.json"));
   await store.modify("azure-openai", () =>
     Promise.resolve({
@@ -518,7 +518,7 @@ test("/login reuses a global stored key in another workspace", async (context) =
   await mkdir(workspace);
   const input = new PassThrough();
   const { output, text } = captureOutput();
-  const app = await KeplerApp.start({
+  const app = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
@@ -546,10 +546,10 @@ test("/login reuses a global stored key in another workspace", async (context) =
 });
 
 test("/reload requests a runtime rebuild and renders the boundary", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-tui-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-tui-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
-  const socketPath = join(directory, "kepler.sock");
-  const daemon = new KeplerDaemon({
+  const socketPath = join(directory, "axl.sock");
+  const daemon = new AxlDaemon({
     socketPath,
     dataDirectory: join(directory, "data"),
     runtime: ({ boundary }) => ({
@@ -571,7 +571,7 @@ test("/reload requests a runtime rebuild and renders the boundary", async (conte
 
   const input = new PassThrough();
   const { output, text } = captureOutput();
-  await KeplerApp.start({
+  await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,

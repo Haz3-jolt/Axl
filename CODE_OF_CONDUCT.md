@@ -5,7 +5,7 @@
 
 ## Our commitment
 
-Kepler should be a safe, respectful, inclusive, and technically constructive community. Harassment and discrimination are not welcome.
+Axl should be a safe, respectful, inclusive, and technically constructive community. Harassment and discrimination are not welcome.
 
 ## Expected behavior
 

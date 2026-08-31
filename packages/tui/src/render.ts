@@ -5,7 +5,7 @@
 export const SYNC_BEGIN = "\x1b[?2026h";
 export const SYNC_END = "\x1b[?2026l";
 export const RESET_LINE = "\x1b[0m\x1b]8;;\x07";
-export const CURSOR_MARKER = "\x1b_kepler_cursor\x1b\\";
+export const CURSOR_MARKER = "\x1b_axl_cursor\x1b\\";
 
 export interface Component {
   render(width: number): string[];

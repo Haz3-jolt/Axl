@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { JsonObject, JsonValue, ToolDeclaration, UserContent } from "@kepler/protocol";
+import type { JsonObject, JsonValue, ToolDeclaration, UserContent } from "@axl/protocol";
 
 export interface ToolExecutionResult {
   readonly content: readonly UserContent[];

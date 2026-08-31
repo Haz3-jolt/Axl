@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelPort } from "@kepler/kernel";
-import type { InteractionKind, JsonObject } from "@kepler/protocol";
+import type { ModelPort } from "@axl/kernel";
+import type { InteractionKind, JsonObject } from "@axl/protocol";
 
 import type { NamedMcpServerConfig } from "./config.ts";
 

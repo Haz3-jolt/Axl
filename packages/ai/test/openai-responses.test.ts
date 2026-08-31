@@ -22,7 +22,7 @@ const model = makeFakeModelInfo({
 
 const request: ModelRequest = {
   modelId: "gpt-5",
-  system: "You are Kepler.",
+  system: "You are Axl.",
   messages: [
     { role: "user", content: [{ type: "text", text: "run the tests" }] },
     {
@@ -48,7 +48,7 @@ test("encodes messages, tools, thinking, and the output-token floor", () => {
   assert.equal(body.model, "gpt-5.6-sol");
   assert.equal(body.stream, true);
   assert.equal(body.store, false);
-  assert.equal(body.instructions, "You are Kepler.");
+  assert.equal(body.instructions, "You are Axl.");
   assert.equal(body.max_output_tokens, 16); // floor of 16
   assert.deepEqual(body.reasoning, { effort: "xhigh" });
   assert.deepEqual(body.input, [

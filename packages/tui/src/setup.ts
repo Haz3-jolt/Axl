@@ -16,7 +16,7 @@ import {
   parseDeploymentMap,
   resolveProviderAuth,
   verifyAzureOpenAiAuth,
-} from "@kepler/ai";
+} from "@axl/ai";
 
 import { decodeOneKey } from "./editor.ts";
 
@@ -115,7 +115,7 @@ export async function runAzureSetup(
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   output.write(
-    "\nAzure OpenAI setup: saved to ~/.kepler/credentials.json (0600), redacted from logs.\n\n",
+    "\nAzure OpenAI setup: saved to ~/.axl/credentials.json (0600), redacted from logs.\n\n",
   );
 
   for (let attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt += 1) {
@@ -176,7 +176,5 @@ export async function runAzureSetup(
     );
     if (attempt < VERIFY_ATTEMPTS) output.write("  Let's try again.\n\n");
   }
-  output.write(
-    "\n  Credentials saved but NOT verified. Fix them with /login or `kepler login`.\n\n",
-  );
+  output.write("\n  Credentials saved but NOT verified. Fix them with /login or `axl login`.\n\n");
 }

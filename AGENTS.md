@@ -1,15 +1,15 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kepler development guide
+# Axl development guide
 
 ## Scope
 
-These instructions apply to the entire Kepler repository.
+These instructions apply to the entire Axl repository.
 
 ## Product
 
-Kepler is a universal agent harness that adapts to existing user setups, models, tools, and clients. One authoritative daemon owns each session. Clients are projections over a canonical event protocol.
+Axl is a universal agent harness that adapts to existing user setups, models, tools, and clients. One authoritative daemon owns each session. Clients are projections over a canonical event protocol.
 
 ## Plans and source of truth
 
@@ -26,7 +26,7 @@ When documents conflict, stop and surface the conflict instead of silently choos
 
 Pi and DSH are read-only references. Local checkout paths belong in developer-specific configuration, not this repository.
 
-Study their behavior, contracts, tests, and architecture. Write independent Kepler implementations. Do not copy source or translate implementations line by line. Do not modify a reference checkout. Flag unavoidable derivative use before writing it so licensing and attribution can be decided first.
+Study their behavior, contracts, tests, and architecture. Write independent Axl implementations. Do not copy source or translate implementations line by line. Do not modify a reference checkout. Flag unavoidable derivative use before writing it so licensing and attribution can be decided first.
 
 ## Architecture invariants
 
@@ -46,7 +46,7 @@ Study their behavior, contracts, tests, and architecture. Write independent Kepl
 
 ## Implementation order
 
-Follow `IMPLEMENTATION_PLAN.md`. Build phases 0 through 4 with a stable harness. Begin dogfooding only after Kepler can safely edit its own disposable worktree, run tests inside Bubblewrap, survive daemon restart, and replay the session deterministically.
+Follow `IMPLEMENTATION_PLAN.md`. Build phases 0 through 4 with a stable harness. Begin dogfooding only after Axl can safely edit its own disposable worktree, run tests inside Bubblewrap, survive daemon restart, and replay the session deterministically.
 
 Build the smallest complete vertical slice. Do not scaffold later phases or add speculative abstractions.
 
@@ -80,7 +80,7 @@ Write plainly and directly. Prefer short sentences and concrete verbs. Do not us
 
 ## Licensing
 
-Kepler is Apache-2.0. Every new tracked file must follow the repository's SPDX and copyright conventions. Preserve provenance and applicable notices for any explicitly approved derivative material. Reference implementations do not justify copying code.
+Axl is Apache-2.0. Every new tracked file must follow the repository's SPDX and copyright conventions. Preserve provenance and applicable notices for any explicitly approved derivative material. Reference implementations do not justify copying code.
 
 ## Tests and verification
 

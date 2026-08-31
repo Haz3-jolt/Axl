@@ -1,9 +1,9 @@
 {
-  "name": "@kepler/daemon",
+  "name": "@axl/daemon",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Authoritative session daemon and local client for Kepler",
+  "description": "Authoritative session daemon and local client for Axl",
   "license": "Apache-2.0",
   "exports": {
     ".": {
@@ -16,11 +16,11 @@
   ],
   "scripts": {
     "build": "tsc -b tsconfig.build.json --force",
-    "test": "pnpm --filter @kepler/protocol build && pnpm --filter @kepler/kernel build && node --test test/*.test.ts",
+    "test": "pnpm --filter @axl/protocol build && pnpm --filter @axl/kernel build && node --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@kepler/kernel": "workspace:*",
-    "@kepler/protocol": "workspace:*"
+    "@axl/kernel": "workspace:*",
+    "@axl/protocol": "workspace:*"
   }
 }

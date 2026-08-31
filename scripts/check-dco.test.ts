@@ -15,7 +15,7 @@ function git(repository: string, ...arguments_: string[]): string {
 }
 
 test("rejects an unsigned commit and accepts a matching sign-off", () => {
-  const root = mkdtempSync(join(tmpdir(), "kepler-dco-"));
+  const root = mkdtempSync(join(tmpdir(), "axl-dco-"));
   git(root, "init", "--quiet");
   git(root, "config", "core.hooksPath", join(root, "hooks"));
   git(root, "config", "user.name", "Test Author");

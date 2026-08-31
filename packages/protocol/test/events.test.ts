@@ -54,7 +54,7 @@ const validPayloads = {
     rosterFingerprint: "f".repeat(64),
     reason: "model_switch",
   },
-  "prompt.section": { name: "identity", source: "core", content: "You are Kepler." },
+  "prompt.section": { name: "identity", source: "core", content: "You are Axl." },
   "tool.schema": {
     name: "read",
     description: "Read a file",

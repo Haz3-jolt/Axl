@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import { parseSessionId } from "@kepler/protocol";
+import { parseSessionId } from "@axl/protocol";
 
 import { decodeEventLogBytes, EventLogCorruptionError } from "./jsonl-event-log.ts";
 

@@ -1,4 +1,4 @@
-Kepler
+Axl
 Copyright 2026 Hari Srinivasan
 
 This product includes material adapted from Pi (https://github.com/earendil-works/pi),
@@ -15,7 +15,7 @@ Copyright (c) 2025 Mario Zechner, MIT License (see LICENSES/MIT.txt), at commit
   AZURE_OPENAI_* environment contract, and the deployment-name map format,
   adapted from pi-ai's api/azure-openai-responses.ts.
 
-Kepler uses the official Model Context Protocol TypeScript SDK,
+Axl uses the official Model Context Protocol TypeScript SDK,
 Copyright (c) Anthropic, PBC, under the MIT License (see LICENSES/MIT.txt).
 
 The reference projects and exact commits inspected during development are recorded in docs/architecture/decisions.md. Future copied or adapted material must be recorded here before distribution.

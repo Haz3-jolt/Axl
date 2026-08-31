@@ -1,28 +1,28 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kepler open source plan
+# Axl open source plan
 
 Status: working plan. This document accompanies [HARNESS_PLAN.md](HARNESS_PLAN.md).
 
 Updated: 2026-08-28
 
-## 1. Why Kepler is open source
+## 1. Why Axl is open source
 
-Kepler asks users to trust it with source code, credentials, commands, and local configuration. Its core claims need to be inspectable.
+Axl asks users to trust it with source code, credentials, commands, and local configuration. Its core claims need to be inspectable.
 
 - The adoption compiler converts existing setups into code that runs on the user's machine. Users must be able to inspect the converter, provenance records, and verification process.
 - The sandbox and permission system claims to enforce real boundaries. Those claims should be open to review.
 - The learning loop changes local instructions based on user behavior. Source access makes those changes understandable and auditable.
 - A product built around avoiding lock-in should not create a new proprietary lock-in.
 
-Open source is part of Kepler's trust model as well as its distribution model.
+Open source is part of Axl's trust model as well as its distribution model.
 
 ## 2. License
 
-All Kepler code is licensed under Apache-2.0. This includes the kernel, clients, adoption compiler, extension API, mobile apps, and cloud adapters. The project will not use an open-core split, feature paywalls, or dual licensing.
+All Axl code is licensed under Apache-2.0. This includes the kernel, clients, adoption compiler, extension API, mobile apps, and cloud adapters. The project will not use an open-core split, feature paywalls, or dual licensing.
 
-Apache-2.0 provides an explicit patent grant and clear contribution terms. Those protections matter for infrastructure that may attract corporate contributors. The contribution terms also let Kepler use DCO sign-offs instead of a contributor license agreement.
+Apache-2.0 provides an explicit patent grant and clear contribution terms. Those protections matter for infrastructure that may attract corporate contributors. The contribution terms also let Axl use DCO sign-offs instead of a contributor license agreement.
 
 Third-party work carries its original obligations:
 
@@ -32,7 +32,7 @@ Third-party work carries its original obligations:
 
 ## 3. Governance
 
-Kepler uses a BDFL and area-maintainer model.
+Axl uses a BDFL and area-maintainer model.
 
 The BDFL owns the kernel guarantees, event format, child contract, extension API, and final architectural decisions. The role exists to settle questions that cannot reach consensus. It should not block routine work.
 
@@ -48,7 +48,7 @@ If the BDFL leaves, the maintainers choose a successor from among themselves.
 
 ### DCO instead of a CLA
 
-Every commit must include a matching `Signed-off-by` trailer. The sign-off certifies that the contributor has the right to submit the work under Apache-2.0. Kepler does not require a contributor license agreement or copyright assignment.
+Every commit must include a matching `Signed-off-by` trailer. The sign-off certifies that the contributor has the right to submit the work under Apache-2.0. Axl does not require a contributor license agreement or copyright assignment.
 
 ### AI-assisted work
 
@@ -64,11 +64,11 @@ The adoption compiler should produce useful starter issues. Each issue should co
 
 ## 5. Working with other ecosystems
 
-Kepler converts resources from Pi, OpenCode, DSH, Claude Code, and open standards. It should help those communities rather than strip value from them.
+Axl converts resources from Pi, OpenCode, DSH, Claude Code, and open standards. It should help those communities rather than strip value from them.
 
 - Report upstream bugs and offer fixes when possible.
 - Preserve authorship, licenses, notices, and provenance during conversion.
-- Let plugin authors run Kepler's compatibility tests in their own CI.
+- Let plugin authors run Axl's compatibility tests in their own CI.
 - Do not convert packages whose licenses forbid it.
 - Describe compatibility accurately and avoid hostile comparisons with other projects.
 
@@ -84,7 +84,7 @@ The public message is simple: users keep their existing setup and gain another r
 
 ## 7. Security engineering
 
-Kepler establishes repository and supply-chain controls from the start. OpenSSF certification, Scorecard automation, OSS-Fuzz integration, public targets, and badges arrive during release hardening, after the underlying controls exist.
+Axl establishes repository and supply-chain controls from the start. OpenSSF certification, Scorecard automation, OSS-Fuzz integration, public targets, and badges arrive during release hardening, after the underlying controls exist.
 
 A tool that runs model-selected commands is security-sensitive. The project does not defer sandboxing, pinned dependencies, least-privilege workflows, or fail-closed behavior.
 
@@ -163,11 +163,11 @@ The compatibility catalog is a public record of how real plugins, skills, and co
 
 ## 10. Community conduct
 
-Kepler follows its [Code of Conduct](CODE_OF_CONDUCT.md). Maintainers should be direct, technical, and respectful in reviews. English is the language for durable project artifacts, but contributors are not penalized for imperfect English.
+Axl follows its [Code of Conduct](CODE_OF_CONDUCT.md). Maintainers should be direct, technical, and respectful in reviews. English is the language for durable project artifacts, but contributors are not penalized for imperfect English.
 
 ## 11. Trademark and name
 
-Apache-2.0 covers the code, not the Kepler name or mark. A separate, permissive trademark policy will allow unmodified redistribution and truthful compatibility claims such as "works with Kepler." Forks are welcome under names that do not claim to be the canonical Kepler project.
+Apache-2.0 covers the code, not the Axl name or mark. A separate, permissive trademark policy will allow unmodified redistribution and truthful compatibility claims such as "works with Axl." Forks are welcome under names that do not claim to be the canonical Axl project.
 
 ## 12. Constraints
 
@@ -175,7 +175,7 @@ Apache-2.0 covers the code, not the Kepler name or mark. A separate, permissive 
 - No open-core split or feature paywall in this repository.
 - No private roadmap that conflicts with the public plan.
 - No committees or working groups until the contributor base needs them.
-- No hostile marketing against the ecosystems Kepler supports.
+- No hostile marketing against the ecosystems Axl supports.
 - No AI-assistance rules that project maintainers cannot meet themselves.
 
 ## 13. Success criteria
@@ -184,7 +184,7 @@ This plan is working when:
 
 1. A contributor's first pull request lands within days without requiring BDFL involvement.
 2. A plugin author independently verifies a catalog entry.
-3. An upstream project accepts a fix found through Kepler's adoption work.
+3. An upstream project accepts a fix found through Axl's adoption work.
 4. A compliant fork exists without causing a governance dispute.
 5. The project has rejected at least one kernel RFC on its merits.
 6. A private security report is fixed and disclosed within the published timeline.

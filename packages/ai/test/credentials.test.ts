@@ -28,7 +28,7 @@ const oauthCredential: Credential = {
 };
 
 async function temporaryStorePath(context: TestContext): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-credentials-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-credentials-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   return join(directory, "store", "credentials.json");
 }

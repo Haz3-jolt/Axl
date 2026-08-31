@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CanonicalEvent } from "@kepler/protocol";
+import type { CanonicalEvent } from "@axl/protocol";
 
 import { type EventLogOptions, JsonlEventLog } from "./jsonl-event-log.ts";
 import { SessionTree } from "./session-tree.ts";

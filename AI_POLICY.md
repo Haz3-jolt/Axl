@@ -3,7 +3,7 @@
 
 # AI policy
 
-AI tools are welcome in Kepler development. Unreviewed output is not.
+AI tools are welcome in Axl development. Unreviewed output is not.
 
 This policy applies the contribution rules in [OPEN_SOURCE.md](OPEN_SOURCE.md).
 

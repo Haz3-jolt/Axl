@@ -86,19 +86,19 @@ async function callbackListener(): Promise<CallbackListener> {
     const state = url.searchParams.get("state");
     if (!pending) {
       response.writeHead(409, { "Content-Type": "text/plain; charset=utf-8" });
-      response.end("No authorization is pending. Return to Kepler.");
+      response.end("No authorization is pending. Return to Axl.");
       return;
     }
     if (error) {
       response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Authorization failed. Return to Kepler.");
+      response.end("Authorization failed. Return to Axl.");
       pending.reject(new Error(`OAuth authorization failed: ${error}`));
       pending = undefined;
       return;
     }
     if (!code || !state || state !== pending.expectedState) {
       response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Invalid OAuth callback. Return to Kepler.");
+      response.end("Invalid OAuth callback. Return to Axl.");
       pending.reject(new Error("OAuth callback did not contain the expected code and state"));
       pending = undefined;
       return;
@@ -108,7 +108,7 @@ async function callbackListener(): Promise<CallbackListener> {
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
     });
     response.end(
-      "<!doctype html><title>Kepler</title><h1>Authorization complete</h1><p>You may close this window.</p>",
+      "<!doctype html><title>Axl</title><h1>Authorization complete</h1><p>You may close this window.</p>",
     );
     pending.resolve(code);
     pending = undefined;
@@ -212,7 +212,7 @@ class PersistentOAuthProvider implements OAuthClientProvider {
       throw new Error(`MCP OAuth client secret source ${config.clientSecretEnv} is not set`);
     }
     this.clientMetadata = {
-      client_name: "Kepler",
+      client_name: "Axl",
       redirect_uris: [this.redirectUrl.href],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],

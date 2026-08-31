@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { JsonObject } from "@kepler/protocol";
+import type { JsonObject } from "@axl/protocol";
 
 /** Invalid tool input. Thrown before execution; the loop records it as an error result. */
 export class ToolInputError extends Error {

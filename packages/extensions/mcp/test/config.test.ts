@@ -10,11 +10,11 @@ import test from "node:test";
 import { loadMcpConfig, mcpSecretValues, McpConfigError } from "../src/index.ts";
 
 test("loads stdio and HTTP servers with project overrides", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "kepler-mcp-config-"));
+  const root = await mkdtemp(join(tmpdir(), "axl-mcp-config-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const global = join(root, "global");
   const project = join(root, "project");
-  await mkdir(join(project, ".kepler"), { recursive: true });
+  await mkdir(join(project, ".axl"), { recursive: true });
   await mkdir(global);
   await writeFile(
     join(global, "mcp.json"),
@@ -26,7 +26,7 @@ test("loads stdio and HTTP servers with project overrides", async (context) => {
     }),
   );
   await writeFile(
-    join(project, ".kepler", "mcp.json"),
+    join(project, ".axl", "mcp.json"),
     JSON.stringify({
       servers: {
         disabled: { transport: "stdio", command: "false", enabled: false },
@@ -34,7 +34,7 @@ test("loads stdio and HTTP servers with project overrides", async (context) => {
           transport: "http",
           url: "https://example.com/mcp",
           headers: { Authorization: "EXAMPLE_TOKEN" },
-          oauth: { clientId: "kepler", scope: "tools" },
+          oauth: { clientId: "axl", scope: "tools" },
         },
       },
     }),
@@ -50,16 +50,16 @@ test("loads stdio and HTTP servers with project overrides", async (context) => {
 });
 
 test("rejects unsafe HTTP URLs and unknown configuration", async (context) => {
-  const root = await mkdtemp(join(tmpdir(), "kepler-mcp-config-"));
+  const root = await mkdtemp(join(tmpdir(), "axl-mcp-config-"));
   context.after(() => rm(root, { recursive: true, force: true }));
-  await mkdir(join(root, ".kepler"));
+  await mkdir(join(root, ".axl"));
   await writeFile(
-    join(root, ".kepler", "mcp.json"),
+    join(root, ".axl", "mcp.json"),
     JSON.stringify({ servers: { bad: { transport: "http", url: "http://example.com/mcp" } } }),
   );
   await assert.rejects(loadMcpConfig({ cwd: root }), McpConfigError);
   await writeFile(
-    join(root, ".kepler", "mcp.json"),
+    join(root, ".axl", "mcp.json"),
     JSON.stringify({ servers: { bad: { transport: "http", url: ":not-a-url" } } }),
   );
   await assert.rejects(loadMcpConfig({ cwd: root }), McpConfigError);

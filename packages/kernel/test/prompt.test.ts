@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import { type ModelStreamEvent, parseSessionId, type Usage } from "@kepler/protocol";
+import { type ModelStreamEvent, parseSessionId, type Usage } from "@axl/protocol";
 
 import {
   AgentSession,
@@ -24,7 +24,7 @@ const sessionId = parseSessionId("123e4567-e89b-42d3-a456-426614174000");
 const usage: Usage = { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
 async function workspace(context: TestContext): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-prompt-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-prompt-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
@@ -60,7 +60,7 @@ test("the stable prompt contains exactly the specified base and nothing more", (
     ],
   });
 
-  assert.match(prompt.text, /You are Kepler/);
+  assert.match(prompt.text, /You are Axl/);
   assert.match(prompt.text, /Working directory: \/workspace\/repo/);
   assert.match(prompt.text, /- shell: Run a shell command/);
   assert.match(prompt.text, /Use pnpm\./);
@@ -147,7 +147,7 @@ test("context injection appends without rewriting anything already sent", async 
     model: port,
     tools: new ToolRegistry(),
     cwd,
-    system: "You are Kepler.",
+    system: "You are Axl.",
   });
 
   await session.runTurn([{ type: "text", text: "first" }]);

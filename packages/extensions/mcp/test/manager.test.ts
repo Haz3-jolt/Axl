@@ -9,15 +9,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 
-import type { ModelPort } from "@kepler/kernel";
-import type { JsonObject, ModelStreamEvent } from "@kepler/protocol";
+import type { ModelPort } from "@axl/kernel";
+import type { JsonObject, ModelStreamEvent } from "@axl/protocol";
 
 import { McpManager, type McpInteractionRequest } from "../src/index.ts";
 
 const fixtureServer = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "server.mjs");
 
 async function workspace(context: TestContext): Promise<string> {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), "kepler-mcp-")));
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "axl-mcp-")));
   context.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
@@ -228,7 +228,7 @@ test("Streamable HTTP completes OAuth discovery, PKCE, registration, and token u
       if (url.pathname === "/register") {
         const metadata = JSON.parse(Buffer.concat(chunks).toString("utf8")) as JsonObject;
         response.writeHead(201, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ ...metadata, client_id: "kepler-test" }));
+        response.end(JSON.stringify({ ...metadata, client_id: "axl-test" }));
         return;
       }
       if (url.pathname === "/token") {

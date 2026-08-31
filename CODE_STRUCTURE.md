@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kepler code structure
+# Axl code structure
 
 Status: working plan. This document accompanies [HARNESS_PLAN.md](HARNESS_PLAN.md) and [OPEN_SOURCE.md](OPEN_SOURCE.md).
 
@@ -13,9 +13,9 @@ The kernel, protocol, adoption compiler, clients, extensions, documentation, and
 
 Many open source projects keep their mobile apps in separate repositories. That works for products such as Signal, Element, Zulip, Mattermost, and Tailscale because their mobile apps own substantial state, storage, and cryptographic logic.
 
-Kepler clients are much thinner. They display state owned by the daemon and communicate through one protocol. A repository boundary would cut across the part of the system that changes most often during early development.
+Axl clients are much thinner. They display state owned by the daemon and communicate through one protocol. A repository boundary would cut across the part of the system that changes most often during early development.
 
-A monorepo gives Kepler three practical benefits:
+A monorepo gives Axl three practical benefits:
 
 - **One compliance surface.** The project has one merge queue, one `CODEOWNERS` file, one security policy, and one set of OpenSSF checks.
 - **Atomic protocol changes.** A single reviewed commit can update the TypeScript protocol, each client, and any generated SDKs that exist later.
@@ -23,18 +23,18 @@ A monorepo gives Kepler three practical benefits:
 
 The tradeoff is heavier CI. Section 8 limits that cost with path-based jobs, while section 9 keeps app-store releases separate from package releases.
 
-Codex offers a useful contrast. Its CLI and Rust core share a repository, while its desktop and mobile products live elsewhere. Kepler keeps the whole product open, including its apps.
+Codex offers a useful contrast. Its CLI and Rust core share a repository, while its desktop and mobile products live elsewhere. Axl keeps the whole product open, including its apps.
 
 ## 2. Languages
 
-- Use **TypeScript** for the kernel, protocol, daemon, adoption compiler, terminal client, web client, and extensions. It matches the ecosystems Kepler integrates with and the Pi components used as references.
+- Use **TypeScript** for the kernel, protocol, daemon, adoption compiler, terminal client, web client, and extensions. It matches the ecosystems Axl integrates with and the Pi components used as references.
 - Use **Kotlin with Jetpack Compose** for Android and **Swift with SwiftUI** for iOS. Choose protocol code generation when the first of these clients is built.
 - Do not add another application language. Tooling should use TypeScript or POSIX shell.
 
 ## 3. Repository layout
 
 ```text
-kepler/
+axl/
   packages/
     kernel/            # event log, agent loop, tool protocol, and policy (HP §2.3)
     protocol/          # authoritative TypeScript event, RPC, and capability contracts
@@ -76,7 +76,7 @@ The protocol package owns the contract between the daemon and every client.
 
 ## 5. Using Pi as a reference
 
-Kepler studies Pi's loop, compaction, provider behavior, and session format, then implements the required behavior in the appropriate Kepler package. It does not keep a modified copy of Pi under `third_party/`.
+Axl studies Pi's loop, compaction, provider behavior, and session format, then implements the required behavior in the appropriate Axl package. It does not keep a modified copy of Pi under `third_party/`.
 
 Any approved adaptation records its source, commit, and changes in an SPDX header. Behavior tests pin compatibility where needed. The `third_party/` directory is reserved for unmodified imported material.
 

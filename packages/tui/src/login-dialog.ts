@@ -16,7 +16,7 @@ import {
   parseDeploymentMap,
   resolveProviderAuth,
   verifyAzureOpenAiAuth,
-} from "@kepler/ai";
+} from "@axl/ai";
 
 import { renderDialog } from "./dialog.ts";
 import { decodeOneKey } from "./editor.ts";
@@ -88,7 +88,7 @@ export class LoginDialog {
       "Map model IDs to Azure deployment names (optional)",
     ] as const;
     const examples = [
-      "Stored globally in ~/.kepler/credentials.json and used in every workspace.",
+      "Stored globally in ~/.axl/credentials.json and used in every workspace.",
       "Example: https://your-resource.openai.azure.com/",
       "Format: gpt-5.6-sol=my-deployment[,model=deployment]",
     ] as const;

@@ -1,9 +1,9 @@
 {
-  "name": "@kepler/sandbox",
+  "name": "@axl/sandbox",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "OS sandbox providers for Kepler tool execution",
+  "description": "OS sandbox providers for Axl tool execution",
   "license": "Apache-2.0",
   "exports": {
     ".": {
@@ -16,11 +16,11 @@
   ],
   "scripts": {
     "build": "tsc -b tsconfig.build.json --force",
-    "test": "pnpm --filter @kepler/protocol build && pnpm --filter @kepler/kernel build && node --test test/*.test.ts",
+    "test": "pnpm --filter @axl/protocol build && pnpm --filter @axl/kernel build && node --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@kepler/kernel": "workspace:*",
-    "@kepler/protocol": "workspace:*"
+    "@axl/kernel": "workspace:*",
+    "@axl/protocol": "workspace:*"
   }
 }

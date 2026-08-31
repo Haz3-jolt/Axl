@@ -9,8 +9,8 @@ import {
   type KernelTool,
   type ShellToolOptions,
   type WorkspacePolicy,
-} from "@kepler/kernel";
-import type { EventPayloadMap } from "@kepler/protocol";
+} from "@axl/kernel";
+import type { EventPayloadMap } from "@axl/protocol";
 
 import { allowlistedEnvironment, definedEnvironment } from "./environment.ts";
 
@@ -18,7 +18,7 @@ const run = promisify(execFile);
 
 export class SandboxUnavailableError extends Error {
   constructor(reason: string) {
-    super(`Sandbox unavailable: ${reason}. Kepler does not run tools unsandboxed.`);
+    super(`Sandbox unavailable: ${reason}. Axl does not run tools unsandboxed.`);
     this.name = "SandboxUnavailableError";
   }
 }

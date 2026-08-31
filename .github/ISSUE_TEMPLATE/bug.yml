@@ -35,7 +35,7 @@ body:
   - type: input
     id: revision
     attributes:
-      label: Kepler revision
+      label: Axl revision
       description: Provide the release version or Git commit.
     validations:
       required: true

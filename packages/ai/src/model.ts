@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelMessage, ThinkingLevel, ToolDeclaration } from "@kepler/protocol";
+import type { ModelMessage, ThinkingLevel, ToolDeclaration } from "@axl/protocol";
 
-// The canonical stream and message shapes live in @kepler/protocol so the
+// The canonical stream and message shapes live in @axl/protocol so the
 // kernel can consume them without depending on this package. Re-exported here
 // so provider code keeps one import surface.
 export type {
@@ -13,8 +13,8 @@ export type {
   TerminalModelStreamEvent,
   ToolCallRequest,
   ToolDeclaration,
-} from "@kepler/protocol";
-export { isTerminalModelStreamEvent } from "@kepler/protocol";
+} from "@axl/protocol";
+export { isTerminalModelStreamEvent } from "@axl/protocol";
 
 /**
  * How a provider can authenticate. Credential storage and lifecycle are a

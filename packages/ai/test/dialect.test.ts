@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { EVENT_FORMAT_VERSION, parseEvent } from "@kepler/protocol";
+import { EVENT_FORMAT_VERSION, parseEvent } from "@axl/protocol";
 
 import {
   dialectBoundaryPayload,

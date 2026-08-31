@@ -15,7 +15,7 @@ import {
   parseEvent,
   parseEventId,
   parseSessionId,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 import {
   JsonlEventLog,
@@ -84,7 +84,7 @@ function makeBranchedSession(secretText = "clean"): readonly CanonicalEvent[] {
 }
 
 async function temporaryDirectory(context: TestContext): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-replay-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-replay-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }

@@ -5,16 +5,16 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { THINKING_LEVELS } from "@kepler/ai";
-import type { ThinkingLevel } from "@kepler/protocol";
+import { THINKING_LEVELS } from "@axl/ai";
+import type { ThinkingLevel } from "@axl/protocol";
 
-export interface KeplerSettings {
+export interface AxlSettings {
   readonly model?: string;
   readonly thinking?: ThinkingLevel;
   readonly theme?: string;
 }
 
-export async function readSettings(path: string): Promise<KeplerSettings> {
+export async function readSettings(path: string): Promise<AxlSettings> {
   let source: string;
   try {
     source = await readFile(path, "utf8");
@@ -49,10 +49,10 @@ export async function readSettings(path: string): Promise<KeplerSettings> {
   ) {
     throw new Error(`Settings field thinking must be one of: ${THINKING_LEVELS.join(", ")}`);
   }
-  return settings as KeplerSettings;
+  return settings as AxlSettings;
 }
 
-export async function writeSettings(path: string, settings: KeplerSettings): Promise<void> {
+export async function writeSettings(path: string, settings: AxlSettings): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {

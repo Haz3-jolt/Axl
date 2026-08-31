@@ -1,9 +1,9 @@
 {
-  "name": "@kepler/ai",
+  "name": "@axl/ai",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Provider contract, model metadata, and tool dialects for Kepler",
+  "description": "Provider contract, model metadata, and tool dialects for Axl",
   "license": "Apache-2.0",
   "exports": {
     ".": {
@@ -16,10 +16,10 @@
   ],
   "scripts": {
     "build": "tsc -b tsconfig.build.json --force",
-    "test": "pnpm --filter @kepler/protocol build && node --test test/*.test.ts",
+    "test": "pnpm --filter @axl/protocol build && node --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@kepler/protocol": "workspace:*"
+    "@axl/protocol": "workspace:*"
   }
 }

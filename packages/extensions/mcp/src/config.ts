@@ -248,7 +248,7 @@ export async function loadMcpConfig(
   const merged = new Map<string, NamedMcpServerConfig>();
   for (const path of [
     ...(options.globalDirectory === undefined ? [] : [join(options.globalDirectory, "mcp.json")]),
-    join(resolve(options.cwd), ".kepler", "mcp.json"),
+    join(resolve(options.cwd), ".axl", "mcp.json"),
   ]) {
     for (const server of await readConfig(path, options.cwd)) merged.set(server.name, server);
   }

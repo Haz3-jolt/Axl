@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import { type CanonicalEvent, type JsonObject, type JsonValue, parseEvent } from "@kepler/protocol";
+import { type CanonicalEvent, type JsonObject, type JsonValue, parseEvent } from "@axl/protocol";
 
 export const SECRET_FIELD_LIST_VERSION = 1 as const;
 export const REDACTED_VALUE = "[REDACTED]" as const;

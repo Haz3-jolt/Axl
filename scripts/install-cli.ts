@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const target = join(repoRoot, "packages", "tui", "dist", "main.js");
 const binDirectory = join(homedir(), ".local", "bin");
-const link = join(binDirectory, "kepler");
+const link = join(binDirectory, "axl");
 
 chmodSync(target, 0o755);
 mkdirSync(binDirectory, { recursive: true });
@@ -24,5 +24,5 @@ symlinkSync(target, link);
 console.log(`Installed: ${link} -> ${target}`);
 
 if (!(process.env.PATH ?? "").split(delimiter).includes(binDirectory)) {
-  console.log(`Note: add ${binDirectory} to your PATH to run \`kepler\` directly.`);
+  console.log(`Note: add ${binDirectory} to your PATH to run \`axl\` directly.`);
 }

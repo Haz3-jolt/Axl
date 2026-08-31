@@ -77,8 +77,8 @@ export function checkWorkspace(root: string): string[] {
     ({ directory }) => directory === resolve(root, "packages/protocol"),
   );
   const kernel = packages.find(({ directory }) => directory === resolve(root, "packages/kernel"));
-  const protocolName = protocol?.manifest.name ?? "@kepler/protocol";
-  const kernelName = kernel?.manifest.name ?? "@kepler/kernel";
+  const protocolName = protocol?.manifest.name ?? "@axl/protocol";
+  const kernelName = kernel?.manifest.name ?? "@axl/kernel";
 
   if (protocol) {
     for (const dependency of runtimeDependencies(protocol.manifest)) {
@@ -139,10 +139,8 @@ export function checkWorkspace(root: string): string[] {
     const extension = path.slice(path.lastIndexOf("."));
     if (!sourceExtensions.has(extension)) return;
     for (const specifier of importsIn(readFileSync(path, "utf8"))) {
-      if (specifier.startsWith("@kepler/") && specifier !== "@kepler/sdk") {
-        errors.push(
-          `${relative(root, path)} imports ${specifier}; apps may import only @kepler/sdk`,
-        );
+      if (specifier.startsWith("@axl/") && specifier !== "@axl/sdk") {
+        errors.push(`${relative(root, path)} imports ${specifier}; apps may import only @axl/sdk`);
       }
     }
   });

@@ -5,8 +5,8 @@ import type { Dirent } from "node:fs";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import type { KernelTool, PromptSection, ToolExecutionResult } from "@kepler/kernel";
-import type { JsonObject } from "@kepler/protocol";
+import type { KernelTool, PromptSection, ToolExecutionResult } from "@axl/kernel";
+import type { JsonObject } from "@axl/protocol";
 import { parseDocument } from "yaml";
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -168,7 +168,7 @@ export async function discoverSkills(
   const discovered = new Map<string, AgentSkill>();
   for (const directory of [
     ...(options.globalDirectory === undefined ? [] : [options.globalDirectory]),
-    join(resolve(options.cwd), ".kepler", "skills"),
+    join(resolve(options.cwd), ".axl", "skills"),
   ]) {
     for (const skill of await skillsIn(directory)) discovered.set(skill.name, skill);
   }

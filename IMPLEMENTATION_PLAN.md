@@ -1,16 +1,16 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kepler implementation plan
+# Axl implementation plan
 
 Status: local execution plan. This file is the current source of truth for build order. `HARNESS_PLAN.md`, `CODE_STRUCTURE.md`, and `OPEN_SOURCE.md` describe the product, repository, and project policies.
 
 ## 1. Delivery rules
 
 1. Build vertical slices, not empty package scaffolding.
-2. Use Pi and DSH as read-only behavioral and architectural references. Write Kepler-native implementations. Do not copy files, paste source, or translate implementations line by line.
+2. Use Pi and DSH as read-only behavioral and architectural references. Write Axl-native implementations. Do not copy files, paste source, or translate implementations line by line.
 3. Build phases 0 through 4 with a stable external harness.
-4. Start using Kepler to build Kepler when the phase 4 dogfood gate passes.
+4. Start using Axl to build Axl when the phase 4 dogfood gate passes.
 5. Continue using independent review for kernel, protocol, sandbox, credentials, adoption trust boundaries, and cloud cleanup.
 6. Fail loudly. An unavailable capability must never silently become a weaker capability.
 7. Keep the kernel limited to the guarantees listed in `HARNESS_PLAN.md` section 2.3.
@@ -25,10 +25,10 @@ Resolve these before implementation because they affect irreversible boundaries.
 
 - [x] Make `packages/protocol` dependency-free and authoritative for event and RPC schemas.
 - [x] Allow `packages/kernel` to depend only on `packages/protocol` and Node.js built-ins, with no third-party runtime dependencies.
-- [x] Use private `@kepler/*` package names and the future `kepler` executable as temporary working names. Revisit naming before publication.
+- [x] Use private `@axl/*` package names and the future `axl` executable as temporary working names. Revisit naming before publication.
 - [x] Define the first at-rest event format version as `1`.
 - [x] Define the first local wire protocol version as `1`, with exact-version compatibility before the first stable release.
-- [x] Confirm Apache-2.0 for Kepler and establish the attribution process for behavior or fixtures derived from external projects.
+- [x] Confirm Apache-2.0 for Axl and establish the attribution process for behavior or fixtures derived from external projects.
 - [x] Record Pi and DSH reference commits used during implementation.
 - [x] Keep third-party extensions out of the daemon process in v1. Only trusted first-party extensions may run in process.
 - [x] Keep capability search local and lexical. V1 uses BM25, not embeddings or provider-native tool search.
@@ -120,7 +120,7 @@ A process can append a branched session, crash during an append, recover, replay
 
 ## Phase 2: Provider and model foundation
 
-Adapt Pi's provider architecture as a Kepler-native contract. Do not create another wrapper above it.
+Adapt Pi's provider architecture as an Axl-native contract. Do not create another wrapper above it.
 
 ### Provider contract
 
@@ -172,7 +172,7 @@ The fake provider and one real provider produce identical canonical stream shape
 - [x] Implement tool execution dispatch and tool call/result pairing.
 - [x] Implement cancellation and operation ownership so only one operation mutates a branch at a time.
 - [x] Implement extension-host lifecycle as an empty seam, not a full extension system yet.
-- [x] Keep provider-specific logic outside the kernel. The kernel consumes an injected `ModelPort`, while `@kepler/protocol` owns canonical stream and message types.
+- [x] Keep provider-specific logic outside the kernel. The kernel consumes an injected `ModelPort`, while `@axl/protocol` owns canonical stream and message types.
 
 ### Prompt behavior
 
@@ -217,7 +217,7 @@ This is the final phase built primarily with the stable external harness.
 
 - [x] Canonicalize every file path before policy evaluation.
 - [x] Reject symlink escapes and writes outside the workspace.
-- [x] Protect Kepler configuration, credentials, and session storage from tool access.
+- [x] Protect Axl configuration, credentials, and session storage from tool access.
 - [x] Execute shell commands through Bubblewrap on Linux.
 - [x] Start with workspace-scoped writes and no tool-process network access.
 - [x] Set `failIfUnavailable` for dogfood sessions.
@@ -226,16 +226,16 @@ This is the final phase built primarily with the stable external harness.
 
 ### Dogfood gate
 
-Switch to Kepler building Kepler when all of the following pass:
+Switch to Axl building Axl when all of the following pass:
 
-- [x] Kepler edits its own source in a disposable worktree using Azure OpenAI.
-- [x] Kepler runs the smallest relevant test inside Bubblewrap.
+- [x] Axl edits its own source in a disposable worktree using Azure OpenAI.
+- [x] Axl runs the smallest relevant test inside Bubblewrap.
 - [x] A fresh daemon restores the full session history and completes another turn.
 - [x] Interrupting model output or a tool records an aborted turn without corrupting the branch.
 - [x] Credentials and secret fixtures are absent from the event log.
 - [x] Deterministic replay reproduces the complete session byte for byte.
 
-After this gate, use Kepler for ordinary development. Continue independent review of kernel and security-boundary changes.
+After this gate, use Axl for ordinary development. Continue independent review of kernel and security-boundary changes.
 
 ### Dogfood follow-up
 
@@ -251,7 +251,7 @@ These are the next dogfood prerequisites. They take priority over the remaining 
 
 ## Phase 5: Productive single-session development
 
-Make Kepler comfortable enough for sustained daily use before expanding its ecosystem.
+Make Axl comfortable enough for sustained daily use before expanding its ecosystem.
 
 The checked TUI items in this phase were pulled forward as an explicit exception to phase ordering. They do not mark Phase 5 complete.
 
@@ -298,7 +298,7 @@ The checked TUI items in this phase were pulled forward as an explicit exception
 ### Configuration
 
 - [ ] Read global and project `AGENTS.md` files.
-- [ ] Read global `~/.kepler/` and project `.kepler/` configuration.
+- [ ] Read global `~/.axl/` and project `.axl/` configuration.
 - [ ] Resolve project settings over global settings while allowing project policy only to narrow capabilities.
 - [ ] Add standard, minimal, and chat profiles.
 
@@ -311,7 +311,7 @@ The checked TUI items in this phase were pulled forward as an explicit exception
 
 ### Exit gate
 
-Use Kepler for multiple real development sessions across restarts and branches without returning to the stable harness for routine edits, tests, compaction, or recovery.
+Use Axl for multiple real development sessions across restarts and branches without returning to the stable harness for routine edits, tests, compaction, or recovery.
 
 ## Phase 6: Native extension runtime and open standards
 
@@ -356,7 +356,7 @@ The checked standards items were brought forward by request. They do not complet
 
 ### Blind credential foundation
 
-- [ ] Represent every Kepler-managed credential with an opaque identifier outside the secrets layer.
+- [ ] Represent every Axl-managed credential with an opaque identifier outside the secrets layer.
 - [ ] Give each sandbox a per-session sentinel instead of the real credential.
 - [ ] Keep real credentials in a broker outside the sandbox.
 - [ ] Have the egress proxy validate the destination and requested credential scope before substituting a real value.
@@ -393,7 +393,7 @@ The initial public registrations have real first-party consumers, each registrat
 - [ ] Implement `direct`, `auto`, `manual`, and `deny`.
 - [ ] Use `direct` by default only when the requested operating-system sandbox is active.
 - [ ] Fail startup when the requested sandbox is unavailable.
-- [ ] Add `kepler --unsafe` as the only way to start without operating-system isolation.
+- [ ] Add `axl --unsafe` as the only way to start without operating-system isolation.
 - [ ] Default an unsafe session to `auto`, show the unsafe state in every client, and record it in the session log.
 - [ ] Allow users to choose a stricter permission level while unsafe.
 - [ ] Treat bypassing an active sandbox as a separate action that always requires approval.
@@ -575,7 +575,7 @@ Implement the unified child mechanism and extension isolation before model-drive
 
 - [ ] Scan known Pi, OpenCode, DSH, and Claude Code locations without executing discovered code.
 - [ ] Present first-launch findings without a setup wizard.
-- [ ] Add interactive `/adopt` and direct `kepler install` commands.
+- [ ] Add interactive `/adopt` and direct `axl install` commands.
 - [ ] Add optional passthrough adoption syntax.
 - [ ] Install MCP, `AGENTS.md`, Agent Skills, and Agent Plugins natively through the trust pipeline.
 
@@ -617,7 +617,7 @@ Implement the unified child mechanism and extension isolation before model-drive
 - [ ] OpenCode resources.
 - [ ] DSH resources.
 - [ ] Claude Code resources and agent definitions.
-- [ ] External harness children for Claude Code and Codex inside Kepler-controlled isolation.
+- [ ] External harness children for Claude Code and Codex inside Axl-controlled isolation.
 
 ### Catalog
 
@@ -739,7 +739,7 @@ A session moves or forks to the first cloud provider, survives client detachment
 
 ### Headless and automation
 
-- [ ] Add `kepler run -p` with structured JSON output.
+- [ ] Add `axl run -p` with structured JSON output.
 - [ ] Add CI and GitHub Action integration with session logs as artifacts.
 - [ ] Add event subscriptions, webhooks, schedules, and wake-up behavior.
 - [ ] Record trigger identity and acting user.
@@ -802,7 +802,7 @@ Each derived feature is implemented from existing public primitives without expa
 - [ ] Verify attestations before publishing.
 - [ ] Make publication idempotent and resume-safe.
 - [ ] Publish release-verification instructions.
-- [ ] Publish signed Kepler base images with SBOMs and provenance.
+- [ ] Publish signed Axl base images with SBOMs and provenance.
 - [ ] Separate package, Android, and iOS release trains.
 
 ### Security maturity

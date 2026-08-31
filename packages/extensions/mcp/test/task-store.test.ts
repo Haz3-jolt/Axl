@@ -14,7 +14,7 @@ import { FileTaskStore } from "../src/index.ts";
 const request: Request = { method: "sampling/createMessage", params: {} };
 
 test("persists task state and results with authorization-context isolation", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-mcp-task-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-mcp-task-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "tasks.json");
   const first = new FileTaskStore(path);
@@ -29,7 +29,7 @@ test("persists task state and results with authorization-context isolation", asy
 });
 
 test("uses opaque cursor pagination and rejects terminal transitions", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-mcp-task-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-mcp-task-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const store = new FileTaskStore(join(directory, "tasks.json"));
   const task = await store.createTask({ ttl: null }, "request", request);

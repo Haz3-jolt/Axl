@@ -1,12 +1,12 @@
 {
-  "name": "@kepler/tui",
+  "name": "@axl/tui",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Interactive terminal client for the Kepler daemon",
+  "description": "Interactive terminal client for the Axl daemon",
   "license": "Apache-2.0",
   "bin": {
-    "kepler": "./dist/main.js"
+    "axl": "./dist/main.js"
   },
   "exports": {
     ".": {
@@ -19,16 +19,16 @@
   ],
   "scripts": {
     "build": "tsc -b tsconfig.build.json --force",
-    "test": "pnpm --filter @kepler/protocol build && pnpm --filter @kepler/kernel build && pnpm --filter @kepler/ai build && pnpm --filter @kepler/daemon build && node --test test/*.test.ts",
+    "test": "pnpm --filter @axl/protocol build && pnpm --filter @axl/kernel build && pnpm --filter @axl/ai build && pnpm --filter @axl/daemon build && node --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@kepler/ai": "workspace:*",
-    "@kepler/daemon": "workspace:*",
-    "@kepler/extension-mcp": "workspace:*",
-    "@kepler/extension-skills": "workspace:*",
-    "@kepler/kernel": "workspace:*",
-    "@kepler/protocol": "workspace:*",
-    "@kepler/sandbox": "workspace:*"
+    "@axl/ai": "workspace:*",
+    "@axl/daemon": "workspace:*",
+    "@axl/extension-mcp": "workspace:*",
+    "@axl/extension-skills": "workspace:*",
+    "@axl/kernel": "workspace:*",
+    "@axl/protocol": "workspace:*",
+    "@axl/sandbox": "workspace:*"
   }
 }

@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Kepler product plan
+# Axl product plan
 
 Status: product description. This document defines the product as a whole. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for delivery order.
 
@@ -9,11 +9,11 @@ Updated: 2026-08-24
 
 ## 1. Product thesis
 
-> Kepler adapts to your setup instead of asking you to adapt to it.
+> Axl adapts to your setup instead of asking you to adapt to it.
 
-Most agent harnesses ask users to migrate their setup, learn new configuration, choose a subscription, stay in one client, or use a preferred model. Kepler works with the setups, habits, devices, and models people already use.
+Most agent harnesses ask users to migrate their setup, learn new configuration, choose a subscription, stay in one client, or use a preferred model. Axl works with the setups, habits, devices, and models people already use.
 
-The name reflects the architecture: one runtime keeps many models and ecosystems in a stable orbit. Kepler was previously called Bolt.
+The name reflects the architecture: one runtime keeps many models and ecosystems in a stable orbit. Axl was previously called Bolt.
 
 The product has five pillars:
 
@@ -81,10 +81,10 @@ Permission hooks alone are not a security boundary. Foreign extensions, MCP serv
 
 The model supplies most of the raw capability. The harness should keep working when that model changes:
 
-- Pi's provider API is the model abstraction. Kepler does not add another layer (section 19).
+- Pi's provider API is the model abstraction. Axl does not add another layer (section 19).
 - Tool dialects (section 7.4): provider adapters render the canonical tool roster in each model's trained schema and edit format, so switching models never means playing away from home.
 - Each model-calling role can choose its own provider. Roles include the main loop, side conversations, conversion workers, permission checks, compaction, vision, OCR, speech, facet extraction, and insights.
-- Thinking level is part of model selection. Every role and child session carries a level that can change mid-session and is recorded as configuration. Kepler follows Pi's levels, capability maps, clamping, and token budgets (section 7.6).
+- Thinking level is part of model selection. Every role and child session carries a level that can change mid-session and is recorded as configuration. Axl follows Pi's levels, capability maps, clamping, and token budgets (section 7.6).
 - Roles use the main model when it fits or the cheapest capable model for routine text work. Users do not need to configure each role before using it.
 - OCR and speech roles start disabled with no default model. Choosing a hosted service on the user's behalf would be unsafe, while choosing no model would make the feature fail on first use. Section 3.8 describes how users enable them.
 - The kernel makes no vendor-specific prompt assumptions. Provider quirks live in provider adapters.
@@ -94,7 +94,7 @@ The model supplies most of the raw capability. The harness should keep working w
 
 ### 2.8 Zero-config, discovered in use
 
-Kepler has many settings, but none should be required for first use. Features appear as they become relevant instead of arriving through a setup wizard or profile questionnaire. The adoption scan is the onboarding. Advanced configuration remains available for people who want it.
+Axl has many settings, but none should be required for first use. Features appear as they become relevant instead of arriving through a setup wizard or profile questionnaire. The adoption scan is the onboarding. Advanced configuration remains available for people who want it.
 
 Some defaults should be off. Features that depend on uncommon resources, such as speech models or hosted transcription, stay disabled until configured (sections 2.7 and 3.8). Zero configuration should not mean silently opting users into services they did not choose.
 
@@ -103,11 +103,11 @@ Some defaults should be off. Features that depend on uncommon resources, such as
 Every shipped feature outside the kernel is a native extension that can be enabled or disabled on its own. This includes side conversations, goal and plan modes, insights, learning, web access, browser support, the session viewer, tips, workflows, mission control, the review inbox, vision routing, and voice. First-party and third-party extensions use the same public API (section 5).
 
 - A disabled feature contributes no prompt tokens, UI, or background work.
-- The kernel (section 2.3) is not a plugin. DSH allows its model adapter, session log, and agent loop to be replaced, but Kepler keeps them fixed for these reasons:
+- The kernel (section 2.3) is not a plugin. DSH allows its model adapter, session log, and agent loop to be replaced, but Axl keeps them fixed for these reasons:
   - **The guarantees live there.** One fixed event log supports log authority, append-only cache behavior, tool call/result integrity, and deterministic replay. A replaceable log would make those guarantees installation-specific.
   - **Security sits below extensions.** Permissions and sandbox enforcement cannot be plugins because plugins must not replace their own security boundary.
   - **Everything meets at the kernel.** Clients, SDKs, the viewer, insights, imports, and compaction depend on one event format and one loop.
-  - **Kepler is a product, not a framework kit.** A replaceable core would burden users with more combinations, harder debugging, and setup choices.
+  - **Axl is a product, not a framework kit.** A replaceable core would burden users with more combinations, harder debugging, and setup choices.
 
   Extensions still get defined hooks into kernel behavior, including custom compaction (section 14) and rendering, without replacing the kernel itself.
 - First-party features get no private APIs. Shipping them through the public API proves that the same API is sufficient for third parties.
@@ -155,15 +155,15 @@ Interactive:
 Direct installation:
 
 ```bash
-kepler install pi @juicesharp/pi-web-tools
-kepler install opencode opencode-wakatime
-kepler install dsh @vendor/dsh-plugin
+axl install pi @juicesharp/pi-web-tools
+axl install opencode opencode-wakatime
+axl install dsh @vendor/dsh-plugin
 ```
 
 Optional passthrough form:
 
 ```bash
-kepler adopt -- pi install @juicesharp/pi-web-tools
+axl adopt -- pi install @juicesharp/pi-web-tools
 ```
 
 ### 3.3 Adoption result
@@ -186,7 +186,7 @@ Permissions requested
   Network: api.example.com
 
 Source retained at:
-  ~/.kepler/adopted/pi/@juicesharp/pi-web-tools/1.4.2/source
+  ~/.axl/adopted/pi/@juicesharp/pi-web-tools/1.4.2/source
 ```
 
 ### 3.4 Plan mode
@@ -197,12 +197,12 @@ Plan review uses a Plannotator-style annotation surface rather than a single con
 
 ### 3.5 Project directory
 
-Kepler reads a `.kepler/` directory in the project alongside the global `~/.kepler/`:
+Axl reads a `.axl/` directory in the project alongside the global `~/.axl/`:
 
 - Project-scoped skills, hooks, extensions, and prompt templates
 - The team profile lockfile (section 18.4)
 - Project settings and sandbox policy defaults
-- Project rules stay project-scoped: nothing in `.kepler/` is promoted into global learning (section 8.2)
+- Project rules stay project-scoped: nothing in `.axl/` is promoted into global learning (section 8.2)
 
 Project settings override global settings. Project capability and sandbox rules may narrow global policy but cannot widen it.
 
@@ -211,19 +211,19 @@ Project settings override global settings. Project capability and sandbox rules 
 Features are taught where the user's eyes already are: the working indicator. While the agent runs, the status line carries an occasional one-line tip, video-game loading-screen style:
 
 ```text
-⚡ Keplering… (12s · 3.1k tokens)
+⚡ Axling… (12s · 3.1k tokens)
 Tip: /learn tier 3 can draft extensions from your patterns. You approve before anything runs.
 ```
 
 ```text
-⚡ Keplering… (4s · 800 tokens)
+⚡ Axling… (4s · 800 tokens)
 Tip: /minimal runs with just two tools when you want raw speed.
 ```
 
 Rules that keep tips helpful instead of annoying:
 
 - Tips come from a reviewed list of plain strings. They never require a model call or spend tokens.
-- Rotation is random, then filtered by local usage. Kepler skips tips for familiar, dismissed, or disabled features.
+- Rotation is random, then filtered by local usage. Axl skips tips for familiar, dismissed, or disabled features.
 - A tip takes one line, appears infrequently, and never blocks work.
 - Tips introduce optional features. Ignoring every tip must still leave a useful agent.
 - `/tip off` removes the feature and its UI completely.
@@ -242,16 +242,16 @@ Rules that keep tips helpful instead of annoying:
 
 ### 3.8 Vision, voice, and media
 
-Image input is available by default in every client. Users can paste, drag, or reference a file. The active model determines how Kepler handles it:
+Image input is available by default in every client. Users can paste, drag, or reference a file. The active model determines how Axl handles it:
 
 - A vision-capable main model receives the image directly.
 - If the main model has vision support, it receives the image directly.
-- If the main model lacks vision support, Kepler says so. An optional vision-description role can produce an attributed description for the main model.
+- If the main model lacks vision support, Axl says so. An optional vision-description role can produce an attributed description for the main model.
 - OCR tasks can use a separate, cheaper OCR role. Without one, images go to the vision-capable main model.
 
 Clients may offer speech-to-text input and text-to-speech output. These are separate model roles with their own model and capability checks (section 2.7).
 
-OCR, speech recognition, and speech synthesis start disabled and have no default model. Users who want them can choose a local or hosted model. When a disabled media feature is requested, Kepler explains what is missing instead of choosing a service on the user's behalf. Disabled roles consume no prompt space, UI, background work, or downloads (section 2.9). Basic image input remains available when the main model supports it.
+OCR, speech recognition, and speech synthesis start disabled and have no default model. Users who want them can choose a local or hosted model. When a disabled media feature is requested, Axl explains what is missing instead of choosing a service on the user's behalf. Disabled roles consume no prompt space, UI, background work, or downloads (section 2.9). Basic image input remains available when the main model supports it.
 
 Media moves through the blob channel, while the event log stores references (section 15.5). Vision descriptions, OCR results, and transcriptions are recorded as attributed events.
 
@@ -319,7 +319,7 @@ There is no automatic substitution between levels.
 ### 4.4 Adopted package storage
 
 ```text
-~/.kepler/adopted/
+~/.axl/adopted/
   <source-runtime>/
     <package-name>/
       <version>/
@@ -407,7 +407,7 @@ The runtime does not expose arbitrary kernel internals. Once a public extension 
 
 ### 5.1 Resource types
 
-The full set of things a user or package can add to Kepler:
+The full set of things a user or package can add to Axl:
 
 - **Extensions**: code registering tools, commands, providers, renderers, panels
 - **Skills**: instruction documents loaded on selection
@@ -419,14 +419,14 @@ The full set of things a user or package can add to Kepler:
 
 ### 5.2 Open standards first
 
-Kepler implements established agent standards directly:
+Axl implements established agent standards directly:
 
 - **MCP** for external tool connectivity, stewarded by AAIF
 - **AGENTS.md** for instructions and context, stewarded by AAIF
 - **Agent Skills** for skill documents
 - **Agent Plugins 1.0** for packages that combine skills and MCP servers
 
-A standard qualifies when it is open and used by more than one vendor. Its current steward does not affect Kepler's implementation. The same rule applies outside agent tooling: Kepler uses OCI specifications for containers and `devcontainer.json` for repository environments (section 11).
+A standard qualifies when it is open and used by more than one vendor. Its current steward does not affect Axl's implementation. The same rule applies outside agent tooling: Axl uses OCI specifications for containers and `devcontainer.json` for repository environments (section 11).
 
 The adoption compiler handles proprietary or divergent formats (section 4). Resources that already use supported standards install without conversion. They still pass the normal trust checks, including capability declarations, installation approval, and extension isolation (section 10.4). Standards compliance does not make executable code safe.
 
@@ -484,7 +484,7 @@ dispose
 
 Each backend advertises capabilities such as continuation, history fork, structured output, tool restriction, resume, remote attachment, and hard termination. Unsupported capability requests fail explicitly.
 
-Kepler can also run another harness, such as Claude Code or Codex, as a child session. The output enters the tree like any native child. A foreign harness always runs inside a Kepler-controlled sandbox or placement because Kepler cannot trust it to enforce local policy. Adapters for specific harnesses remain extensions. Only the child contract belongs in the kernel (section 2.9).
+Axl can also run another harness, such as Claude Code or Codex, as a child session. The output enters the tree like any native child. A foreign harness always runs inside an Axl-controlled sandbox or placement because Axl cannot trust it to enforce local policy. Adapters for specific harnesses remain extensions. Only the child contract belongs in the kernel (section 2.9).
 
 The contract, in full:
 
@@ -514,11 +514,11 @@ The user invokes `/subagents` to start children for work such as cross-model rev
 
 A workflow is a plain program that uses the SDK to spawn child sessions. Ordinary code controls fan-out, pipelines, and verification passes. Users start workflows, and every child appears in the tree and mission control with its own model and thinking level.
 
-Kepler does not define a workflow language (section 19). Workflows use the same RPC surface as every client. Existing Claude Code workflows and Codex automations are adoption targets for the compiler.
+Axl does not define a workflow language (section 19). Workflows use the same RPC surface as every client. Existing Claude Code workflows and Codex automations are adoption targets for the compiler.
 
 ### 6.7 Agent definitions
 
-Named agent definitions live in `.kepler/agents/` for a project or `~/.kepler/agents/` globally:
+Named agent definitions live in `.axl/agents/` for a project or `~/.axl/agents/` globally:
 
 - A definition is a markdown file: YAML frontmatter plus a prompt body.
 
@@ -564,17 +564,17 @@ Rules:
 - Dynamic information should leave the stable prompt prefix unchanged. The user request and other per-turn content follow that prefix.
 - If a capability is unavailable for a request, it contributes zero prompt tokens.
 
-Provider caches match the longest unchanged prefix, so Kepler appends new context instead of rewriting old content. The base prompt and core tool schemas stay stable. Skills, context, and injected instructions arrive after the user message. BM25-selected tool schemas may change at a user-turn boundary, then remain frozen through every continuation in that turn. Correct tool selection takes priority over retaining every possible cache hit.
+Provider caches match the longest unchanged prefix, so Axl appends new context instead of rewriting old content. The base prompt and core tool schemas stay stable. Skills, context, and injected instructions arrive after the user message. BM25-selected tool schemas may change at a user-turn boundary, then remain frozen through every continuation in that turn. Correct tool selection takes priority over retaining every possible cache hit.
 
 ### 7.2 Global AGENTS.md
 
 The global file should remain intentionally small. Automated learning may edit only a managed block:
 
 ```md
-<!-- kepler:auto:start -->
+<!-- axl:auto:start -->
 - Prefer the smallest relevant verification command first.
 - Report commands run and their outcomes.
-<!-- kepler:auto:end -->
+<!-- axl:auto:end -->
 ```
 
 Content outside this block remains user-owned.
@@ -599,7 +599,7 @@ The browser is opt-in. Ordinary sessions do not include subagent, task-list, or 
 
 Tool identity is canonical, but provider adapters render each selected tool in the model's native format. The kernel, policy layer, sandbox, and event log continue to use one canonical definition. Tool dialects are data files. A model switch or `/reload` applies an updated dialect and records the cache boundary.
 
-Kepler distinguishes four directions of invocation:
+Axl distinguishes four directions of invocation:
 
 - **Model to harness:** typed tools selected for the current turn
 - **User to harness:** commands such as `/goal`, `/btw`, `/subagents`, `/learn`, `/adopt`, and `/insights`
@@ -610,31 +610,31 @@ A scoped harness-control tool may expose user commands to the model when request
 
 ### 7.5 Progressive capability disclosure
 
-Kepler maintains one disposable local BM25 index for enabled skills, tools, commands, and agent definitions. Each record contains a name, kind, description, aliases, path, and scope. The index is rebuilt from manifests and frontmatter and is never authoritative.
+Axl maintains one disposable local BM25 index for enabled skills, tools, commands, and agent definitions. Each record contains a name, kind, description, aliases, path, and scope. The index is rebuilt from manifests and frontmatter and is never authoritative.
 
-Before the first model request for each user turn, Kepler searches the index using the user's text. Exact names and aliases rank first, project entries win ties against global entries, and results below a fixed relevance threshold are discarded. At most three matches are disclosed, and the event log records what was selected.
+Before the first model request for each user turn, Axl searches the index using the user's text. Exact names and aliases rank first, project entries win ties against global entries, and results below a fixed relevance threshold are discarded. At most three matches are disclosed, and the event log records what was selected.
 
 Skills, commands, and agent definitions contribute only compact metadata and a path. The model uses the normal read tool to load a full body when needed. An explicit request such as `/skill:pull-request` skips ranking and loads that item directly.
 
-A selected executable tool contributes its complete provider-native schema before inference. The model calls it directly by its rendered name. Kepler freezes the selected roster and implementation bindings through every continuation in that turn, then may select a new roster for the next user turn. Dispatch validates tool input against the frozen schema.
+A selected executable tool contributes its complete provider-native schema before inference. The model calls it directly by its rendered name. Axl freezes the selected roster and implementation bindings through every continuation in that turn, then may select a new roster for the next user turn. Dispatch validates tool input against the frozen schema.
 
-The stable prompt says only that optional capabilities may be supplied with a request. Kepler does not preload the catalog, depend on provider-native `tool_search`, use embeddings, maintain a vector index, or route normal calls through a generic untyped tool. Discovery never grants authority, and disabled, unavailable, or untrusted capabilities are removed before ranking.
+The stable prompt says only that optional capabilities may be supplied with a request. Axl does not preload the catalog, depend on provider-native `tool_search`, use embeddings, maintain a vector index, or route normal calls through a generic untyped tool. Discovery never grants authority, and disabled, unavailable, or untrusted capabilities are removed before ranking.
 
 ### 7.6 Thinking levels
 
-Kepler calls reasoning effort a thinking level and follows Pi's scale. Provider adapters translate that common setting into each provider's format.
+Axl calls reasoning effort a thinking level and follows Pi's scale. Provider adapters translate that common setting into each provider's format.
 
 **The scale.** Seven values: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The default is `medium`, resolved as user setting → current session level → `medium`. `off` omits the reasoning parameter from the request entirely rather than sending a zero.
 
-**Support comes from the model registry.** Each model maps Kepler's levels to provider values. A null value marks an unsupported level, while a missing value asks the provider to use its default. Models without reasoning support offer only `off`. The registry exposes `xhigh` and `max` only for models that define them.
+**Support comes from the model registry.** Each model maps Axl's levels to provider values. A null value marks an unsupported level, while a missing value asks the provider to use its default. Models without reasoning support offer only `off`. The registry exposes `xhigh` and `max` only for models that define them.
 
-**Unsupported levels are clamped.** Kepler searches upward through the scale, then downward, and finally uses the model's first available level. This differs from a missing capability because a nearby reasoning level remains useful. The client shows the effective level, and the log records the clamp (section 2.4).
+**Unsupported levels are clamped.** Axl searches upward through the scale, then downward, and finally uses the model's first available level. This differs from a missing capability because a nearby reasoning level remains useful. The client shows the effective level, and the log records the clamp (section 2.4).
 
 **Token-budget providers get budgets, not enums.** Where a provider takes a thinking-token budget instead of an effort word, the levels map to defaults of 1024, 2048, 8192, and 16384 tokens for `minimal` through `high`, with `xhigh` and `max` collapsing to `high`. Budgets are overridable per request and per model.
 
-**Reserve room for the answer.** When reasoning and output share a response limit, Kepler leaves at least 1,024 tokens for the answer and keeps the total below the context window. Users cannot disable this safeguard.
+**Reserve room for the answer.** When reasoning and output share a response limit, Axl leaves at least 1,024 tokens for the answer and keeps the total below the context window. Users cannot disable this safeguard.
 
-**Adapters render provider syntax.** An endpoint may expect `reasoning_effort`, `reasoning: {effort}`, `thinking: {type}`, `enable_thinking`, a chat-template argument, or a token budget. Provider adapters handle those differences and allow compatibility overrides. The kernel, event log, and clients keep the common Kepler level.
+**Adapters render provider syntax.** An endpoint may expect `reasoning_effort`, `reasoning: {effort}`, `thinking: {type}`, `enable_thinking`, a chat-template argument, or a token budget. Provider adapters handle those differences and allow compatibility overrides. The kernel, event log, and clients keep the common Axl level.
 
 **Thinking level is session state.** It applies to future turns and can change during a session. Per-model settings override the global default, and switching models clamps the level to the new model's capabilities without changing that global default. Every role and child carries its own level.
 
@@ -681,7 +681,7 @@ Do not learn global instructions directly from:
 
 Session summaries may identify candidates, but candidates require supporting user-originated evidence before promotion.
 
-Kepler has no ambient memory system. It does not retrieve old conversations or inject summaries without a request. Cross-session learning is limited to a small set of visible rules in the managed `AGENTS.md` block. Each rule has evidence, ledger history, and regression tracking. Users and agents can search old sessions on demand, and recalled material enters the current session as a visible event (sections 8.7 and 18.2).
+Axl has no ambient memory system. It does not retrieve old conversations or inject summaries without a request. Cross-session learning is limited to a small set of visible rules in the managed `AGENTS.md` block. Each rule has evidence, ledger history, and regression tracking. Users and agents can search old sessions on demand, and recalled material enters the current session as a visible event (sections 8.7 and 18.2).
 
 ### 8.2 Tier 1: managed instructions
 
@@ -765,7 +765,7 @@ Additional controls:
 
 ### 8.6 Insights engine
 
-The evidence layer for the learning loop is a native insights engine built on the design proven by `observal/pi-insights` (prior work by Kepler's author), promoted from a Pi extension to a built-in `/insights` command.
+The evidence layer for the learning loop is a native insights engine built on the design proven by `observal/pi-insights` (prior work by Axl's author), promoted from a Pi extension to a built-in `/insights` command.
 
 ```text
 /insights
@@ -782,7 +782,7 @@ The pipeline follows that proven design:
 4. Aggregate with decay weighting (10-day half-life), compute week-over-week diffs, detect anomalies and trajectories, distinguish resolved from ongoing friction, and gather user context (AGENTS.md, installed skills, extensions, packages) so suggestions never propose what already exists.
 5. Generate report sections with parallel prompts plus a synthesis pass, rendered as a self-contained HTML or Markdown report.
 
-Properties Kepler depends on:
+Properties Axl depends on:
 
 - Temporal awareness: diffs and trajectories, not a static portrait of usage.
 - Negative suggestions: a "stop doing" section with concrete alternatives, not just additions.
@@ -793,21 +793,21 @@ The insights report proposes learning candidates but does not count as evidence 
 
 ### 8.7 Learning ledger and regression tracking
 
-Every change the learning system makes, in any tier, is recorded in its own ledger under `~/.kepler/learn/`, separate from the artifacts it modifies:
+Every change the learning system makes, in any tier, is recorded in its own ledger under `~/.axl/learn/`, separate from the artifacts it modifies:
 
 - Each entry records the change itself, its tier, provenance, supporting evidence, confidence, and when it took effect.
 - The ledger is append-only and is what powers `/learn diff`, `/learn why`, and rollback.
 - Outcome tracking: insights metrics (friction, tool errors, cost, satisfaction, outcome rates) are compared between sessions before and after each change took effect, so the system can see whether its own changes helped.
-- Insights flag changes followed by worse metrics and show the evidence. Kepler automatically reverts a regressing tier 1 automatic change and records the reversion. Manual-tier changes are proposed for removal.
+- Insights flag changes followed by worse metrics and show the evidence. Axl automatically reverts a regressing tier 1 automatic change and records the reversion. Manual-tier changes are proposed for removal.
 - Attribution stays honest about confounders: metrics move for many reasons, so regression flags carry confidence, and changes that took effect together are evaluated together rather than blamed individually.
 
-The learning loop thereby gets the same treatment Kepler gives everything else: its actions are logged, reversible, and judged by evidence.
+The learning loop thereby gets the same treatment Axl gives everything else: its actions are logged, reversible, and judged by evidence.
 
 ### 8.8 Proactive suggestions at project start
 
-When Kepler opens an unfamiliar project, it may suggest skills, hooks, or extensions based on the repository and the user's recorded work patterns. A deployment script might suggest a deployment hook. Repeated trouble with one stack might suggest a diagnostic skill.
+When Axl opens an unfamiliar project, it may suggest skills, hooks, or extensions based on the repository and the user's recorded work patterns. A deployment script might suggest a deployment hook. Repeated trouble with one stack might suggest a diagnostic skill.
 
-Manual tiers require approval before creating anything. Automatic tiers may create and announce non-executable artifacts. Executable hooks and extensions still go to quarantine and require approval before activation (sections 8.4 and 19). New artifacts stay under the project's `.kepler/` directory unless the user promotes them.
+Manual tiers require approval before creating anything. Automatic tiers may create and announce non-executable artifacts. Executable hooks and extensions still go to quarantine and require approval before activation (sections 8.4 and 19). New artifacts stay under the project's `.axl/` directory unless the user promotes them.
 
 Suggestions appear only in the client. They do not enter model context or alter the prompt cache. They are rate-limited and dismissible, and dismissed suggestions do not return.
 
@@ -830,15 +830,15 @@ Provide at least:
 
 A normal session requires an operating-system sandbox and uses `direct` inside that boundary. If the requested sandbox is unavailable, startup fails.
 
-Unsandboxed execution requires `kepler --unsafe`. Unsafe sessions default to `auto`, record that mode in the session log, and show a persistent warning in every client. Users may choose `manual` or `deny` for tighter control. The classifier helps with decisions but is not a security boundary. Bypassing an active sandbox is a separate action that always requires approval.
+Unsandboxed execution requires `axl --unsafe`. Unsafe sessions default to `auto`, record that mode in the session log, and show a persistent warning in every client. Users may choose `manual` or `deny` for tighter control. The classifier helps with decisions but is not a security boundary. Bypassing an active sandbox is a separate action that always requires approval.
 
 ### 9.3 Auto mode
 
 Auto mode is the recommended midpoint for users who want more intervention than Pi without approving every command.
 
-Kepler gives the classifier a structured action record with the tool name, parsed arguments, canonical paths, target domains, requested capability change, and active sandbox profile. Raw commands and file contents are clearly marked as untrusted data.
+Axl gives the classifier a structured action record with the tool name, parsed arguments, canonical paths, target domains, requested capability change, and active sandbox profile. Raw commands and file contents are clearly marked as untrusted data.
 
-The classifier chooses from decisions that Kepler derives from administrator and user policy. It can approve an action within the current ceiling, but it cannot grant new filesystem, network, credential, or cloud access. Every decision and reason enters the log.
+The classifier chooses from decisions that Axl derives from administrator and user policy. It can approve an action within the current ceiling, but it cannot grant new filesystem, network, credential, or cloud access. Every decision and reason enters the log.
 
 All automatic decisions are logged with their reason and policy version.
 
@@ -870,7 +870,7 @@ Support the same broad classes as Claude Code:
 
 Levels 3 through 6 use OCI underneath. They differ by image ownership and execution location.
 
-A new session uses the host's per-command sandbox when one is available: Bubblewrap or Landlock on Linux, and Seatbelt on macOS. Workspace-scoped writes and the default network policy make `direct` the default permission profile. Without a suitable provider, Kepler reports the missing isolation and uses `auto` only where policy allows it.
+A new session uses the host's per-command sandbox when one is available: Bubblewrap or Landlock on Linux, and Seatbelt on macOS. Workspace-scoped writes and the default network policy make `direct` the default permission profile. Without a suitable provider, Axl reports the missing isolation and uses `auto` only where policy allows it.
 
 ### 10.2 Per-command controls
 
@@ -915,7 +915,7 @@ Use shell and file tools first, MCP and APIs second, and browser automation when
 
 ### 10.6 Web access
 
-Web search and content fetching are core capabilities. Kepler adopts the proven shape of `pi-web-access` under its MIT license:
+Web search and content fetching are core capabilities. Axl adopts the proven shape of `pi-web-access` under its MIT license:
 
 - Two public tools, `web_search` and `fetch_content`, with provider routing behind them.
 - Keyless search works by default. API keys, reused subscription auth, and self-hosted endpoints enable more providers.
@@ -925,25 +925,25 @@ Web search and content fetching are core capabilities. Kepler adopts the proven 
 - Video understanding: transcripts, visual descriptions, and frame extraction from video links and local screen recordings.
 - SSRF protection and content sanitization are built in. Hosted third-party page fetchers require an explicit opt-in.
 
-Under Kepler, provider calls are ordinary egress: they obey the session's network policy and appear in the event log like any other tool traffic. Provider keys live in the secrets layer (section 12.4), never in prompts or logs.
+Under Axl, provider calls are ordinary egress: they obey the session's network policy and appear in the event log like any other tool traffic. Provider keys live in the secrets layer (section 12.4), never in prompts or logs.
 
 ## 11. OCI runtime
 
-OCI is the shared execution layer for dev containers, custom images, child sessions, and cloud workers. Kepler consumes OCI standards and does not define its own image, bundle, or environment format.
+OCI is the shared execution layer for dev containers, custom images, child sessions, and cloud workers. Axl consumes OCI standards and does not define its own image, bundle, or environment format.
 
 ### 11.1 Which specifications
 
-"OCI support" is three specifications, and Kepler targets all three explicitly:
+"OCI support" is three specifications, and Axl targets all three explicitly:
 
-- **Image Specification**: manifests, config, layers, and the image index for multi-platform images. Kepler reads indexes and resolves them to a single platform-specific manifest digest.
-- **Runtime Specification**: the filesystem bundle and `config.json` that describe how a container is configured and run, including the Linux section (namespaces, cgroups, seccomp, capabilities, masked and read-only paths). This is where Kepler's sandbox policy (section 10.2) is actually expressed.
+- **Image Specification**: manifests, config, layers, and the image index for multi-platform images. Axl reads indexes and resolves them to a single platform-specific manifest digest.
+- **Runtime Specification**: the filesystem bundle and `config.json` that describe how a container is configured and run, including the Linux section (namespaces, cgroups, seccomp, capabilities, masked and read-only paths). This is where Axl's sandbox policy (section 10.2) is actually expressed.
 - **Distribution Specification**: the registry API used to pull by digest, and the referrers API used to discover signatures, SBOMs, and attestations attached to an image (section 11.4).
 
-Anything runtime-spec compliant can serve as the low-level runtime. Kepler does not ship a runtime.
+Anything runtime-spec compliant can serve as the low-level runtime. Axl does not ship a runtime.
 
 ### 11.2 Runtimes and clients
 
-Isolation strength is a property of the runtime, and Kepler reports it rather than flattening everything into the word "container":
+Isolation strength is a property of the runtime, and Axl reports it rather than flattening everything into the word "container":
 
 | Runtime | Isolation | Notes |
 | --- | --- | --- |
@@ -953,11 +953,11 @@ Isolation strength is a property of the runtime, and Kepler reports it rather th
 | gVisor (`runsc`) | user-space kernel | Intercepts system calls before the host kernel. Stronger isolation with some compatibility and performance costs. |
 | Kata Containers | hardware VM | Each container in a lightweight VM (QEMU, Cloud Hypervisor, or Firecracker). Strongest local isolation, highest startup cost. |
 
-Kepler supports Podman, Docker Engine, and containerd through nerdctl. Rootless Podman is preferred. On macOS, Kepler detects a Linux VM supplied by Lima, Colima, Docker Desktop, or Apple's `container` tooling. Windows support runs through WSL2 with a Linux engine. Native Windows containers are outside the plan.
+Axl supports Podman, Docker Engine, and containerd through nerdctl. Rootless Podman is preferred. On macOS, Axl detects a Linux VM supplied by Lima, Colima, Docker Desktop, or Apple's `container` tooling. Windows support runs through WSL2 with a Linux engine. Native Windows containers are outside the plan.
 
 **Rootless is the local default.** Containers use a user namespace, map container root to an unprivileged host ID, use an unprivileged overlay filesystem, run through user-space networking, and receive cgroups v2 delegation from the user's systemd slice. Requiring a root-equivalent daemon would move risk instead of reducing it. Rootful execution remains available for workloads that need it and is announced at session start.
 
-`/doctor` reports available engines and runtimes, rootless support, cgroups v2 delegation, user namespaces, and enforceable controls. A session fails to start when the installed runtime cannot meet its policy. Kepler never replaces requested VM isolation with a shared-kernel container without saying so.
+`/doctor` reports available engines and runtimes, rootless support, cgroups v2 delegation, user namespaces, and enforceable controls. A session fails to start when the installed runtime cannot meet its policy. Axl never replaces requested VM isolation with a shared-kernel container without saying so.
 
 ### 11.3 The container contract
 
@@ -984,9 +984,9 @@ verifyTerminated
 - **AppArmor or SELinux labels** applied where the host provides them, including the volume relabeling that SELinux hosts require for bind mounts.
 - **User namespace mapping** so container UID 0 is an unprivileged host UID.
 - **No device passthrough.** No GPU, no `/dev/kvm`, no host devices unless explicitly granted.
-- **cgroups v2 limits** for CPU, memory and swap, process counts, and I/O. Kepler reports an out-of-memory kill directly.
+- **cgroups v2 limits** for CPU, memory and swap, process counts, and I/O. Axl reports an out-of-memory kill directly.
 
-`snapshot` captures the workspace and the event log, not process state. Process-level checkpointing is explicitly out of scope initially: a resumed session replays from its log (section 15.6), which is a guarantee Kepler already makes, rather than from a frozen process image, which it would then have to keep making across kernel and runtime versions.
+`snapshot` captures the workspace and the event log, not process state. Process-level checkpointing is explicitly out of scope initially: a resumed session replays from its log (section 15.6), which is a guarantee Axl already makes, rather than from a frozen process image, which it would then have to keep making across kernel and runtime versions.
 
 `stop` sends a graceful signal, waits for a bounded period, then forces termination. `terminate` is idempotent. `verifyTerminated` queries the provider after cleanup and confirms that the resource is gone. Time and cost ceilings use resource leases on top of cgroup limits (section 12.3).
 
@@ -995,32 +995,32 @@ verifyTerminated
 An agent that runs model-chosen code inside a container it pulled from the internet has two trust problems, not one. The image gets the same provenance treatment as an adopted extension (section 4.4):
 
 - **Digests, always.** Tags resolve to a digest once, at configuration time, and the digest is what is stored and pulled thereafter. A moving tag is not a reproducible environment.
-- **Platform pinning.** Resolve a multi-platform image to a platform-specific digest and record it. Kepler announces emulation because it can be slower and behave differently.
+- **Platform pinning.** Resolve a multi-platform image to a platform-specific digest and record it. Axl announces emulation because it can be slower and behave differently.
 - **Signature verification.** Sigstore/cosign verification, keyless or key-based, with policy configurable per registry. Where policy requires verification and the signature is missing or invalid, the container does not start. Attestations and SBOMs are discovered through the referrers API and recorded alongside the digest, so what ran is auditable after the fact.
 - **Registry credentials** come from the host's existing credential helpers and live in the secrets layer (section 12.4). They never appear in prompts, logs, session events, or generated extensions.
-- **Offline behavior is clear.** Without network access, Kepler uses the local layer cache and reports that choice. It neither starts an unexpected pull nor disguises a blocked pull as a missing image.
-- **Kepler's own base images** are published with signatures, SBOMs, and provenance attestations. Asking users to verify what they run while shipping unverifiable images would be incoherent.
+- **Offline behavior is clear.** Without network access, Axl uses the local layer cache and reports that choice. It neither starts an unexpected pull nor disguises a blocked pull as a missing image.
+- **Axl's own base images** are published with signatures, SBOMs, and provenance attestations. Asking users to verify what they run while shipping unverifiable images would be incoherent.
 
 ### 11.5 Dev containers
 
-Repositories can describe their environment with `devcontainer.json`, so Kepler uses that specification instead of adding another format. It supports image and Dockerfile builds, Compose files, features, `remoteUser`, `containerEnv`, mounts, and forwarded ports.
+Repositories can describe their environment with `devcontainer.json`, so Axl uses that specification instead of adding another format. It supports image and Dockerfile builds, Compose files, features, `remoteUser`, `containerEnv`, mounts, and forwarded ports.
 
 Dev containers are code, so two rules apply:
 
 - **Lifecycle commands are untrusted input.** `postCreateCommand`, `postStartCommand`, and friends are arbitrary commands supplied by the repository, which may be a repository the user just cloned. They run inside the container under the session's normal permission policy, with the first execution requiring an explicit grant that names the commands. A dev container is a convenience, not an exemption.
 - **Features are OCI artifacts**, pulled from registries, and they get section 11.4's verification policy like any other image content.
 
-Kepler uses the reference `devcontainer` CLI where it fits. Kepler owns policy, mounts, and lifecycle rather than reimplementing the format.
+Axl uses the reference `devcontainer` CLI where it fits. Axl owns policy, mounts, and lifecycle rather than reimplementing the format.
 
 ### 11.6 Networking and egress
 
-Each container gets its own network namespace. Firewall rules send outbound traffic through a Kepler-controlled proxy and prevent direct sockets from bypassing it. The proxy checks host names for plaintext traffic and SNI for TLS, and it also handles DNS. Rootless setups use a user-space network stack even though it is slower than a bridge device.
+Each container gets its own network namespace. Firewall rules send outbound traffic through an Axl-controlled proxy and prevent direct sockets from bypassing it. The proxy checks host names for plaintext traffic and SNI for TLS, and it also handles DNS. Rootless setups use a user-space network stack even though it is slower than a bridge device.
 
 No ports are published by default. Publishing one is explicit, bound to loopback unless the user says otherwise, and surfaced in the client so a forwarded port is never a surprise. All of this is the same policy object as the per-command sandbox, so a rule written once holds whether a command runs on the host or in a container.
 
 ### 11.7 Filesystem, state, and secrets
 
-The workspace is mounted at a fixed path, and the host home directory is not mounted. Kepler injects secrets at startup through temporary files or environment variables. They do not enter image layers, snapshots, or the event log. Cloud workers upload the append-only session log as they run, and artifacts travel through the blob channel rather than the event stream.
+The workspace is mounted at a fixed path, and the host home directory is not mounted. Axl injects secrets at startup through temporary files or environment variables. They do not enter image layers, snapshots, or the event log. Cloud workers upload the append-only session log as they run, and artifacts travel through the blob channel rather than the event stream.
 
 ### 11.8 When it cannot be done
 
@@ -1083,15 +1083,15 @@ An external reconciler periodically destroys expired or orphaned resources. Clea
 
 ### 12.4 Credentials
 
-Kepler-managed credentials are opaque identifiers outside the secrets layer. Models, skills, extensions, and sandboxed commands receive placeholders instead of raw values.
+Axl-managed credentials are opaque identifiers outside the secrets layer. Models, skills, extensions, and sandboxed commands receive placeholders instead of raw values.
 
 For supported protocols, a sandbox receives a per-session sentinel. A broker outside the sandbox checks the destination and requested scope, then substitutes the credential only for the approved outbound request. V1 starts with bearer-token and basic-auth flows. Schemes that cannot be brokered safely fail instead of exposing plaintext to an extension.
 
-Cloud providers should use AWS IAM roles, Azure managed identities, GCP workload identity, short-lived Git credentials, or external secret brokers where available. Redaction remains a backup control. Kepler-managed credentials must never enter model context, session logs, generated extensions, or adoption metadata. User-authored text remains subject to local retention policy.
+Cloud providers should use AWS IAM roles, Azure managed identities, GCP workload identity, short-lived Git credentials, or external secret brokers where available. Redaction remains a backup control. Axl-managed credentials must never enter model context, session logs, generated extensions, or adoption metadata. User-authored text remains subject to local retention policy.
 
 ## 13. Subscription pooling
 
-Many users can reach the same model through a personal subscription, work account, API key, cloud endpoint, or local service. Kepler can group authorized access methods into a pool so one exhausted account does not stop all work. Every routing decision is visible and logged.
+Many users can reach the same model through a personal subscription, work account, API key, cloud endpoint, or local service. Axl can group authorized access methods into a pool so one exhausted account does not stop all work. Every routing decision is visible and logged.
 
 ### 13.1 Members
 
@@ -1119,9 +1119,9 @@ A mid-session member switch is an explicit event with its reason, and the re-pri
 
 ### 13.3 Limits and exhaustion
 
-Each member has an observed state: `available`, `throttled`, `exhausted`, `degraded`, or `failed`. Kepler records retry and reset times when the provider supplies them and uses conservative estimates otherwise. It moves a request to another member only when retrying is safe. Authentication failures disable the member and ask the user to sign in again.
+Each member has an observed state: `available`, `throttled`, `exhausted`, `degraded`, or `failed`. Axl records retry and reset times when the provider supplies them and uses conservative estimates otherwise. It moves a request to another member only when retrying is safe. Authentication failures disable the member and ask the user to sign in again.
 
-When every member is exhausted, Kepler reports the pool state and earliest reset time, then pauses at the next safe boundary. It does not choose a weaker model or lower thinking level without an explicit setting and visible notice.
+When every member is exhausted, Axl reports the pool state and earliest reset time, then pauses at the next safe boundary. It does not choose a weaker model or lower thinking level without an explicit setting and visible notice.
 
 ### 13.4 Boundaries
 
@@ -1190,13 +1190,13 @@ The web, terminal, and mobile clients must not implement separate agent loops.
 
 ### 15.1 Session placement
 
-Kepler has one coding interface with three session placements:
+Axl has one coding interface with three session placements:
 
 - `local`: the agent loop runs on the user's machine, driven from the terminal, desktop, or local web client.
 - `cloud`: the loop runs on a cloud worker in an OCI sandbox (sections 11 and 12).
 - `attach`: a phone or web client controls an existing session without starting another loop (section 16.3).
 
-Placement changes where the loop runs, not its protocol or event format. Sessions can move through cloud transfer. `kepler web` serves a local web client with a full **code** mode and a tool-free **chat** mode. Both use the same daemon and event log. A broader cowork interface is outside the initial scope.
+Placement changes where the loop runs, not its protocol or event format. Sessions can move through cloud transfer. `axl web` serves a local web client with a full **code** mode and a tool-free **chat** mode. Both use the same daemon and event log. A broader cowork interface is outside the initial scope.
 
 Parallel sessions on the same repository isolate their working state in git worktrees, so mission control (section 18.3) can run several agents against one repo without them fighting over files. Worktrees are created on demand when a session opens an already-busy repo and cleaned up automatically when a session ends without changes.
 
@@ -1228,9 +1228,9 @@ The daemon owns behavior, so client SDKs stay small. They provide:
 - **Capability negotiation**: client and daemon exchange protocol version and feature sets on connect, and mismatches degrade loudly (open decision 5 covers the versioning scheme).
 - **Presence**: who else is attached to the session, so simultaneous terminal, web, and mobile clients can indicate each other.
 
-The current TypeScript event and wire definitions remain authoritative while every client uses TypeScript. Kepler will choose a schema language and generator when the first non-TypeScript client creates a real need. Swift and Kotlin clients will then be generated from that shared schema rather than maintained by hand.
+The current TypeScript event and wire definitions remain authoritative while every client uses TypeScript. Axl will choose a schema language and generator when the first non-TypeScript client creates a real need. Swift and Kotlin clients will then be generated from that shared schema rather than maintained by hand.
 
-Local clients use a Unix socket, while remote clients use WebSocket through the relay. MCP remains the external tool protocol and does not replace Kepler's client protocol.
+Local clients use a Unix socket, while remote clients use WebSocket through the relay. MCP remains the external tool protocol and does not replace Axl's client protocol.
 
 Slash commands are thin wrappers around daemon RPCs. A scoped harness-control tool can expose the same operations to the model when the user asks for them. The tool is discovered on demand, follows normal permission policy, and records each action. This lets a user ask the model to find a session, create a branch, compact context, or switch models.
 
@@ -1242,7 +1242,7 @@ Storage is split into a canonical log and a derived index, each in the format th
 
 - **JSONL is the source of truth.** Each session has an append-only log whose parent IDs form the tree. The shape stays close to Pi's format so imports can preserve most information. A torn write can damage only the final line, which recovery may truncate. JSONL is readable, searchable, streamable, and easy to move between workers.
 - **Per-session JSON sidecar caches are the default index.** The pi-insights pattern (section 8.6): deterministic stats extracted once per session and cached as small JSON files. This covers the session picker, insights aggregation, and most viewer queries with no database at all.
-- **SQLite is an optional search index.** When JSON sidecars become too slow for full-text search, Kepler builds an FTS5 database from the logs. The database is disposable. Schema changes rebuild it instead of migrating canonical history.
+- **SQLite is an optional search index.** When JSON sidecars become too slow for full-text search, Axl builds an FTS5 database from the logs. The database is disposable. Schema changes rebuild it instead of migrating canonical history.
 - Every write reaches JSONL before any index. An index may lag, but the log may not. If they disagree, rebuild the index.
 - Cloud workers upload only durable JSONL (section 11). Each client builds its own local caches and indexes.
 
@@ -1299,8 +1299,8 @@ The mobile apps use SwiftUI on iOS and Jetpack Compose on Android. Thin clients 
 
 The same daemon serves non-interactive callers:
 
-- `kepler run -p "<prompt>"` executes a session headlessly and can emit structured JSON output for scripting.
-- CI integration: run Kepler as a pipeline step or a GitHub Action, with the event log uploaded as the run artifact.
+- `axl run -p "<prompt>"` executes a session headlessly and can emit structured JSON output for scripting.
+- CI integration: run Axl as a pipeline step or a GitHub Action, with the event log uploaded as the run artifact.
 - Event subscriptions can wake a session for a pull request comment, CI failure, or webhook. The normal permission and sandbox policy still applies.
 - Schedules: recurring triggers that start a fresh session or wake a persistent one.
 - Automation uses the same daemon, log, budgets, and sandbox rules as interactive sessions.
@@ -1350,7 +1350,7 @@ Publish tested compatibility status for real plugins. Plugin authors should be a
 
 Seed the catalog with widely used packages for documentation, optional memory, planning, side conversations, browser control, Git workflows, configuration sync, and usage analytics. Prefer adopting established tools over rebuilding them.
 
-The catalog also measures whether adoption works. For a seed set of popular packages in each supported ecosystem, Kepler targets:
+The catalog also measures whether adoption works. For a seed set of popular packages in each supported ecosystem, Axl targets:
 
 - At least 90% of corpus packages activate with their primary entry surface converted.
 - At least 80% of all corpus surfaces convert at `native` or `adapted`.
@@ -1367,7 +1367,7 @@ Because sessions are event-sourced, a recorded session is a test fixture for fre
 
 ## 18. Feature directions
 
-Beyond the core, these are the features Kepler's own primitives make uniquely possible.
+Beyond the core, these are the features Axl's own primitives make uniquely possible.
 
 ### 18.1 From the session tree
 
@@ -1397,7 +1397,7 @@ Beyond the core, these are the features Kepler's own primitives make uniquely po
 
 ## 19. Explicit non-goals
 
-Kepler should not add:
+Axl should not add:
 
 - Another skill format
 - Another MCP replacement
@@ -1412,7 +1412,7 @@ Kepler should not add:
 
 ## 20. Decisions and open questions
 
-1. Product name: Kepler. The package namespace and npm scope remain open.
+1. Product name: Axl. The package namespace and npm scope remain open.
 2. Default permission profile: decided. Use `direct` with an enforced sandbox and `auto` when policy permits operation without confinement (section 9.2).
 3. Exact compatibility surface promised for the first Pi, OpenCode, and DSH release.
 4. Third-party extension placement: decided for v1. Third-party and adopted code always runs out of process under the selected sandbox.
@@ -1446,31 +1446,31 @@ The initial product thesis is proven when a user can:
 
 **Why not use DeepSeek Harness?**
 
-DSH makes the loop, log, and policy layer replaceable. Kepler uses that flexibility for features but keeps a fixed kernel for event-log integrity, replay, and security enforcement. DSH serves framework builders. Kepler is an opinionated product.
+DSH makes the loop, log, and policy layer replaceable. Axl uses that flexibility for features but keeps a fixed kernel for event-log integrity, replay, and security enforcement. DSH serves framework builders. Axl is an opinionated product.
 
 **Why not fork Pi?**
 
-Pi provides proven behavior for the agent loop, compaction, provider API, prompt design, cache handling, and tree-shaped JSONL sessions. Kepler uses those contracts where they fit. It adds an adoption compiler, one daemon for every client, cloud placement, enforced sandbox policy, and a learning system.
+Pi provides proven behavior for the agent loop, compaction, provider API, prompt design, cache handling, and tree-shaped JSONL sessions. Axl uses those contracts where they fit. It adds an adoption compiler, one daemon for every client, cloud placement, enforced sandbox policy, and a learning system.
 
 **Is this a Claude Code clone?**
 
-No. Kepler focuses on adopting existing ecosystems and running one session across clients and models. Tree sessions, visible decisions, and the lack of default model-controlled delegation are also core differences.
+No. Axl focuses on adopting existing ecosystems and running one session across clients and models. Tree sessions, visible decisions, and the lack of default model-controlled delegation are also core differences.
 
 **Will my existing setup work?**
 
 Open standards such as MCP, AGENTS.md, Agent Skills, and Agent Plugins install directly. Pi, OpenCode, DSH, and Claude Code resources go through the adoption compiler, which leaves the original untouched and reports any behavior it could not preserve.
 
-**Can Kepler run subagents without exposing a default subagent tool?**
+**Can Axl run subagents without exposing a default subagent tool?**
 
 Yes. A subagent is a child session with its own model, thinking level, tools, placement, log, and budget. Users, workflows, goals, and system operations hold separate spawn authorities. Ordinary sessions do not give that authority to the model by default.
 
-**How is Kepler built?**
+**How is Axl built?**
 
-Kepler starts dogfooding as soon as it can safely edit a disposable worktree, run its tests, restart, and replay its history. Development may fall back to another harness when Kepler itself is under repair. Outside users remain important because the author is a poor test of zero-configuration behavior.
+Axl starts dogfooding as soon as it can safely edit a disposable worktree, run its tests, restart, and replay its history. Development may fall back to another harness when Axl itself is under repair. Outside users remain important because the author is a poor test of zero-configuration behavior.
 
 **Why is there no memory system?**
 
-Ambient memory can inject stale context, reduce cache reuse, and make behavior hard to explain. Kepler keeps a small, visible set of evidence-based rules and searches old sessions only on request. Users may still install memory extensions.
+Ambient memory can inject stale context, reduce cache reuse, and make behavior hard to explain. Axl keeps a small, visible set of evidence-based rules and searches old sessions only on request. Users may still install memory extensions.
 
 **Where does my data live?**
 
@@ -1480,9 +1480,9 @@ Local session logs are JSONL files on the user's machine. Cloud workers upload l
 
 Use any provider that meets the role's capability requirements. Tool dialects adapt the core tools to each model, and the personal model bench compares models against the user's own work.
 
-**Can Kepler combine subscriptions and API keys?**
+**Can Axl combine subscriptions and API keys?**
 
-Yes. Subscription pools group authorized entitlements, keep sessions sticky for cache reuse, and move work when a member is throttled or exhausted. Kepler records the switch, reason, and cost. It does not silently downgrade models or share credentials between people.
+Yes. Subscription pools group authorized entitlements, keep sessions sticky for cache reuse, and move work when a member is throttled or exhausted. Axl records the switch, reason, and cost. It does not silently downgrade models or share credentials between people.
 
 **Do I need to configure every feature?**
 

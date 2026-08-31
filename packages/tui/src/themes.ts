@@ -34,7 +34,7 @@ function foregroundOn(fg: string, bg: string): (text: string) => string {
 
 const bold = sgr("1", "22");
 
-const kepler: Palette = {
+const axl: Palette = {
   dim: sgr("2", "22"),
   accent: sgr("36", "39"),
   error: sgr("31", "39"),
@@ -162,7 +162,7 @@ const plain: Palette = {
 
 export const THEMES: Readonly<Record<string, Palette>> = {
   dark,
-  kepler,
+  axl,
   ember,
   ocean,
   grove,

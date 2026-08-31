@@ -12,8 +12,8 @@ import {
   type ModelInfo,
   supportedThinkingLevels,
   THINKING_LEVELS,
-} from "@kepler/ai";
-import type { DaemonClient, SessionSnapshot } from "@kepler/daemon";
+} from "@axl/ai";
+import type { DaemonClient, SessionSnapshot } from "@axl/daemon";
 import type {
   CanonicalEvent,
   EventPayloadMap,
@@ -22,7 +22,7 @@ import type {
   SessionForkResult,
   SessionSummary,
   ThinkingLevel,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 import { renderDialog } from "./dialog.ts";
 import { decodeOneKey, LineEditor } from "./editor.ts";
@@ -288,7 +288,7 @@ interface InputStream {
   isTTY?: boolean;
 }
 
-export interface KeplerAppOptions {
+export interface AxlAppOptions {
   readonly client: DaemonClient;
   readonly input: InputStream;
   readonly output: OutputStream;
@@ -322,10 +322,10 @@ type TranscriptEntry =
   | { readonly kind: "event"; readonly event: CanonicalEvent }
   | { readonly kind: "lines"; readonly lines: readonly string[] };
 
-/** A terminal projection over one daemon-owned Kepler session. */
-export class KeplerApp {
+/** A terminal projection over one daemon-owned Axl session. */
+export class AxlApp {
   sessionId: string;
-  private readonly options: KeplerAppOptions;
+  private readonly options: AxlAppOptions;
   private readonly screen: DifferentialScreen;
   private view: SessionView;
   private readonly editor = new LineEditor();
@@ -372,7 +372,7 @@ export class KeplerApp {
   };
 
   private constructor(
-    options: KeplerAppOptions,
+    options: AxlAppOptions,
     sessionId: string,
     width: number,
     height: number,
@@ -398,7 +398,7 @@ export class KeplerApp {
     });
   }
 
-  static async start(options: KeplerAppOptions): Promise<KeplerApp> {
+  static async start(options: AxlAppOptions): Promise<AxlApp> {
     const snapshot = (await (options.sessionId === undefined
       ? options.client.request("session.create", {
           cwd: options.cwd,
@@ -414,7 +414,7 @@ export class KeplerApp {
     const width =
       options.output.columns && options.output.columns > 0 ? options.output.columns : 80;
     const height = options.output.rows && options.output.rows > 0 ? options.output.rows : 24;
-    const app = new KeplerApp(
+    const app = new AxlApp(
       options,
       snapshot.sessionId,
       width,
@@ -468,7 +468,7 @@ export class KeplerApp {
   private welcomeLines(cwd: string, resumed: boolean): string[] {
     const { accent, dim } = this.view.palette;
     return [
-      `${accent("◆ Kepler")}  ${dim(resumed ? "resuming session" : "new session")}`,
+      `${accent("◆ Axl")}  ${dim(resumed ? "resuming session" : "new session")}`,
       dim(`  ${cwd}`),
       dim("  /help for commands · Shift+Enter for a new line"),
       "",

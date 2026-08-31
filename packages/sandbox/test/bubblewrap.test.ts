@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import type { WorkspacePolicy } from "@kepler/kernel";
+import type { WorkspacePolicy } from "@axl/kernel";
 
 import {
   BUBBLEWRAP_CONTROLS,
@@ -26,22 +26,22 @@ const integration = {
 const noSignal = new AbortController().signal;
 
 async function makeLayout(context: TestContext) {
-  const root = await mkdtemp(join(tmpdir(), "kepler-bwrap-"));
+  const root = await mkdtemp(join(tmpdir(), "axl-bwrap-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, "workspace");
-  const keplerHome = join(root, "kepler-home");
+  const axlHome = join(root, "axl-home");
   await mkdir(workspace, { recursive: true });
-  await mkdir(keplerHome, { recursive: true });
-  await writeFile(join(keplerHome, "credentials.json"), '{"secret":"topsecret"}\n');
+  await mkdir(axlHome, { recursive: true });
+  await writeFile(join(axlHome, "credentials.json"), '{"secret":"topsecret"}\n');
   await writeFile(join(root, "outside.txt"), "outside\n");
-  const policy: WorkspacePolicy = { workspace, protectedPaths: [keplerHome] };
+  const policy: WorkspacePolicy = { workspace, protectedPaths: [axlHome] };
   const tool = makeBubblewrapShellTool({
     cwd: workspace,
     overflowDirectory: join(root, "overflow"),
     policy,
     capabilities,
   });
-  return { root, workspace, keplerHome, policy, tool };
+  return { root, workspace, axlHome, policy, tool };
 }
 
 function text(result: { content: readonly { type: string; text?: string }[] }): string {
@@ -49,7 +49,7 @@ function text(result: { content: readonly { type: string; text?: string }[] }): 
 }
 
 test("builds the confinement argv: namespaces, masks, cleared environment", () => {
-  const policy: WorkspacePolicy = { workspace: "/repo", protectedPaths: ["/home/user/.kepler"] };
+  const policy: WorkspacePolicy = { workspace: "/repo", protectedPaths: ["/home/user/.axl"] };
   const argv = buildBubblewrapArgv(policy, "echo hi", "/repo", {
     PATH: "/usr/bin",
     HOME: "/home/user",
@@ -64,14 +64,14 @@ test("builds the confinement argv: namespaces, masks, cleared environment", () =
     "/repo",
   ]);
   const maskIndex = argv.indexOf("--tmpfs", argv.indexOf("--bind"));
-  assert.deepEqual(argv.slice(maskIndex, maskIndex + 2), ["--tmpfs", "/home/user/.kepler"]);
+  assert.deepEqual(argv.slice(maskIndex, maskIndex + 2), ["--tmpfs", "/home/user/.axl"]);
   assert.deepEqual(argv.slice(-5), ["--chdir", "/repo", "bash", "-c", "echo hi"]);
   // No environment value leaks without an allowlist entry.
   assert.equal(argv.includes("AZURE_OPENAI_API_KEY"), false);
 });
 
 test("wraps long-lived extension processes without a shell", () => {
-  const policy: WorkspacePolicy = { workspace: "/repo", protectedPaths: ["/home/user/.kepler"] };
+  const policy: WorkspacePolicy = { workspace: "/repo", protectedPaths: ["/home/user/.axl"] };
   const process = buildBubblewrapProcess(policy, "node", ["server.mjs"], "/repo", {
     PATH: "/usr/bin",
     MCP_TOKEN: "secret",
@@ -144,9 +144,9 @@ test(
 );
 
 test("protected paths are invisible inside the sandbox", integration, async (context) => {
-  const { keplerHome, tool } = await makeLayout(context);
+  const { axlHome, tool } = await makeLayout(context);
   const result = await tool.execute(
-    { command: `cat ${join(keplerHome, "credentials.json")}; ls -A ${keplerHome}` },
+    { command: `cat ${join(axlHome, "credentials.json")}; ls -A ${axlHome}` },
     noSignal,
   );
   assert.equal(text(result).includes("topsecret"), false);
@@ -167,9 +167,9 @@ test("the sandbox has no network", integration, async (context) => {
 
 test("the environment is cleared to the allowlist", integration, async (context) => {
   const { tool } = await makeLayout(context);
-  process.env.KEPLER_TEST_SECRET = "leaky-value";
+  process.env.AXL_TEST_SECRET = "leaky-value";
   context.after(() => {
-    delete process.env.KEPLER_TEST_SECRET;
+    delete process.env.AXL_TEST_SECRET;
   });
   const result = await tool.execute({ command: "env" }, noSignal);
   assert.equal(text(result).includes("leaky-value"), false);

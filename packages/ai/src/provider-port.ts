@@ -1,12 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type {
-  ModelMessage,
-  ModelStreamEvent,
-  ThinkingLevel,
-  ToolDeclaration,
-} from "@kepler/protocol";
+import type { ModelMessage, ModelStreamEvent, ThinkingLevel, ToolDeclaration } from "@axl/protocol";
 
 import type { ModelProvider } from "./provider.ts";
 import { normalizeModelStream } from "./stream.ts";

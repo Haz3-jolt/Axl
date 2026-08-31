@@ -10,8 +10,8 @@ import type {
   TaskStore,
 } from "@modelcontextprotocol/sdk/experimental/tasks/index.js";
 import type { Request, RequestId, Result, Task } from "@modelcontextprotocol/sdk/types.js";
-import { redactJsonValue } from "@kepler/kernel";
-import type { JsonValue } from "@kepler/protocol";
+import { redactJsonValue } from "@axl/kernel";
+import type { JsonValue } from "@axl/protocol";
 
 const PAGE_SIZE = 100;
 const DEFAULT_MAX_TTL_MS = 86_400_000;

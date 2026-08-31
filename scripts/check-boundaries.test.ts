@@ -22,25 +22,25 @@ function writePackage(
 }
 
 test("enforces protocol, kernel, and extension dependency boundaries", () => {
-  const root = mkdtempSync(join(tmpdir(), "kepler-boundaries-"));
-  writePackage(root, "protocol", { name: "@kepler/protocol", dependencies: { typebox: "1.0.0" } });
+  const root = mkdtempSync(join(tmpdir(), "axl-boundaries-"));
+  writePackage(root, "protocol", { name: "@axl/protocol", dependencies: { typebox: "1.0.0" } });
   writePackage(root, "kernel", {
-    name: "@kepler/kernel",
-    dependencies: { "@kepler/protocol": "workspace:*", yaml: "1.0.0" },
+    name: "@axl/kernel",
+    dependencies: { "@axl/protocol": "workspace:*", yaml: "1.0.0" },
   });
   writePackage(
     root,
     "extensions/example",
-    { name: "@kepler/example" },
-    'import "@kepler/kernel/private";\n',
+    { name: "@axl/example" },
+    'import "@axl/kernel/private";\n',
   );
   mkdirSync(join(root, "apps/example"), { recursive: true });
-  writeFileSync(join(root, "apps/example/index.ts"), 'import "@kepler/kernel";\n');
+  writeFileSync(join(root, "apps/example/index.ts"), 'import "@axl/kernel";\n');
 
   assert.deepEqual(checkWorkspace(root), [
     "packages/protocol must be dependency-free, found typebox",
-    "packages/kernel may depend only on @kepler/protocol, found yaml",
-    "packages/extensions/example/src/index.ts imports private kernel path @kepler/kernel/private",
-    "apps/example/index.ts imports @kepler/kernel; apps may import only @kepler/sdk",
+    "packages/kernel may depend only on @axl/protocol, found yaml",
+    "packages/extensions/example/src/index.ts imports private kernel path @axl/kernel/private",
+    "apps/example/index.ts imports @axl/kernel; apps may import only @axl/sdk",
   ]);
 });

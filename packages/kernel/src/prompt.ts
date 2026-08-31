@@ -18,7 +18,7 @@ export interface StablePrompt {
 }
 
 export const DEFAULT_IDENTITY =
-  "You are Kepler, a coding agent. You work directly in the user's repository with the tools listed below.";
+  "You are Axl, a coding agent. You work directly in the user's repository with the tools listed below.";
 
 /** Essential operating constraints — short, static, and free of feature instructions. */
 export const ESSENTIAL_CONSTRAINTS: readonly string[] = [
@@ -74,7 +74,7 @@ export function buildStablePrompt(input: StablePromptInput): StablePrompt {
 export interface AgentsInstructionsInput {
   /** Project working directory; its `AGENTS.md` applies when present. */
   readonly cwd: string;
-  /** Global instructions file, e.g. `~/.kepler/AGENTS.md`. Absent by default. */
+  /** Global instructions file, e.g. `~/.axl/AGENTS.md`. Absent by default. */
   readonly globalPath?: string;
 }
 

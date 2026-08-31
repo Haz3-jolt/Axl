@@ -10,7 +10,7 @@ import {
   WIRE_PROTOCOL_VERSION,
   type WireEvent,
   type WireMethod,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 export class WireClientError extends Error {
   readonly code: string;

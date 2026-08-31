@@ -10,9 +10,9 @@ import test from "node:test";
 import { readSettings, writeSettings } from "../src/index.ts";
 
 test("settings persist global model, thinking, and theme choices", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-settings-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-settings-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
-  const path = join(directory, ".kepler", "settings.json");
+  const path = join(directory, ".axl", "settings.json");
   const settings = { model: "gpt-5.6-sol", thinking: "xhigh", theme: "dark" } as const;
 
   await writeSettings(path, settings);
@@ -22,7 +22,7 @@ test("settings persist global model, thinking, and theme choices", async (contex
 });
 
 test("settings reject malformed and unknown values", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-settings-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-settings-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, "settings.json");
 

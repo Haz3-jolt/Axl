@@ -20,25 +20,25 @@ importers:
 
   packages/ai:
     dependencies:
-      '@kepler/protocol':
+      '@axl/protocol':
         specifier: workspace:*
         version: link:../protocol
 
   packages/daemon:
     dependencies:
-      '@kepler/kernel':
+      '@axl/kernel':
         specifier: workspace:*
         version: link:../kernel
-      '@kepler/protocol':
+      '@axl/protocol':
         specifier: workspace:*
         version: link:../protocol
 
   packages/extensions/mcp:
     dependencies:
-      '@kepler/kernel':
+      '@axl/kernel':
         specifier: workspace:*
         version: link:../../kernel
-      '@kepler/protocol':
+      '@axl/protocol':
         specifier: workspace:*
         version: link:../../protocol
       '@modelcontextprotocol/sdk':
@@ -47,10 +47,10 @@ importers:
 
   packages/extensions/skills:
     dependencies:
-      '@kepler/kernel':
+      '@axl/kernel':
         specifier: workspace:*
         version: link:../../kernel
-      '@kepler/protocol':
+      '@axl/protocol':
         specifier: workspace:*
         version: link:../../protocol
       yaml:
@@ -59,7 +59,7 @@ importers:
 
   packages/kernel:
     dependencies:
-      '@kepler/protocol':
+      '@axl/protocol':
         specifier: workspace:*
         version: link:../protocol
 
@@ -67,34 +67,34 @@ importers:
 
   packages/sandbox:
     dependencies:
-      '@kepler/kernel':
+      '@axl/kernel':
         specifier: workspace:*
         version: link:../kernel
-      '@kepler/protocol':
+      '@axl/protocol':
         specifier: workspace:*
         version: link:../protocol
 
   packages/tui:
     dependencies:
-      '@kepler/ai':
+      '@axl/ai':
         specifier: workspace:*
         version: link:../ai
-      '@kepler/daemon':
+      '@axl/daemon':
         specifier: workspace:*
         version: link:../daemon
-      '@kepler/extension-mcp':
+      '@axl/extension-mcp':
         specifier: workspace:*
         version: link:../extensions/mcp
-      '@kepler/extension-skills':
+      '@axl/extension-skills':
         specifier: workspace:*
         version: link:../extensions/skills
-      '@kepler/kernel':
+      '@axl/kernel':
         specifier: workspace:*
         version: link:../kernel
-      '@kepler/protocol':
+      '@axl/protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@kepler/sandbox':
+      '@axl/sandbox':
         specifier: workspace:*
         version: link:../sandbox
 

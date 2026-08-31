@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Usage } from "@kepler/protocol";
+import type { Usage } from "@axl/protocol";
 
 import type { ModelCost } from "./model.ts";
 

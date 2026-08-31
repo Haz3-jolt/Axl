@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import type { JsonObject } from "@kepler/protocol";
+import type { JsonObject } from "@axl/protocol";
 
 import {
   makeEditTool,
@@ -20,7 +20,7 @@ import {
 const noSignal = new AbortController().signal;
 
 async function workspace(context: TestContext): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-tools-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-tools-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }

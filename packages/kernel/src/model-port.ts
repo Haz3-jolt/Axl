@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelMessage, ModelStreamEvent, ToolDeclaration } from "@kepler/protocol";
+import type { ModelMessage, ModelStreamEvent, ToolDeclaration } from "@axl/protocol";
 
 /** One model turn as the kernel requests it. Model identity is the adapter's concern. */
 export interface ModelTurnRequest {

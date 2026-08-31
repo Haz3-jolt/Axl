@@ -49,14 +49,9 @@ import {
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv-provider.js";
-import { redactJsonValue } from "@kepler/kernel";
-import type {
-  ExtensionHost,
-  KernelTool,
-  ModelTurnRequest,
-  ToolExecutionResult,
-} from "@kepler/kernel";
-import type { JsonObject, JsonValue, ModelMessage, UserContent } from "@kepler/protocol";
+import { redactJsonValue } from "@axl/kernel";
+import type { ExtensionHost, KernelTool, ModelTurnRequest, ToolExecutionResult } from "@axl/kernel";
+import type { JsonObject, JsonValue, ModelMessage, UserContent } from "@axl/protocol";
 
 import type { McpServerConfig, NamedMcpServerConfig } from "./config.ts";
 import { createOAuthSession, type OAuthSession } from "./oauth.ts";
@@ -229,7 +224,7 @@ function samplingMessages(messages: readonly SamplingMessage[]): ModelMessage[] 
     if (unsupported) {
       throw new McpError(
         ErrorCode.InvalidParams,
-        `The active Kepler model cannot accept MCP ${unsupported.type} sampling content`,
+        `The active Axl model cannot accept MCP ${unsupported.type} sampling content`,
       );
     }
     const text = items
@@ -267,7 +262,7 @@ async function sampleModel(
   if (safeParams.maxTokens < 16) {
     throw new McpError(
       ErrorCode.InvalidParams,
-      "The active Kepler provider requires maxTokens to be at least 16",
+      "The active Axl provider requires maxTokens to be at least 16",
     );
   }
   const request: ModelTurnRequest = {
@@ -660,7 +655,7 @@ export class McpManager implements ExtensionHost {
       { secretValues: () => [...this.secretValues] },
     );
     const client = new Client(
-      { name: "kepler", title: "Kepler", version: "0.0.0" },
+      { name: "axl", title: "Axl", version: "0.0.0" },
       {
         capabilities: {
           roots: { listChanged: false },

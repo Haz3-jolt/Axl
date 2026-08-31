@@ -14,8 +14,8 @@ import {
   type KernelTool,
   type ShellToolOptions,
   type WorkspacePolicy,
-} from "@kepler/kernel";
-import type { EventPayloadMap } from "@kepler/protocol";
+} from "@axl/kernel";
+import type { EventPayloadMap } from "@axl/protocol";
 
 import { allowlistedEnvironment, definedEnvironment } from "./environment.ts";
 import { type SandboxedProcess, SandboxUnavailableError } from "./bubblewrap.ts";

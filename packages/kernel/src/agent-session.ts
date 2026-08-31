@@ -20,7 +20,7 @@ import {
   type ToolCallRequest,
   type Usage,
   type UserContent,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 import { type ExtensionHost, NOOP_EXTENSION_HOST } from "./extension-host.ts";
 import { type EventLogOptions, JsonlEventLog } from "./jsonl-event-log.ts";

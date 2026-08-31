@@ -5,11 +5,11 @@
 // Adapted from Pi (earendil-works/pi @ 6c87d9a, MIT): thinking-level support
 // and clamping semantics from pi-ai models.ts; default thinking budgets and
 // answer-room reservation from pi-ai api/simple-options.ts. Changes: rewritten
-// against Kepler's ModelInfo and protocol ThinkingLevel (which includes "off"),
+// against Axl's ModelInfo and protocol ThinkingLevel (which includes "off"),
 // and clamping returns the `config.thinking` event payload so every clamp is
 // visible in the session log.
 
-import type { ThinkingLevel } from "@kepler/protocol";
+import type { ThinkingLevel } from "@axl/protocol";
 
 import type { ModelInfo } from "./model.ts";
 

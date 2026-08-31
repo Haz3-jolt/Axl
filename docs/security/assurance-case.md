@@ -5,11 +5,11 @@
 
 ## Claim
 
-Kepler runs model-selected actions under an enforceable local policy and keeps a redacted canonical record. The current implementation provides the Phase 4 sandbox and session controls. Later phases will add stronger isolation, remote workers, and release verification.
+Axl runs model-selected actions under an enforceable local policy and keeps a redacted canonical record. The current implementation provides the Phase 4 sandbox and session controls. Later phases will add stronger isolation, remote workers, and release verification.
 
 ## Assets
 
-Kepler protects:
+Axl protects:
 
 - Provider credentials and authorization state
 - Session events, prompts, tool inputs, tool outputs, and artifacts

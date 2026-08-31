@@ -17,4 +17,4 @@
 
 ## Next
 
-Before more Phase 5 work, Kepler needs four dogfood fixes: interactive `ask_user_question`, BM25 capability selection, direct typed MCP tools, and credential brokering for untrusted processes. Phase 5 then continues with the standard tool profile, secure web access, compaction, and the remaining single-session controls.
+Before more Phase 5 work, Axl needs four dogfood fixes: interactive `ask_user_question`, BM25 capability selection, direct typed MCP tools, and credential brokering for untrusted processes. Phase 5 then continues with the standard tool profile, secure web access, compaction, and the remaining single-session controls.

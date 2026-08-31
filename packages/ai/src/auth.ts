@@ -4,7 +4,7 @@
 // Behavioral reference: Pi's auth resolution (earendil-works/pi @ 6c87d9a):
 // a stored credential owns the provider, ambient sources apply only when
 // nothing is stored, and OAuth refresh runs once under the store lock with a
-// double-checked expiry. Kepler-native implementation; Kepler additionally exposes
+// double-checked expiry. Axl-native implementation; Axl additionally exposes
 // resolved secret values for event-log redaction and fails loudly through
 // typed auth states.
 

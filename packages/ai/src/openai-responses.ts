@@ -5,10 +5,10 @@
 // Adapted from Pi (earendil-works/pi @ 6c87d9a, MIT): OpenAI Responses API
 // behavior from pi-ai api/openai-responses-shared.ts — stream event mapping,
 // cached/cache-write token subtraction from input usage, and the minimum
-// output-token floor. Changes: Kepler-native codec split from transport, wired
-// to Kepler's canonical ModelStreamEvent contract and ModelInfo thinking maps.
+// output-token floor. Changes: Axl-native codec split from transport, wired
+// to Axl's canonical ModelStreamEvent contract and ModelInfo thinking maps.
 
-import type { JsonObject, JsonValue, Usage } from "@kepler/protocol";
+import type { JsonObject, JsonValue, Usage } from "@axl/protocol";
 
 import { assertModelSupports } from "./capabilities.ts";
 import type { ResolvedAuth } from "./auth.ts";

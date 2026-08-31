@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Behavioral reference: Pi's CredentialStore contract and auth.json storage
-// (earendil-works/pi @ 6c87d9a). Kepler-native implementation.
+// (earendil-works/pi @ 6c87d9a). Axl-native implementation.
 
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";

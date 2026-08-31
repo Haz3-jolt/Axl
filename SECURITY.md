@@ -3,11 +3,11 @@
 
 # Security policy
 
-The [security assurance case](docs/security/assurance-case.md) lists Kepler's assets, trust boundaries, current controls, and known limits. Kepler has not published release artifacts yet. [Release verification](docs/security/release-verification.md) defines what must be in place before that happens.
+The [security assurance case](docs/security/assurance-case.md) lists Axl's assets, trust boundaries, current controls, and known limits. Axl has not published release artifacts yet. [Release verification](docs/security/release-verification.md) defines what must be in place before that happens.
 
 ## Supported versions
 
-Kepler is still in pre-release development, so only the current `main` branch receives security fixes.
+Axl is still in pre-release development, so only the current `main` branch receives security fixes.
 
 ## Report a vulnerability
 

@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 
-import type { DialectBoundaryReason, EventPayloadMap, JsonObject } from "@kepler/protocol";
+import type { DialectBoundaryReason, EventPayloadMap, JsonObject } from "@axl/protocol";
 
 import type { ToolDeclaration } from "./model.ts";
 

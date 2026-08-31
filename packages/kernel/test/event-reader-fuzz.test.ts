@@ -9,12 +9,12 @@ import {
   type CanonicalEvent,
   parseEvent,
   parseSessionId,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 import { decodeEventLogBytes, fuzzEventLogReader } from "../src/index.ts";
 
 const fuzzSessionId = parseSessionId("00000000-0000-4000-8000-000000000000");
-const iterations = Number(process.env.KEPLER_FUZZ_ITERATIONS ?? 512);
+const iterations = Number(process.env.AXL_FUZZ_ITERATIONS ?? 512);
 
 // Deterministic PRNG (mulberry32) so every CI failure is reproducible from its seed.
 function makeRandom(seed: number): () => number {

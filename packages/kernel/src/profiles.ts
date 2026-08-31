@@ -13,7 +13,7 @@ export interface MinimalProfileOptions {
 
 /**
  * The minimal profile: shell and file editing, the base prompt, nothing else.
- * The smallest thing that is still Kepler. No subagent, planning, or task tools
+ * The smallest thing that is still Axl. No subagent, planning, or task tools
  * exist here — or anywhere — by default.
  */
 export function makeMinimalProfileTools(options: MinimalProfileOptions): readonly KernelTool[] {

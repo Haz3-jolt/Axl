@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test, { type TestContext } from "node:test";
 
-import { type AuthContext, FileCredentialStore } from "@kepler/ai";
+import { type AuthContext, FileCredentialStore } from "@axl/ai";
 
 import { promptLine, runAzureSetup, SetupAbortedError } from "../src/index.ts";
 
@@ -61,7 +61,7 @@ test("empty input is refused unless allowed, and Ctrl+C aborts", async () => {
 });
 
 test("full setup stores a verified credential without leaking the key", async (testContext: TestContext) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-setup-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-setup-"));
   testContext.after(() => rm(directory, { recursive: true, force: true }));
   const store = new FileCredentialStore(join(directory, "credentials.json"));
   const { input, output, text } = makeIo();
@@ -87,7 +87,7 @@ test("full setup stores a verified credential without leaking the key", async (t
 });
 
 test("setup without a deployment map skips the env entry", async (testContext: TestContext) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-setup-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-setup-"));
   testContext.after(() => rm(directory, { recursive: true, force: true }));
   const store = new FileCredentialStore(join(directory, "credentials.json"));
   const { input, output } = makeIo();
@@ -110,7 +110,7 @@ test("setup without a deployment map skips the env entry", async (testContext: T
 });
 
 test("pasted keys arrive clean: bracketed-paste markers and whitespace stripped", async (testContext: TestContext) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-setup-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-setup-"));
   testContext.after(() => rm(directory, { recursive: true, force: true }));
   const store = new FileCredentialStore(join(directory, "credentials.json"));
   const { input, output, text } = makeIo();
@@ -127,7 +127,7 @@ test("pasted keys arrive clean: bracketed-paste markers and whitespace stripped"
 });
 
 test("a rejected key re-prompts and only real acceptance says verified", async (testContext: TestContext) => {
-  const directory = await mkdtemp(join(tmpdir(), "kepler-setup-"));
+  const directory = await mkdtemp(join(tmpdir(), "axl-setup-"));
   testContext.after(() => rm(directory, { recursive: true, force: true }));
   const store = new FileCredentialStore(join(directory, "credentials.json"));
   const { input, output, text } = makeIo();

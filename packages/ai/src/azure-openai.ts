@@ -5,8 +5,8 @@
 // Adapted from Pi (earendil-works/pi @ 6c87d9a, MIT): Azure OpenAI endpoint
 // behavior from pi-ai api/azure-openai-responses.ts — base-URL normalization
 // for Azure hosts, the AZURE_OPENAI_* environment contract, and the
-// model-to-deployment name map format. Changes: Kepler-native composition over
-// OpenAiResponsesProvider with no SDK dependency, auth through Kepler's
+// model-to-deployment name map format. Changes: Axl-native composition over
+// OpenAiResponsesProvider with no SDK dependency, auth through Axl's
 // credential store, and a static model catalog.
 
 import { AuthError, type ApiKeyAuthMethod, type AuthContext, type ResolvedAuth } from "./auth.ts";

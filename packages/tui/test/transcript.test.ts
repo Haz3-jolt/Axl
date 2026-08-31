@@ -10,7 +10,7 @@ import {
   type EventPayloadMap,
   type EventType,
   parseEvent,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 import { PLAIN_PALETTE, SessionView } from "../src/index.ts";
 

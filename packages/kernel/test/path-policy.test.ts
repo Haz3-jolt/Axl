@@ -21,26 +21,26 @@ async function makeLayout(context: TestContext): Promise<{
   root: string;
   workspace: string;
   outside: string;
-  keplerHome: string;
+  axlHome: string;
   policy: WorkspacePolicy;
 }> {
-  const root = await mkdtemp(join(tmpdir(), "kepler-policy-"));
+  const root = await mkdtemp(join(tmpdir(), "axl-policy-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, "workspace");
   const outside = join(root, "outside");
-  const keplerHome = join(root, "kepler-home");
+  const axlHome = join(root, "axl-home");
   await mkdir(workspace, { recursive: true });
   await mkdir(outside, { recursive: true });
-  await mkdir(keplerHome, { recursive: true });
+  await mkdir(axlHome, { recursive: true });
   await writeFile(join(outside, "victim.txt"), "outside data\n");
-  await writeFile(join(keplerHome, "credentials.json"), '{"secret":true}\n');
+  await writeFile(join(axlHome, "credentials.json"), '{"secret":true}\n');
   await writeFile(join(workspace, "inside.txt"), "inside\n");
   return {
     root,
     workspace,
     outside,
-    keplerHome,
-    policy: { workspace, protectedPaths: [keplerHome] },
+    axlHome,
+    policy: { workspace, protectedPaths: [axlHome] },
   };
 }
 
@@ -75,9 +75,9 @@ test("writes outside the workspace and symlink escapes are rejected", async (con
 });
 
 test("protected paths are unreadable and unwritable", async (context) => {
-  const { keplerHome, outside, policy } = await makeLayout(context);
+  const { axlHome, outside, policy } = await makeLayout(context);
   await assert.rejects(
-    assertReadAllowed(policy, join(keplerHome, "credentials.json")),
+    assertReadAllowed(policy, join(axlHome, "credentials.json")),
     (error) => error instanceof SandboxViolationError && error.capability === "filesystem.read",
   );
   // Reads outside the workspace but outside protected paths are allowed.
@@ -88,13 +88,13 @@ test("protected paths are unreadable and unwritable", async (context) => {
 });
 
 test("read and edit tools enforce the policy before touching the filesystem", async (context) => {
-  const { workspace, outside, keplerHome, policy } = await makeLayout(context);
+  const { workspace, outside, axlHome, policy } = await makeLayout(context);
   const read = makeReadTool({ cwd: workspace, policy });
   const edit = makeEditTool({ cwd: workspace, policy });
   const signal = new AbortController().signal;
 
   await assert.rejects(
-    read.execute({ path: join(keplerHome, "credentials.json") }, signal),
+    read.execute({ path: join(axlHome, "credentials.json") }, signal),
     SandboxViolationError,
   );
   await assert.rejects(

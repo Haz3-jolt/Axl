@@ -15,7 +15,7 @@ import {
   SessionTree,
   type StablePrompt,
   type ToolRegistry,
-} from "@kepler/kernel";
+} from "@axl/kernel";
 import {
   type CanonicalEvent,
   EVENT_FORMAT_VERSION,
@@ -32,7 +32,7 @@ import {
   type SessionModelSelection,
   type SessionSummary,
   type UserContent,
-} from "@kepler/protocol";
+} from "@axl/protocol";
 
 export class DaemonError extends Error {
   readonly code: string;
