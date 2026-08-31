@@ -1,15 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-// Bordered dialog rendering for modal overlays: title in the top border,
-// content rows padded inside, footer hints above the bottom border.
+// Full-width terminal panel used by selectors, approvals, and login flows.
 
-import { visibleLength, wrapLine } from "./render.ts";
+import { wrapLine } from "./render.ts";
 import type { Palette } from "./transcript.ts";
 
 export interface DialogInput {
   readonly title: string;
-  /** Pre-styled content rows; overlong rows are clipped to the dialog. */
+  /** Pre-styled content rows; overlong rows wrap inside the panel. */
   readonly rows: readonly string[];
   readonly footer?: string;
   /** Total terminal width available. */
@@ -17,28 +16,26 @@ export interface DialogInput {
   readonly palette: Palette;
 }
 
-export const DIALOG_MAX_WIDTH = 76;
-
 /** Inner content width for a dialog at the given terminal width. */
 export function dialogInnerWidth(width: number): number {
-  return Math.max(1, Math.min(DIALOG_MAX_WIDTH, width - 4) - 4);
+  return Math.max(1, width - 4);
 }
 
-/** Renders a dialog to lines. Content column starts at terminal column 2. */
+/** Renders a Pi-style panel with horizontal rules and open content. */
 export function renderDialog(input: DialogInput): string[] {
   const { title, rows, footer, width, palette } = input;
   const inner = dialogInnerWidth(width);
-  const dim = palette.dim;
-
-  const pad = (row: string): string => {
-    const clipped = wrapLine(row, inner)[0] ?? "";
-    return `${dim("│")} ${clipped}${" ".repeat(Math.max(0, inner - visibleLength(clipped)))} ${dim("│")}`;
-  };
-
-  const titleText = ` ${title} `;
-  const topDashes = Math.max(0, inner - visibleLength(titleText));
-  const top = dim(`╭─`) + palette.accent(titleText) + dim(`${"─".repeat(topDashes)}╮`);
-  const bottom = dim(`╰${"─".repeat(inner + 2)}╯`);
-
-  return [top, ...rows.map(pad), ...(footer === undefined ? [] : [pad(dim(footer))]), bottom];
+  const border = (palette.border ?? palette.dim)("─".repeat(Math.max(1, width - 2)));
+  const content = rows.flatMap((row) =>
+    row.length === 0 ? [""] : wrapLine(row, inner).map((line) => `  ${line}`),
+  );
+  return [
+    border,
+    "",
+    ...(title ? [`  ${palette.accent((palette.bold ?? ((text) => text))(title))}`, ""] : []),
+    ...content,
+    ...(footer === undefined ? [] : ["", `  ${palette.dim(footer)}`]),
+    "",
+    border,
+  ];
 }

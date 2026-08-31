@@ -8,11 +8,17 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
 import { type ModelPort, ToolRegistry } from "@kepler/kernel";
-import type { CanonicalEvent, ModelStreamEvent, Usage } from "@kepler/protocol";
+import type {
+  CanonicalEvent,
+  ModelStreamEvent,
+  SessionForkResult,
+  SessionSummary,
+  Usage,
+} from "@kepler/protocol";
 
 import {
-  KeplerDaemon,
   DaemonClient,
+  KeplerDaemon,
   type SessionSnapshot,
   WireClientError,
   type WireEvent,
@@ -136,6 +142,85 @@ test("a session survives daemon termination and resumes with full history", asyn
     content: [{ type: "text", text: "after restart" }],
   })) as { stopReason: string };
   assert.equal(sent.stopReason, "stop");
+});
+
+test("lists, forks, clones, and resumes sessions", async (context) => {
+  const first = await startDaemon(context);
+  const client = await DaemonClient.connect(first.socketPath);
+  const created = (await client.request("session.create", { cwd: first.cwd })) as SessionSnapshot;
+  await client.request("session.send", {
+    sessionId: created.sessionId,
+    content: [{ type: "text", text: "first prompt" }],
+  });
+  await client.request("session.send", {
+    sessionId: created.sessionId,
+    content: [{ type: "text", text: "second prompt" }],
+  });
+
+  const listed = (await client.request("session.list", {})) as SessionSummary[];
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0]?.cwd, first.cwd);
+  assert.equal(listed[0]?.userMessageCount, 2);
+  assert.equal(listed[0]?.firstUserMessage, "first prompt");
+  assert.equal(listed[0]?.lastUserMessage, "second prompt");
+
+  const source = (await client.request("session.resume", {
+    sessionId: created.sessionId,
+  })) as SessionSnapshot;
+  const secondMessage = source.events.filter((event) => event.type === "user.message")[1];
+  assert.ok(secondMessage);
+  const forked = (await client.request("session.fork", {
+    sessionId: created.sessionId,
+    fromEventId: secondMessage.id,
+  })) as SessionForkResult;
+  assert.equal(forked.selectedText, "second prompt");
+  assert.equal(forked.events[0]?.type, "session.created");
+  assert.equal(
+    forked.events[0]?.type === "session.created" && forked.events[0].payload.parentSessionId,
+    created.sessionId,
+  );
+  assert.deepEqual(
+    forked.events
+      .filter((event) => event.type === "user.message")
+      .map((event) => {
+        const content = event.type === "user.message" ? event.payload.content[0] : undefined;
+        return content?.type === "text" ? content.text : undefined;
+      }),
+    ["first prompt"],
+  );
+
+  const cloned = (await client.request("session.clone", {
+    sessionId: created.sessionId,
+  })) as SessionForkResult;
+  assert.deepEqual(
+    cloned.events
+      .filter((event) => event.type === "user.message")
+      .map((event) => {
+        const content = event.type === "user.message" ? event.payload.content[0] : undefined;
+        return content?.type === "text" ? content.text : undefined;
+      }),
+    ["first prompt", "second prompt"],
+  );
+
+  client.close();
+  await first.daemon.stop();
+  const daemon = new KeplerDaemon({
+    socketPath: first.socketPath,
+    dataDirectory: first.dataDirectory,
+    runtime: () => ({ model: replyPort(), tools: new ToolRegistry() }),
+  });
+  await daemon.start();
+  context.after(() => daemon.stop());
+  const resumedClient = await DaemonClient.connect(first.socketPath);
+  context.after(() => resumedClient.close());
+  const resumedFork = (await resumedClient.request("session.resume", {
+    sessionId: forked.sessionId,
+  })) as SessionSnapshot;
+  const resumedClone = (await resumedClient.request("session.resume", {
+    sessionId: cloned.sessionId,
+  })) as SessionSnapshot;
+  assert.equal(resumedFork.events[0]?.type, "session.created");
+  assert.equal(resumedClone.events[0]?.type, "session.created");
 });
 
 test("interrupt aborts the active operation from another connection", async (context) => {

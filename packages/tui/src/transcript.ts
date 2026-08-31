@@ -168,7 +168,7 @@ export class SessionView {
   }
 
   apply(event: CanonicalEvent): string[] {
-    const { dim, error } = this.palette;
+    const { dim } = this.palette;
     switch (event.type) {
       case "session.created":
         return this.wrap(dim(`· session started in ${sanitizeTerminalText(event.payload.cwd)}`));
@@ -223,9 +223,7 @@ export class SessionView {
         }
         if (event.payload.stopReason === "error") {
           lines.push(
-            ...this.wrap(
-              error(`✖ ${sanitizeTerminalText(event.payload.errorMessage ?? "model error")}`),
-            ),
+            ...this.errorLines(sanitizeTerminalText(event.payload.errorMessage ?? "model error")),
           );
         } else if (event.payload.stopReason === "aborted") {
           lines.push(...this.wrap(dim("■ interrupted")));
@@ -247,10 +245,9 @@ export class SessionView {
         return lines;
       }
       case "session.error":
-        return this.wrap(
-          error(
-            `✖ ${sanitizeTerminalText(event.payload.code)}: ${sanitizeTerminalText(event.payload.message)}`,
-          ),
+        return this.errorLines(
+          sanitizeTerminalText(event.payload.message),
+          sanitizeTerminalText(event.payload.code),
         );
       case "config.model":
         this.model = sanitizeTerminalText(event.payload.modelId);
@@ -288,6 +285,24 @@ export class SessionView {
         : "idle";
     const full = `${activity} · session ${sessionId.slice(0, 8)} · model ${this.model ?? "?"} · thinking ${this.thinking ?? "?"} · sandbox ${this.sandbox ?? "none"}`;
     return this.palette.dim(truncateToWidth(full, this.width, ""));
+  }
+
+  private errorLines(message: string, code?: string): string[] {
+    if (message.includes("DeploymentNotFound")) {
+      return [
+        ...this.wrap(
+          this.palette.error(
+            `✖ Azure deployment not found for ${this.model ?? "the selected model"}`,
+          ),
+        ),
+        ...this.wrap(
+          this.palette.dim(
+            `  Use /login to map ${this.model ?? "the model"} to its Azure deployment name, or choose another model with /model.`,
+          ),
+        ),
+      ];
+    }
+    return this.wrap(this.palette.error(`✖ ${code ? `${code}: ` : ""}${message}`));
   }
 
   private userMessage(text: string): string[] {

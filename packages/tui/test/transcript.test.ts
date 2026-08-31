@@ -97,6 +97,16 @@ test("shows tool activity compactly and errors loudly", () => {
     view.apply(makeEvent("session.error", { code: "x", message: "y", retryable: false })),
     ["✖ x: y"],
   );
+  view.model = "gpt-5.6-sol";
+  const deploymentError = view.apply(
+    makeEvent("session.error", {
+      code: "http_404",
+      message: '{"error":{"code":"DeploymentNotFound"}}',
+      retryable: false,
+    }),
+  );
+  assert.equal(deploymentError[0], "✖ Azure deployment not found for gpt-5.6-sol");
+  assert.match(deploymentError.join(" "), /Use \/login .* or choose another\s+model with \/model/);
 });
 
 test("tracks model, thinking, and sandbox into the status line", () => {

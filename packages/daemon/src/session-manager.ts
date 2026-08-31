@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { randomUUID } from "node:crypto";
-import { mkdir, realpath, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import type { Dirent } from "node:fs";
+import { mkdir, readdir, realpath, rm, stat } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 
 import {
   AgentSession,
@@ -11,18 +12,25 @@ import {
   type ExtensionHost,
   JsonlEventLog,
   type ModelPort,
+  SessionTree,
   type StablePrompt,
   type ToolRegistry,
 } from "@kepler/kernel";
 import {
   type CanonicalEvent,
+  EVENT_FORMAT_VERSION,
   type EventId,
   type EventPayloadMap,
   type InteractionAction,
   type JsonObject,
+  type JsonValue,
+  parseEvent,
+  parseEventId,
   parseSessionId,
+  type SessionForkResult,
   type SessionId,
   type SessionModelSelection,
+  type SessionSummary,
   type UserContent,
 } from "@kepler/protocol";
 
@@ -107,6 +115,41 @@ function deferredTurn(): ActiveTurn {
     resolveDone = resolvePromise;
   });
   return { controller: new AbortController(), done, finish: resolveDone };
+}
+
+function userMessageText(event: CanonicalEvent): string | undefined {
+  if (event.type !== "user.message") return undefined;
+  const text = event.payload.content
+    .filter((item) => item.type === "text")
+    .map((item) => item.text)
+    .join("\n")
+    .trim();
+  return text || undefined;
+}
+
+function summarizeSession(events: readonly CanonicalEvent[]): SessionSummary {
+  const created = events[0];
+  if (created?.type !== "session.created") {
+    throw new DaemonError("corrupt_session", "Session has no creation event");
+  }
+  const messages = events.flatMap((event) => {
+    const text = userMessageText(event);
+    return text === undefined ? [] : [text];
+  });
+  const firstUserMessage = messages[0];
+  const lastUserMessage = messages.at(-1);
+  return {
+    sessionId: created.sessionId,
+    cwd: created.payload.cwd,
+    createdAt: created.timestamp,
+    updatedAt: events.at(-1)?.timestamp ?? created.timestamp,
+    userMessageCount: messages.length,
+    ...(firstUserMessage === undefined ? {} : { firstUserMessage }),
+    ...(lastUserMessage === undefined ? {} : { lastUserMessage }),
+    ...(created.payload.parentSessionId === undefined
+      ? {}
+      : { parentSessionId: created.payload.parentSessionId }),
+  };
 }
 
 /** Owns every live session. Clients never receive a mutable kernel object. */
@@ -200,6 +243,56 @@ export class SessionManager {
     return { sessionId, events: [...managed.events] };
   }
 
+  async list(): Promise<readonly SessionSummary[]> {
+    const directory = join(this.options.dataDirectory, "sessions");
+    let entries: Dirent[];
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+
+    const summaries: SessionSummary[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+      const sessionId = parseSessionId(basename(entry.name, ".jsonl"), "session file name");
+      const active = this.sessions.get(sessionId);
+      const events =
+        active?.events ?? (await JsonlEventLog.open(join(directory, entry.name), sessionId)).events;
+      summaries.push(summarizeSession(events));
+    }
+    return summaries.sort((left, right) => right.updatedAt - left.updatedAt);
+  }
+
+  async fork(sessionId: unknown, fromEventId: unknown): Promise<SessionForkResult> {
+    const sourceId = parseSessionId(sessionId, "sessionId");
+    await this.resume(sourceId);
+    const source = this.managed(sourceId);
+    if (source.activeTurn || source.rebuilding) {
+      throw new DaemonError("operation_active", "An operation owns this session; fork after it");
+    }
+    const eventId = parseEventId(fromEventId, "fromEventId");
+    const event = SessionTree.fromEvents(sourceId, source.events).event(eventId);
+    if (event.type !== "user.message") {
+      throw new DaemonError("invalid_fork_point", "A fork must start from a user message");
+    }
+    return this.copySession(sourceId, eventId, false, userMessageText(event));
+  }
+
+  async clone(sessionId: unknown): Promise<SessionForkResult> {
+    const sourceId = parseSessionId(sessionId, "sessionId");
+    await this.resume(sourceId);
+    const source = this.managed(sourceId);
+    if (source.activeTurn || source.rebuilding) {
+      throw new DaemonError("operation_active", "An operation owns this session; clone after it");
+    }
+    const tip = source.events.at(-1)?.id;
+    if (tip === undefined)
+      throw new DaemonError("empty_session", "Session has no history to clone");
+    return this.copySession(sourceId, tip, true);
+  }
+
   async resume(
     sessionId: unknown,
   ): Promise<{ sessionId: SessionId; events: readonly CanonicalEvent[] }> {
@@ -219,6 +312,87 @@ export class SessionManager {
       return { sessionId: parsed, events: [...managed.events] };
     } finally {
       this.opening.delete(parsed);
+    }
+  }
+
+  private async copySession(
+    sourceId: SessionId,
+    targetId: EventId,
+    includeTarget: boolean,
+    selectedText?: string,
+  ): Promise<SessionForkResult> {
+    const source = this.managed(sourceId);
+    const tree = SessionTree.fromEvents(sourceId, source.events);
+    const lineage = tree.lineage(targetId);
+    const copied = includeTarget ? lineage.slice(1) : lineage.slice(1, -1);
+    const sessionId = parseSessionId(randomUUID(), "sessionId");
+    const path = this.logPath(sessionId);
+    const startedAt = Date.now();
+    const eventIds = new Map<string, string>();
+    const operationIds = new Map<string, string>();
+    const sourceRoot = lineage[0];
+    if (sourceRoot === undefined || sourceRoot.type !== "session.created") {
+      throw new DaemonError("corrupt_session", `Session ${sourceId} has no creation event`);
+    }
+
+    try {
+      const { log } = await JsonlEventLog.open(path, sessionId);
+      const root = await log.append({
+        version: EVENT_FORMAT_VERSION,
+        id: randomUUID(),
+        sessionId,
+        parentId: null,
+        timestamp: startedAt,
+        type: "session.created",
+        payload: { cwd: source.cwd, parentSessionId: sourceId },
+      });
+      eventIds.set(sourceRoot.id, root.id);
+      let parentId = root.id;
+      for (const [index, event] of copied.entries()) {
+        if (event.type === "session.created" || event.type === "session.closed") continue;
+        const payload = structuredClone(event.payload) as Record<string, JsonValue>;
+        if (event.type === "permission.resolved" && typeof payload.requestId === "string") {
+          payload.requestId = eventIds.get(payload.requestId) ?? payload.requestId;
+        } else if (event.type === "context.compacted" && Array.isArray(payload.replacedEventIds)) {
+          payload.replacedEventIds = payload.replacedEventIds.flatMap((id) => {
+            const replacement = typeof id === "string" ? eventIds.get(id) : undefined;
+            return replacement === undefined ? [] : [replacement];
+          });
+        }
+        const id = randomUUID();
+        const operationId =
+          event.operationId === undefined
+            ? undefined
+            : (operationIds.get(event.operationId) ??
+              (() => {
+                const created = randomUUID();
+                operationIds.set(event.operationId as string, created);
+                return created;
+              })());
+        const clone = parseEvent({
+          version: EVENT_FORMAT_VERSION,
+          id,
+          sessionId,
+          ...(operationId === undefined ? {} : { operationId }),
+          parentId,
+          timestamp: startedAt + index + 1,
+          type: event.type,
+          payload,
+        });
+        await log.append(clone);
+        eventIds.set(event.id, id);
+        parentId = clone.id;
+      }
+      await log.drain();
+      const managed = await this.open(sessionId, source.cwd, source.selection);
+      return {
+        sessionId,
+        events: [...managed.events],
+        ...(selectedText === undefined ? {} : { selectedText }),
+      };
+    } catch (error) {
+      await rm(path, { force: true });
+      throw error;
     }
   }
 

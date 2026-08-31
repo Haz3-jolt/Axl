@@ -2,13 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { EventId, JsonObject, SessionId } from "./event-envelope.ts";
-import { parseEventId, parseSessionId, ProtocolValidationError } from "./event-envelope.ts";
+import { ProtocolValidationError, parseEventId, parseSessionId } from "./event-envelope.ts";
 import type { CanonicalEvent, InteractionAction, ThinkingLevel, UserContent } from "./events.ts";
 import { parseEvent, parseUserContent } from "./events.ts";
 
 export interface SessionModelSelection {
   readonly modelId?: string;
   readonly thinkingLevel?: ThinkingLevel;
+}
+
+export interface SessionSummary {
+  readonly sessionId: SessionId;
+  readonly cwd: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly userMessageCount: number;
+  readonly firstUserMessage?: string;
+  readonly lastUserMessage?: string;
+  readonly parentSessionId?: SessionId;
 }
 
 export type WireRequest =
@@ -22,6 +33,24 @@ export type WireRequest =
       readonly kind: "request";
       readonly id: number;
       readonly method: "session.resume";
+      readonly params: { readonly sessionId: SessionId };
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
+      readonly method: "session.list";
+      readonly params: Record<string, never>;
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
+      readonly method: "session.fork";
+      readonly params: { readonly sessionId: SessionId; readonly fromEventId: EventId };
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
+      readonly method: "session.clone";
       readonly params: { readonly sessionId: SessionId };
     }
   | {
@@ -93,6 +122,10 @@ export interface SessionSnapshot {
   readonly events: readonly CanonicalEvent[];
 }
 
+export interface SessionForkResult extends SessionSnapshot {
+  readonly selectedText?: string;
+}
+
 function object(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new ProtocolValidationError(path, "must be an object");
@@ -162,12 +195,27 @@ export function parseWireRequest(value: unknown): WireRequest {
       },
     };
   }
-  if (method === "session.resume") {
+  if (method === "session.resume" || method === "session.clone") {
     exact(params, "request.params", ["sessionId"]);
     return {
       ...base,
       method,
       params: { sessionId: parseSessionId(params.sessionId, "request.params.sessionId") },
+    };
+  }
+  if (method === "session.list") {
+    exact(params, "request.params", []);
+    return { ...base, method, params: {} };
+  }
+  if (method === "session.fork") {
+    exact(params, "request.params", ["sessionId", "fromEventId"]);
+    return {
+      ...base,
+      method,
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        fromEventId: parseEventId(params.fromEventId, "request.params.fromEventId"),
+      },
     };
   }
   if (method === "session.send") {

@@ -210,6 +210,7 @@ This is the final phase built primarily with the stable external harness.
 - [x] Build a plain terminal or headless client.
 - [x] Show streamed text, tool activity, errors, model, thinking level, and sandbox status. Text currently arrives one event at a time. Phase 9 adds token-delta streaming over the wire.
 - [x] Support send, interrupt, detach, reconnect, and resume.
+- [x] Add a searchable `/resume` selector over daemon-owned session metadata. Treat this as bootstrap behavior, not a later convenience.
 - [x] Defer the polished TUI and public SDK at the Phase 4 gate. The TUI work below was later brought forward. The public SDK remains deferred.
 
 ### Minimum enforceable sandbox
@@ -287,7 +288,8 @@ The checked TUI items in this phase were pulled forward as an explicit exception
 - [ ] Add token, cost, and wall-clock budgets with safe-boundary pauses.
 - [ ] Implement steer, follow-up, and interrupt semantics.
 - [x] Queue multiple follow-ups in order.
-- [ ] Add branch, fork, clone, and tree navigation.
+- [x] Add `/fork` from a selected user message and `/clone` from the current tip.
+- [ ] Add in-session branch and tree navigation.
 - [ ] Add workspace checkpoints after modifying turns.
 - [ ] Add conversation-only, workspace-only, and combined rewind.
 - [ ] Report allowed writes outside the workspace that rewind cannot undo.
@@ -465,6 +467,7 @@ Adversarial tests cannot escape workspace path rules, tool egress policy, extens
 
 - [ ] Represent every subagent as a full child session with its own log and tree node.
 - [ ] Implement start, send, interrupt, status, wait, snapshot, resume, and dispose.
+- [ ] Expose child-agent lifecycle through daemon RPC and the public SDK so RPC clients never own an agent loop.
 - [ ] Support fresh-context and forked-history children first.
 - [ ] Add persistent background, local subprocess, OCI, remote, external-harness, and workflow-managed backends as needed.
 - [ ] Make backend capability requests fail when unsupported.

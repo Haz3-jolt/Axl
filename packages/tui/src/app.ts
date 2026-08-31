@@ -19,6 +19,8 @@ import type {
   EventPayloadMap,
   JsonObject,
   JsonValue,
+  SessionForkResult,
+  SessionSummary,
   ThinkingLevel,
 } from "@kepler/protocol";
 
@@ -44,6 +46,67 @@ const PASTE_ON = "\x1b[?2004h";
 const PASTE_OFF = "\x1b[?2004l";
 const KITTY_KEYS_ON = "\x1b[>1u";
 const KITTY_KEYS_OFF = "\x1b[<u";
+
+function plural(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function compactCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K`;
+  return String(value);
+}
+
+function relativeAge(timestamp: number): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1_000));
+  if (seconds < 60) return "now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function messageText(event: CanonicalEvent): string | undefined {
+  if (event.type !== "user.message") return undefined;
+  const text = event.payload.content
+    .filter((item) => item.type === "text")
+    .map((item) => item.text)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || undefined;
+}
+
+function orderSessions(
+  sessions: readonly SessionSummary[],
+  mode: "threaded" | "recent",
+): SessionSummary[] {
+  const recent = [...sessions].sort((left, right) => right.updatedAt - left.updatedAt);
+  if (mode === "recent") return recent;
+  const ids = new Set(recent.map((session) => session.sessionId));
+  const children = new Map<string, SessionSummary[]>();
+  for (const session of recent) {
+    const parent = session.parentSessionId;
+    if (parent === undefined || !ids.has(parent)) continue;
+    const siblings = children.get(parent) ?? [];
+    siblings.push(session);
+    children.set(parent, siblings);
+  }
+  const ordered: SessionSummary[] = [];
+  const visited = new Set<string>();
+  const visit = (session: SessionSummary): void => {
+    if (visited.has(session.sessionId)) return;
+    visited.add(session.sessionId);
+    ordered.push(session);
+    for (const child of children.get(session.sessionId) ?? []) visit(child);
+  };
+  for (const session of recent) {
+    if (session.parentSessionId === undefined || !ids.has(session.parentSessionId)) visit(session);
+  }
+  for (const session of recent) visit(session);
+  return ordered;
+}
 
 function formatPath(cwd: string): string {
   const home = resolve(homedir());
@@ -190,6 +253,9 @@ function openExternalUrl(url: string, onError: (error: Error) => void): void {
 }
 
 const COMMANDS: readonly { readonly name: string; readonly summary: string }[] = [
+  { name: "/resume", summary: "open another saved session" },
+  { name: "/fork", summary: "fork from an earlier user message" },
+  { name: "/clone", summary: "clone the complete current session" },
   { name: "/model", summary: "select a model, or /model <id>" },
   { name: "/thinking", summary: "select reasoning effort" },
   { name: "/theme", summary: "select a color theme" },
@@ -234,8 +300,10 @@ export interface KeplerAppOptions {
   readonly modelCatalog?: readonly ModelInfo[];
   readonly currentModel?: string;
   readonly currentThinking?: ThinkingLevel;
-  /** Compatibility hook called after the daemon accepts a model switch. */
-  readonly onModelChange?: (modelId: string) => void;
+  /** Called after the daemon accepts a model switch. */
+  readonly onModelChange?: (modelId: string) => void | Promise<void>;
+  readonly onThinkingChange?: (level: ThinkingLevel) => void | Promise<void>;
+  readonly onThemeChange?: (theme: string) => void | Promise<void>;
   readonly credentials?: {
     readonly store: CredentialStore;
     readonly context: AuthContext;
@@ -256,13 +324,14 @@ type TranscriptEntry =
 
 /** A terminal projection over one daemon-owned Kepler session. */
 export class KeplerApp {
-  readonly sessionId: string;
+  sessionId: string;
   private readonly options: KeplerAppOptions;
   private readonly screen: DifferentialScreen;
   private view: SessionView;
   private readonly editor = new LineEditor();
   private width: number;
   private height: number;
+  private cwd: string;
   private readonly transcript: TranscriptEntry[] = [];
   private notice: string | undefined;
   private modal: Modal | null = null;
@@ -313,6 +382,7 @@ export class KeplerApp {
     this.sessionId = sessionId;
     this.width = width;
     this.height = height;
+    this.cwd = options.cwd;
     this.screen = new DifferentialScreen(width);
     this.branch = branch;
     this.currentTheme = options.color === false ? "plain" : (options.theme ?? DEFAULT_THEME);
@@ -434,13 +504,13 @@ export class KeplerApp {
       boxLine(row === 0 ? gutter : "  ", line),
     );
     const completionHints = this.completions();
-    const location = `${formatPath(this.options.cwd)}${this.branch ? `   ${this.branch}` : ""}`;
+    const location = `${formatPath(this.cwd)}${this.branch ? `   ${this.branch}` : ""}`;
     const lines = [
       ...(this.notice === undefined ? [] : [this.notice]),
       this.frameLine(this.view.usageLabel(), this.view.modelLabel(), "┌", "┐"),
       ...contentLines,
       this.frameLine(location, this.view.tpsLabel(), "└", "┘"),
-      ...(completionHints === undefined ? [] : [completionHints]),
+      ...(completionHints ?? []),
     ];
     const contentStart = (this.notice === undefined ? 0 : 1) + 1;
     return {
@@ -463,12 +533,17 @@ export class KeplerApp {
     return `${this.view.frameBorder(start)}${this.view.palette.dim(leftLabel)}${this.view.frameBorder(fill)}${this.view.palette.dim(rightLabel)}${this.view.frameBorder(end)}`;
   }
 
-  private completions(): string | undefined {
+  private completions(): string[] | undefined {
     const text = this.editor.text;
     if (!/^\/[a-z]*$/.test(text)) return undefined;
-    const matches = COMMANDS.filter((command) => command.name.startsWith(text));
+    const matches = COMMANDS.filter((command) => command.name.startsWith(text)).slice(0, 6);
     if (matches.length === 0) return undefined;
-    return this.view.palette.dim(`  ${matches.map((command) => command.name).join("  ")}  · Tab`);
+    return matches.map(
+      (command, index) =>
+        `${index === 0 ? this.view.palette.accent("→") : " "} ${this.view.palette.accent(
+          command.name.padEnd(12),
+        )}${this.view.palette.dim(command.summary)}`,
+    );
   }
 
   private redraw(): void {
@@ -598,6 +673,24 @@ export class KeplerApp {
       this.stop();
       return;
     }
+    if (command === "/resume") {
+      if (this.view.working)
+        this.notice = this.view.palette.dim("· finish or interrupt the turn first");
+      else void this.openResume();
+      return;
+    }
+    if (command === "/fork") {
+      if (this.view.working)
+        this.notice = this.view.palette.dim("· finish or interrupt the turn first");
+      else this.openFork();
+      return;
+    }
+    if (command === "/clone") {
+      if (this.view.working)
+        this.notice = this.view.palette.dim("· finish or interrupt the turn first");
+      else void this.cloneSession();
+      return;
+    }
     if (command === "/help") {
       const { dim, accent } = this.view.palette;
       this.commitLines([
@@ -637,7 +730,7 @@ export class KeplerApp {
     if (command === "/login" || command === "/reload") {
       if (this.view.working)
         this.notice = this.view.palette.dim("· finish or interrupt the turn first");
-      else if (command === "/login") this.openLogin();
+      else if (command === "/login") void this.openLogin();
       else void this.reload();
       return;
     }
@@ -683,6 +776,279 @@ export class KeplerApp {
     this.redraw();
   }
 
+  private async openResume(): Promise<void> {
+    try {
+      const sessions = (await this.options.client.request("session.list", {})) as SessionSummary[];
+      if (sessions.length === 0) {
+        this.notice = this.view.palette.dim("· no saved sessions");
+        this.redraw();
+        return;
+      }
+      let scope: "current" | "all" = "current";
+      let sort: "threaded" | "recent" = "threaded";
+      let filter = "";
+      let index = 0;
+      const visibleSessions = (): SessionSummary[] => {
+        const query = filter.toLowerCase();
+        return orderSessions(
+          sessions.filter(
+            (session) =>
+              (scope === "all" || session.cwd === this.cwd) &&
+              (!query ||
+                session.sessionId.toLowerCase().includes(query) ||
+                session.cwd.toLowerCase().includes(query) ||
+                session.firstUserMessage?.toLowerCase().includes(query) ||
+                session.lastUserMessage?.toLowerCase().includes(query)),
+          ),
+          sort,
+        );
+      };
+      const modal: Modal = {
+        render: () => {
+          const filtered = visibleSessions();
+          index = Math.min(index, Math.max(0, filtered.length - 1));
+          const start = Math.max(
+            0,
+            Math.min(index - Math.floor(SELECTOR_WINDOW / 2), filtered.length - SELECTOR_WINDOW),
+          );
+          const shown = filtered.slice(start, start + SELECTOR_WINDOW);
+          const scopeLabel = `${scope === "current" ? "●" : "○"} Current Folder  |  ${
+            scope === "all" ? "●" : "○"
+          } All  ·  Sort: ${sort === "threaded" ? "Threaded" : "Recent"}`;
+          const rows = [
+            this.view.palette.dim(scopeLabel),
+            this.view.palette.dim("tab scope · ctrl+s sort · enter resume · escape/ctrl+c cancel"),
+            `> ${filter}`,
+            "",
+            ...shown.flatMap((session, position) => {
+              const selected = start + position === index;
+              const message =
+                session.lastUserMessage ?? session.firstUserMessage ?? "Session without a prompt";
+              const line = truncateToWidth(
+                `${selected ? this.view.palette.accent("›") : " "} ${
+                  selected && this.view.palette.bold ? this.view.palette.bold(message) : message
+                }`,
+                this.width - 4,
+                "…",
+              );
+              const current = session.sessionId === this.sessionId ? " · current" : "";
+              const location = scope === "all" ? ` · ${formatPath(session.cwd)}` : "";
+              return [
+                line,
+                this.view.palette.dim(
+                  `  ${plural(session.userMessageCount, "message")} · ${relativeAge(session.updatedAt)}${current}${location}`,
+                ),
+                "",
+              ];
+            }),
+            ...(filtered.length === 0 ? [this.view.palette.dim("No matching sessions")] : []),
+            ...(filtered.length > SELECTOR_WINDOW
+              ? [this.view.palette.dim(`(${index + 1}/${filtered.length})`)]
+              : []),
+          ];
+          return renderDialog({
+            title: `Resume Session (${scope === "current" ? "Current Folder" : "All"})`,
+            rows,
+            width: this.width,
+            palette: this.view.palette,
+          });
+        },
+        cursor: () => ({ row: 6, column: 4 + visibleWidth(filter) }),
+        handleKey: (data) => {
+          for (let at = 0; at < data.length; ) {
+            const decoded = decodeOneKey(data, at);
+            const key = decoded.key;
+            at = decoded.next;
+            const filtered = visibleSessions();
+            if (key.kind === "tab") {
+              scope = scope === "current" ? "all" : "current";
+              index = 0;
+            } else if (key.kind === "ctrl" && key.char === "s") {
+              sort = sort === "threaded" ? "recent" : "threaded";
+              index = 0;
+            } else if (key.kind === "up" && filtered.length > 0) {
+              index = (index - 1 + filtered.length) % filtered.length;
+            } else if (key.kind === "down" && filtered.length > 0) {
+              index = (index + 1) % filtered.length;
+            } else if (key.kind === "enter") {
+              const selected = filtered[index];
+              if (selected) {
+                this.modal = null;
+                void this.resumeSession(selected.sessionId);
+                return;
+              }
+            } else if (key.kind === "escape" || (key.kind === "ctrl" && key.char === "c")) {
+              this.modal = null;
+              return;
+            } else if (key.kind === "backspace") {
+              filter = filter.slice(0, -1);
+              index = 0;
+            } else if (key.kind === "char") {
+              filter += key.char;
+              index = 0;
+            }
+          }
+        },
+      };
+      this.modal = modal;
+      this.redraw();
+    } catch (error) {
+      this.notice = this.view.palette.error(
+        `✖ ${error instanceof Error ? error.message : "could not list sessions"}`,
+      );
+      this.redraw();
+    }
+  }
+
+  private openFork(): void {
+    const messages = this.transcript.flatMap((entry) => {
+      if (entry.kind !== "event") return [];
+      const text = messageText(entry.event);
+      return text === undefined ? [] : [{ id: entry.event.id, text }];
+    });
+    if (messages.length === 0) {
+      this.notice = this.view.palette.dim("· no user messages to fork from");
+      return;
+    }
+    let index = messages.length - 1;
+    const modal: Modal = {
+      render: () => {
+        const start = Math.max(
+          0,
+          Math.min(index - Math.floor(SELECTOR_WINDOW / 2), messages.length - SELECTOR_WINDOW),
+        );
+        const shown = messages.slice(start, start + SELECTOR_WINDOW);
+        return renderDialog({
+          title: "Fork from Message",
+          rows: [
+            this.view.palette.dim(
+              "Select a user message to copy the active path before it into a new session.",
+            ),
+            "",
+            ...shown.flatMap((message, position) => [
+              truncateToWidth(
+                `${start + position === index ? this.view.palette.accent("›") : " "} ${
+                  start + position === index && this.view.palette.bold
+                    ? this.view.palette.bold(message.text)
+                    : message.text
+                }`,
+                this.width - 4,
+                "…",
+              ),
+              this.view.palette.dim(`  Message ${start + position + 1} of ${messages.length}`),
+              "",
+            ]),
+            ...(messages.length > SELECTOR_WINDOW
+              ? [this.view.palette.dim(`(${index + 1}/${messages.length})`)]
+              : []),
+          ],
+          footer: "↑↓ navigate · enter fork · escape/ctrl+c cancel",
+          width: this.width,
+          palette: this.view.palette,
+        });
+      },
+      handleKey: (data) => {
+        for (let at = 0; at < data.length; ) {
+          const decoded = decodeOneKey(data, at);
+          const key = decoded.key;
+          at = decoded.next;
+          if (key.kind === "up") index = (index - 1 + messages.length) % messages.length;
+          else if (key.kind === "down") index = (index + 1) % messages.length;
+          else if (key.kind === "enter") {
+            this.modal = null;
+            void this.forkSession(messages[index]?.id);
+            return;
+          } else if (key.kind === "escape" || (key.kind === "ctrl" && key.char === "c")) {
+            this.modal = null;
+            return;
+          }
+        }
+      },
+    };
+    this.modal = modal;
+  }
+
+  private async resumeSession(sessionId: string): Promise<void> {
+    try {
+      const snapshot = (await this.options.client.request("session.resume", {
+        sessionId,
+      })) as SessionSnapshot;
+      await this.switchSession(snapshot, "", "· resumed session");
+    } catch (error) {
+      this.notice = this.view.palette.error(
+        `✖ ${error instanceof Error ? error.message : "could not resume session"}`,
+      );
+      this.redraw();
+    }
+  }
+
+  private async forkSession(fromEventId: string | undefined): Promise<void> {
+    if (fromEventId === undefined) return;
+    try {
+      const forked = (await this.options.client.request("session.fork", {
+        sessionId: this.sessionId,
+        fromEventId,
+      })) as SessionForkResult;
+      await this.switchSession(forked, forked.selectedText ?? "", "· forked to new session");
+    } catch (error) {
+      this.notice = this.view.palette.error(
+        `✖ ${error instanceof Error ? error.message : "could not fork session"}`,
+      );
+      this.redraw();
+    }
+  }
+
+  private async cloneSession(): Promise<void> {
+    try {
+      const cloned = (await this.options.client.request("session.clone", {
+        sessionId: this.sessionId,
+      })) as SessionForkResult;
+      await this.switchSession(cloned, "", "· cloned to new session");
+    } catch (error) {
+      this.notice = this.view.palette.error(
+        `✖ ${error instanceof Error ? error.message : "could not clone session"}`,
+      );
+      this.redraw();
+    }
+  }
+
+  private async switchSession(
+    snapshot: SessionSnapshot,
+    draft: string,
+    notice: string,
+  ): Promise<void> {
+    const created = snapshot.events[0];
+    if (created?.type !== "session.created") throw new Error("Session has no creation event");
+    const palette = this.view.palette;
+    const thinkingDisplay = this.view.thinkingDisplay;
+    const toolOutputDisplay = this.view.toolOutputDisplay;
+    this.sessionId = snapshot.sessionId;
+    this.cwd = created.payload.cwd;
+    this.branch = await readGitBranch(this.cwd);
+    this.seenEventIds.clear();
+    this.transcript.length = 0;
+    this.interactionQueue.length = 0;
+    this.activeInteractionId = undefined;
+    this.bufferedEvents = [];
+    this.view = new SessionView(this.width, palette, this.options.modelCatalog);
+    this.view.thinkingDisplay = thinkingDisplay;
+    this.view.toolOutputDisplay = toolOutputDisplay;
+    this.transcript.push({ kind: "lines", lines: this.welcomeLines(this.cwd, true) });
+    for (const event of snapshot.events) this.commitEvent(event, false);
+    const lastEventId = snapshot.events.at(-1)?.id;
+    const subscription = (await this.options.client.request("session.subscribe", {
+      sessionId: snapshot.sessionId,
+      ...(lastEventId === undefined ? {} : { afterEventId: lastEventId }),
+    })) as { snapshot: readonly CanonicalEvent[] };
+    for (const event of subscription.snapshot) this.commitEvent(event, false);
+    for (const event of this.bufferedEvents ?? []) this.commitEvent(event, false);
+    this.bufferedEvents = undefined;
+    this.editor.setText(draft);
+    this.notice = this.view.palette.dim(notice);
+    this.openNextInteraction();
+    this.rebuildAfterResize();
+  }
+
   private selectTheme(name: string): void {
     if (name) {
       const palette = THEMES[name];
@@ -694,12 +1060,19 @@ export class KeplerApp {
       this.view.palette = palette;
       this.screen.invalidate();
       this.notice = palette.dim(`· theme ${name}`);
+      void Promise.resolve(this.options.onThemeChange?.(name)).catch((error: unknown) => {
+        this.notice = this.view.palette.error(
+          `✖ ${error instanceof Error ? error.message : "could not save theme"}`,
+        );
+        this.redraw();
+      });
       return;
     }
     this.openPicker({
       title: "Select theme",
       items: themeNames().map((value) => ({ value, label: value })),
       current: this.currentTheme,
+      footer: "↑↓ navigate · enter select and save as default · escape/ctrl+c cancel",
       onPick: (value) => this.selectTheme(value),
     });
   }
@@ -722,10 +1095,32 @@ export class KeplerApp {
       void this.configure({ modelId });
       return;
     }
+    const current = this.view.model ?? this.options.currentModel ?? "";
+    const ordered = [...models].sort((left, right) => {
+      if (left === current) return -1;
+      if (right === current) return 1;
+      return 0;
+    });
     this.openPicker({
-      title: "Select model",
-      items: models.map((id) => ({ value: id, label: this.modelLabel(id, models) })),
-      current: this.view.model ?? this.options.currentModel ?? "",
+      title: "",
+      intro: "Only showing models from configured providers. Use /login to update credentials.",
+      items: ordered.map((id) => ({
+        value: id,
+        label: `${id} ${this.view.palette.dim("[azure-openai]")}`,
+      })),
+      current,
+      detail: (value) => {
+        const model = this.options.modelCatalog?.find((candidate) => candidate.modelId === value);
+        if (!model) return [];
+        return [
+          this.view.palette.dim(`Model Name: ${model.displayName}`),
+          this.view.palette.dim(
+            `Context: ${compactCount(model.contextWindow)} · Max output: ${compactCount(model.maxOutputTokens)}`,
+          ),
+        ];
+      },
+      status: `Azure OpenAI catalog · ${models.length} models`,
+      footer: "↑↓ navigate · enter select and save as default · escape/ctrl+c cancel",
       onPick: (value) => void this.configure({ modelId: value }),
     });
   }
@@ -748,6 +1143,7 @@ export class KeplerApp {
       title: "Select thinking level",
       items: levels.map((value) => ({ value, label: value })),
       current: this.view.thinking ?? this.options.currentThinking ?? "medium",
+      footer: "↑↓ navigate · enter select and save as default · escape/ctrl+c cancel",
       onPick: (value) => void this.configure({ thinkingLevel: value as ThinkingLevel }),
     });
   }
@@ -775,27 +1171,17 @@ export class KeplerApp {
     await this.configure({ thinkingLevel: next });
   }
 
-  private modelLabel(modelId: string, all: readonly string[]): string {
-    const info = this.options.modelCatalog?.find((model) => model.modelId === modelId);
-    if (!info) return modelId;
-    const pad = Math.min(24, Math.max(...all.map((id) => id.length)) + 2);
-    const context =
-      info.contextWindow >= 1_000_000
-        ? `${(info.contextWindow / 1_000_000).toFixed(1)}M`
-        : `${Math.round(info.contextWindow / 1000)}K`;
-    const price = info.cost ? `$${info.cost.inputUsdPerMTok}/$${info.cost.outputUsdPerMTok}` : "";
-    return `${modelId.padEnd(pad)}${this.view.palette.dim(
-      `${context.padStart(6)} ctx  ${price.padStart(9)}${info.reasoning ? "  ∴" : ""}`,
-    )}`;
-  }
-
   private openPicker(input: {
     readonly title: string;
+    readonly intro?: string;
     readonly items: readonly { readonly value: string; readonly label: string }[];
     readonly current: string;
+    readonly detail?: (value: string) => readonly string[];
+    readonly status?: string;
+    readonly footer?: string;
     readonly onPick: (value: string) => void;
   }): void {
-    const { title, items, current, onPick } = input;
+    const { title, intro, items, current, detail, status, footer, onPick } = input;
     const { dim, accent } = this.view.palette;
     let filter = "";
     let index = Math.max(
@@ -820,27 +1206,37 @@ export class KeplerApp {
           Math.min(index - Math.floor(SELECTOR_WINDOW / 2), list.length - SELECTOR_WINDOW),
         );
         const visible = list.slice(windowStart, windowStart + SELECTOR_WINDOW);
+        const selected = list[index];
         const rows = [
-          `${accent("❯")} ${filter}`,
+          ...(intro === undefined ? [] : [(this.view.palette.warning ?? accent)(intro), ""]),
+          `> ${filter}`,
           "",
-          ...(windowStart > 0 ? [dim(`  ↑ ${windowStart} more`)] : []),
-          ...visible.map((item, position) =>
-            windowStart + position === index ? `${accent("❯")} ${item.label}` : `  ${item.label}`,
-          ),
-          ...(list.length === 0 ? [dim("  no matches")] : []),
+          ...(windowStart > 0 ? [dim(`↑ ${windowStart} more`)] : []),
+          ...visible.map((item, position) => {
+            const selectedRow = windowStart + position === index;
+            const currentMark =
+              item.value === current ? (this.view.palette.success ?? accent)(" ✓") : "";
+            return `${selectedRow ? accent("→") : " "} ${item.label}${currentMark}`;
+          }),
+          ...(list.length === 0 ? [dim("No matches")] : []),
           ...(windowStart + SELECTOR_WINDOW < list.length
-            ? [dim(`  ↓ ${list.length - windowStart - SELECTOR_WINDOW} more`)]
+            ? [dim(`↓ ${list.length - windowStart - SELECTOR_WINDOW} more`)]
             : []),
+          ...(list.length > 0 ? [dim(`(${index + 1}/${list.length})`)] : []),
+          ...(selected === undefined || detail === undefined
+            ? []
+            : ["", ...detail(selected.value)]),
+          ...(status === undefined ? [] : ["", (this.view.palette.success ?? accent)(status)]),
         ];
         return renderDialog({
           title,
           rows,
-          footer: `${list.length}/${items.length} · ↑↓ move · Enter select · Esc close`,
+          footer: footer ?? "↑↓ navigate · enter select · escape/ctrl+c cancel",
           width: this.width,
           palette: this.view.palette,
         });
       },
-      cursor: () => ({ row: 1, column: 4 + visibleWidth(filter) }),
+      cursor: () => ({ row: 4, column: 4 + visibleWidth(filter) }),
       handleKey: (data) => {
         const keys = [];
         for (let at = 0; at < data.length; ) {
@@ -1014,7 +1410,7 @@ export class KeplerApp {
       cursor: () => {
         if (confirming) return undefined;
         const name = fields[index]?.name ?? "value";
-        return { row: fields.length + 5, column: 2 + visibleWidth(`${name}: ${draft}`) };
+        return { row: fields.length + 8, column: 2 + visibleWidth(`${name}: ${draft}`) };
       },
       handleKey: (data) => {
         for (let at = 0; at < data.length; ) {
@@ -1095,25 +1491,35 @@ export class KeplerApp {
     }
   }
 
-  private openLogin(): void {
+  private async openLogin(): Promise<void> {
     const credentials = this.options.credentials;
     if (!credentials) {
       this.notice = this.view.palette.dim("· login is unavailable over this attachment");
       return;
     }
-    this.modal = new LoginDialog({
-      store: credentials.store,
-      context: credentials.context,
-      ...(credentials.fetch === undefined ? {} : { fetch: credentials.fetch }),
-      palette: this.view.palette,
-      width: this.width,
-      refresh: () => this.redraw(),
-      close: (summary) => {
-        this.modal = null;
-        this.commitLines([this.view.palette.dim(summary)]);
-        this.openNextInteraction();
-      },
-    });
+    try {
+      const stored = await credentials.store.read("azure-openai");
+      this.modal = new LoginDialog({
+        store: credentials.store,
+        context: credentials.context,
+        ...(credentials.fetch === undefined ? {} : { fetch: credentials.fetch }),
+        ...(stored?.type === "api_key" ? { currentCredential: stored } : {}),
+        palette: this.view.palette,
+        width: this.width,
+        refresh: () => this.redraw(),
+        close: (summary) => {
+          this.modal = null;
+          this.commitLines([this.view.palette.dim(summary)]);
+          this.openNextInteraction();
+        },
+      });
+      this.redraw();
+    } catch (error) {
+      this.notice = this.view.palette.error(
+        `✖ ${error instanceof Error ? error.message : "could not read credentials"}`,
+      );
+      this.redraw();
+    }
   }
 
   private async configure(update: {
@@ -1131,7 +1537,8 @@ export class KeplerApp {
         sessionId: this.sessionId,
         ...update,
       });
-      if (update.modelId) this.options.onModelChange?.(update.modelId);
+      if (update.modelId) await this.options.onModelChange?.(update.modelId);
+      if (update.thinkingLevel) await this.options.onThinkingChange?.(update.thinkingLevel);
     } catch (error) {
       this.notice = this.view.palette.error(
         `✖ ${error instanceof Error ? error.message : "configuration failed"}`,
@@ -1171,7 +1578,7 @@ export class KeplerApp {
   }
 
   private async refreshBranch(): Promise<void> {
-    const branch = await readGitBranch(this.options.cwd);
+    const branch = await readGitBranch(this.cwd);
     if (branch !== this.branch) {
       this.branch = branch;
       this.redraw();

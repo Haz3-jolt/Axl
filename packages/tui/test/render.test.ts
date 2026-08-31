@@ -4,7 +4,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DifferentialScreen, SYNC_BEGIN, SYNC_END, visibleLength, wrapLine } from "../src/index.ts";
+import {
+  DifferentialScreen,
+  PLAIN_PALETTE,
+  renderDialog,
+  SYNC_BEGIN,
+  SYNC_END,
+  visibleLength,
+  wrapLine,
+} from "../src/index.ts";
 
 function lines(...values: string[]): { render: () => string[] }[] {
   return [{ render: () => values }];
@@ -52,6 +60,26 @@ test("a width change forces a full repaint", () => {
   screen.setWidth(40);
   const frame = screen.frame(lines("same"));
   assert.equal(frame, `${SYNC_BEGIN}\x1b[1F\x1b[2Ksame\n${SYNC_END}`);
+});
+
+test("dialogs use a responsive full-width panel", () => {
+  const rendered = renderDialog({
+    title: "Select model",
+    rows: ["> ", "gpt-5 [azure-openai]"],
+    footer: "enter select · escape cancel",
+    width: 40,
+    palette: PLAIN_PALETTE,
+  });
+  assert.match(rendered[0] ?? "", /^─{38}$/);
+  assert.equal(rendered.includes("  Select model"), true);
+  assert.equal(
+    rendered.some((line) => line.includes("│")),
+    false,
+  );
+  assert.equal(
+    rendered.every((line) => visibleLength(line) <= 40),
+    true,
+  );
 });
 
 test("reset forgets stale terminal geometry after an external clear", () => {

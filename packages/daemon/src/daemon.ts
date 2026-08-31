@@ -7,11 +7,11 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { dirname } from "node:path";
 
 import {
+  type CanonicalEvent,
   encodeWireMessage,
   parseWireRequest,
-  WIRE_PROTOCOL_VERSION,
-  type CanonicalEvent,
   type ServerMessage,
+  WIRE_PROTOCOL_VERSION,
   type WireRequest,
 } from "@kepler/protocol";
 
@@ -226,6 +226,12 @@ export class KeplerDaemon {
       }
       case "session.resume":
         return this.sessions.resume(request.params.sessionId);
+      case "session.list":
+        return this.sessions.list();
+      case "session.fork":
+        return this.sessions.fork(request.params.sessionId, request.params.fromEventId);
+      case "session.clone":
+        return this.sessions.clone(request.params.sessionId);
       case "session.send":
         return this.sessions.send(request.params.sessionId, request.params.content);
       case "session.interrupt":

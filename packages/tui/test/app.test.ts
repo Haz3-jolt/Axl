@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test, { type TestContext } from "node:test";
 
+import { AZURE_OPENAI_MODELS } from "@kepler/ai";
 import { DaemonClient, KeplerDaemon, type SessionInteractionRequest } from "@kepler/daemon";
 import { type ModelPort, ToolRegistry } from "@kepler/kernel";
 import type { JsonObject, ModelStreamEvent, Usage } from "@kepler/protocol";
@@ -142,6 +143,48 @@ test("a full round trip: type, send, render the reply, detach, resume", async (c
   resumedApp.stop();
 });
 
+test("fork, clone, and resume switch sessions through the daemon", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await KeplerApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+  });
+  const sourceSessionId = app.sessionId;
+
+  input.write("first prompt\r");
+  await until(() => text().includes("the answer"), "first reply");
+  const firstReplyCount = (text().match(/the answer/g) ?? []).length;
+  input.write("second prompt\r");
+  await until(() => (text().match(/the answer/g) ?? []).length > firstReplyCount, "second reply");
+
+  input.write("/fork\r");
+  await until(() => text().includes("Fork from Message"), "fork selector");
+  assert.match(text(), /Message 2 of 2/);
+  input.write("\r");
+  await until(() => app.sessionId !== sourceSessionId, "fork switch");
+  const forkSessionId = app.sessionId;
+  assert.match(text(), /forked to new session/);
+  assert.match(text(), /second prompt/);
+
+  input.write("\x15/resume\r");
+  await until(() => text().includes("Resume Session (Current Folder)"), "resume selector");
+  input.write("\r");
+  await until(() => app.sessionId === sourceSessionId, "source session resume");
+
+  input.write("/clone\r");
+  await until(
+    () => app.sessionId !== sourceSessionId && app.sessionId !== forkSessionId,
+    "clone switch",
+  );
+  assert.match(text(), /cloned to new session/);
+  app.stop();
+});
+
 test("terminal resize clears and rebuilds the complete view", async (context) => {
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
@@ -193,6 +236,24 @@ test("editing, /quit, and busy notices behave", async (context) => {
 
   input.write("/quit\r");
   await until(() => exited, "quit");
+});
+
+test("command completion shows the selected command and description", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await KeplerApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+  });
+
+  input.write("/log");
+  await until(() => text().includes("configure Azure OpenAI credentials"), "command completion");
+  assert.match(text(), /→ \/login/);
+  app.stop();
 });
 
 test("prompts entered while working queue in order", async (context) => {
@@ -352,13 +413,18 @@ test("/model opens a selector and switches the model live", async (context) => {
     cwd: directory,
     color: false,
     models: ["gpt-5", "gpt-4.1", "gpt-4o-mini"],
+    modelCatalog: AZURE_OPENAI_MODELS,
     currentModel: "gpt-5",
-    onModelChange: (modelId) => switched.push(modelId),
+    onModelChange: (modelId) => {
+      switched.push(modelId);
+    },
   });
 
   input.write("/model\r");
-  await until(() => text().includes("Select model"), "selector open");
-  assert.match(text(), /❯ gpt-5/);
+  await until(() => text().includes("Only showing models"), "selector open");
+  assert.match(text(), /→ gpt-5 \[azure-openai\] ✓/);
+  assert.match(text(), /Model Name: GPT-5/);
+  assert.match(text(), /Azure OpenAI catalog · 3 models/);
   assert.match(text(), /gpt-4\.1/);
 
   input.write("\x1b[B"); // down
@@ -382,14 +448,16 @@ test("/model digit selection and Esc cancel behave", async (context) => {
     cwd: directory,
     color: false,
     models: ["gpt-5", "gpt-4o-mini"],
-    onModelChange: (modelId) => switched.push(modelId),
+    onModelChange: (modelId) => {
+      switched.push(modelId);
+    },
   });
 
   input.write("/model\r");
-  await until(() => text().includes("Select model"), "selector open");
+  await until(() => text().includes("Only showing models"), "selector open");
   input.write("\x1b"); // cancel
   input.write("/model\r");
-  await until(() => (text().match(/Select model/g) ?? []).length >= 2, "reopened");
+  await until(() => (text().match(/Only showing models/g) ?? []).length >= 2, "reopened");
   input.write("2");
   await until(() => switched.length > 0, "digit selection");
   assert.deepEqual(switched, ["gpt-4o-mini"]);
@@ -416,10 +484,12 @@ test("/login is a dialog: fields, masked key, live Azure verification", async (c
   });
 
   input.write("/login\r");
-  await until(() => text().includes("Azure OpenAI login"), "login dialog");
+  await until(() => text().includes("Login to Azure OpenAI"), "login dialog");
   assert.match(text(), /API key/);
-  input.write("dialog-test-key\r");
-  await until(() => text().includes("Endpoint"), "endpoint field");
+  input.write("dialog-test-key");
+  await until(() => /\*{5,}/.test(text()), "masked key");
+  input.write("\r");
+  await until(() => text().includes("Enter Azure OpenAI endpoint"), "endpoint field");
   input.write("https://myres.openai.azure.com/\r");
   input.write("\r"); // skip the optional map
   await until(() => text().includes("credentials verified with Azure"), "verified");
@@ -428,6 +498,51 @@ test("/login is a dialog: fields, masked key, live Azure verification", async (c
   assert.match(text(), /\*{5,}/);
   const stored = await store.read("azure-openai");
   assert.equal(stored?.type === "api_key" && stored.key, "dialog-test-key");
+});
+
+test("/login reuses a global stored key in another workspace", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const { FileCredentialStore } = await import("@kepler/ai");
+  const store = new FileCredentialStore(join(directory, "credentials.json"));
+  await store.modify("azure-openai", () =>
+    Promise.resolve({
+      type: "api_key",
+      key: "stored-key",
+      env: {
+        AZURE_OPENAI_BASE_URL: "https://myres.openai.azure.com/openai/v1",
+        AZURE_OPENAI_DEPLOYMENT_NAME_MAP: "gpt-5.6-sol=production",
+      },
+    }),
+  );
+  const workspace = join(directory, "other-workspace");
+  await mkdir(workspace);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await KeplerApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: workspace,
+    color: false,
+    credentials: {
+      store,
+      context: { env: () => undefined, fileExists: () => Promise.resolve(false) },
+      fetch: (async () => new Response("{}", { status: 200 })) as typeof fetch,
+    },
+  });
+
+  input.write("/login\r");
+  await until(() => text().includes("leave blank to keep the stored key"), "stored login");
+  input.write("\r");
+  await until(() => text().includes("https://myres.openai.azure.com/openai/v1"), "stored endpoint");
+  input.write("\r");
+  await until(() => text().includes("gpt-5.6-sol=production"), "stored deployment map");
+  input.write("\r");
+  await until(() => text().includes("credentials verified with Azure"), "verification");
+  const stored = await store.read("azure-openai");
+  assert.equal(stored?.type, "api_key");
+  assert.equal(stored?.type === "api_key" ? stored.key : undefined, "stored-key");
+  app.stop();
 });
 
 test("/reload requests a runtime rebuild and renders the boundary", async (context) => {

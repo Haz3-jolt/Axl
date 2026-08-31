@@ -6,6 +6,7 @@
 // against the live Azure endpoint before anything claims success.
 
 import {
+  type ApiKeyCredential,
   type AuthContext,
   AZURE_OPENAI_PROVIDER_ID,
   azureOpenAiAuthMethod,
@@ -33,6 +34,7 @@ export interface LoginDialogOptions {
   readonly store: CredentialStore;
   readonly context: AuthContext;
   readonly fetch?: typeof fetch;
+  readonly currentCredential?: ApiKeyCredential;
   readonly palette: Palette;
   readonly width: number;
   /** Repaint request while async verification progresses. */
@@ -44,39 +46,64 @@ export interface LoginDialogOptions {
 /** The `/login` modal: renders as a dialog, verifies against Azure, then closes. */
 export class LoginDialog {
   private readonly options: LoginDialogOptions;
-  private readonly fields: readonly Field[] = [
-    { label: "API key ", mask: true, optional: false, value: "" },
-    { label: "Endpoint", mask: false, optional: false, value: "" },
-    { label: "Map     ", mask: false, optional: true, value: "" },
-  ];
+  private readonly fields: readonly Field[];
   private active = 0;
   private message: string | undefined;
   private verifying = false;
 
   constructor(options: LoginDialogOptions) {
     this.options = options;
+    this.fields = [
+      {
+        label: "API key",
+        mask: true,
+        optional: options.currentCredential?.key !== undefined,
+        value: "",
+      },
+      {
+        label: "Endpoint",
+        mask: false,
+        optional: false,
+        value: options.currentCredential?.env?.AZURE_OPENAI_BASE_URL ?? "",
+      },
+      {
+        label: "Deployment map",
+        mask: false,
+        optional: true,
+        value: options.currentCredential?.env?.AZURE_OPENAI_DEPLOYMENT_NAME_MAP ?? "",
+      },
+    ];
   }
 
   render(width = this.options.width): string[] {
     const { palette } = this.options;
     const { dim, accent, error } = palette;
-    const rows: string[] = [
-      dim("Saved to ~/.kepler/credentials.json (0600), redacted from logs."),
-      "",
-      ...this.fields.map((field, index) => {
-        const shown = field.mask ? "*".repeat(field.value.length) : field.value;
-        const hint = field.optional && field.value.length === 0 ? dim(" (optional)") : "";
-        const line = `${field.label}  ${shown}${hint}`;
-        return index === this.active && !this.verifying ? `${accent("❯")} ${line}` : `  ${line}`;
-      }),
-      "",
-    ];
-    if (this.verifying) rows.push(dim("Checking the key against Azure…"));
-    else if (this.message !== undefined) rows.push(error(this.message));
+    const field = this.fields[this.active] as Field;
+    const shown = field.mask ? "*".repeat(field.value.length) : field.value;
+    const prompts = [
+      this.options.currentCredential?.key
+        ? "Enter a new Azure OpenAI API key, or leave blank to keep the stored key"
+        : "Enter Azure OpenAI API key",
+      "Enter Azure OpenAI endpoint",
+      "Map model IDs to Azure deployment names (optional)",
+    ] as const;
+    const examples = [
+      "Stored globally in ~/.kepler/credentials.json and used in every workspace.",
+      "Example: https://your-resource.openai.azure.com/",
+      "Format: gpt-5.6-sol=my-deployment[,model=deployment]",
+    ] as const;
+    const rows = this.verifying
+      ? [dim("Checking the credentials against Azure…")]
+      : [
+          prompts[this.active] as string,
+          `${accent(">")} ${shown}`,
+          dim(examples[this.active] as string),
+          ...(this.message === undefined ? [] : [error(this.message)]),
+        ];
     return renderDialog({
-      title: "Azure OpenAI login",
+      title: "Login to Azure OpenAI",
       rows,
-      footer: this.verifying ? "verifying…" : "Enter next · Esc cancel",
+      footer: this.verifying ? "verifying…" : "escape/ctrl+c cancel · enter continue",
       width,
       palette,
     });
@@ -86,12 +113,7 @@ export class LoginDialog {
   cursor(): CursorPlacement | undefined {
     if (this.verifying) return undefined;
     const field = this.fields[this.active] as Field;
-    const shownLength = field.value.length;
-    // dialog border(1) + info(1) + blank(1) + field rows above the active one
-    return {
-      row: 3 + this.active,
-      column: 2 + 2 + field.label.length + 2 + shownLength,
-    };
+    return { row: 5, column: 4 + field.value.length };
   }
 
   handleKey(data: string): void {
@@ -146,7 +168,13 @@ export class LoginDialog {
   }
 
   private async finish(): Promise<void> {
-    const key = (this.fields[0] as Field).value.replace(/\s+/g, "");
+    const key =
+      (this.fields[0] as Field).value.replace(/\s+/g, "") || this.options.currentCredential?.key;
+    if (!key) {
+      this.message = "API key is required";
+      this.active = 0;
+      return;
+    }
     const baseUrl = normalizeAzureBaseUrl((this.fields[1] as Field).value);
     const map = (this.fields[2] as Field).value.trim();
     const mapValid = map.length > 0 && Object.keys(parseDeploymentMap(map)).length > 0;
@@ -175,7 +203,7 @@ export class LoginDialog {
       }
       const status = verification.status === undefined ? "" : ` (HTTP ${verification.status})`;
       this.verifying = false;
-      this.message = `Azure rejected the credentials${status} — check the key`;
+      this.message = `Azure rejected the credentials${status}. Check the key`;
       this.active = 0;
       (this.fields[0] as Field).value = "";
       this.options.refresh();

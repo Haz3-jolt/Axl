@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // First-run credential setup: interactive prompts instead of environment
-// exports. Input is decoded like the editor's — bracketed-paste markers and
-// escape sequences never leak into typed values — and "verified" means Azure
+// exports. Input is decoded like the editor's: bracketed-paste markers and
+// escape sequences never leak into typed values. "Verified" means Azure
 // actually accepted the key, checked with a token-free request.
 
 import {
+  type AuthContext,
   AZURE_OPENAI_PROVIDER_ID,
   azureOpenAiAuthMethod,
-  type AuthContext,
   type CredentialStore,
   login,
   normalizeAzureBaseUrl,
@@ -115,7 +115,7 @@ export async function runAzureSetup(
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   output.write(
-    "\nAzure OpenAI setup — saved to ~/.kepler/credentials.json (0600), redacted from logs.\n\n",
+    "\nAzure OpenAI setup: saved to ~/.kepler/credentials.json (0600), redacted from logs.\n\n",
   );
 
   for (let attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt += 1) {
@@ -177,6 +177,6 @@ export async function runAzureSetup(
     if (attempt < VERIFY_ATTEMPTS) output.write("  Let's try again.\n\n");
   }
   output.write(
-    "\n  Credentials saved but NOT verified — fix them with /login or `kepler login`.\n\n",
+    "\n  Credentials saved but NOT verified. Fix them with /login or `kepler login`.\n\n",
   );
 }

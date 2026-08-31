@@ -6,9 +6,9 @@ import test from "node:test";
 
 import {
   encodeWireMessage,
+  ProtocolValidationError,
   parseServerMessage,
   parseWireRequest,
-  ProtocolValidationError,
   WIRE_PROTOCOL_VERSION,
 } from "../src/index.ts";
 
@@ -18,6 +18,14 @@ test("validates every request shape", () => {
   const requests = [
     { kind: "request", id: 1, method: "session.create", params: { cwd: "/repo" } },
     { kind: "request", id: 2, method: "session.resume", params: { sessionId } },
+    { kind: "request", id: 11, method: "session.list", params: {} },
+    {
+      kind: "request",
+      id: 12,
+      method: "session.fork",
+      params: { sessionId, fromEventId: "00000000-0000-4000-8000-000000000001" },
+    },
+    { kind: "request", id: 13, method: "session.clone", params: { sessionId } },
     {
       kind: "request",
       id: 3,
@@ -61,6 +69,8 @@ test("rejects malformed requests at the wire boundary", () => {
     { kind: "request", id: 1, method: "unknown", params: {} },
     { kind: "request", id: 1, method: "session.create", params: { cwd: "" } },
     { kind: "request", id: 1, method: "session.resume", params: { sessionId: "bad" } },
+    { kind: "request", id: 1, method: "session.list", params: { cwd: "/repo" } },
+    { kind: "request", id: 1, method: "session.fork", params: { sessionId } },
     { kind: "request", id: 1, method: "session.send", params: { sessionId, content: "bad" } },
     { kind: "request", id: 1, method: "session.configure", params: { sessionId } },
     {

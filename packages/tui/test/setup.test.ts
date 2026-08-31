@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test, { type TestContext } from "node:test";
 
-import { FileCredentialStore, type AuthContext } from "@kepler/ai";
+import { type AuthContext, FileCredentialStore } from "@kepler/ai";
 
 import { promptLine, runAzureSetup, SetupAbortedError } from "../src/index.ts";
 

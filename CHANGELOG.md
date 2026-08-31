@@ -14,7 +14,7 @@ This file records notable user-facing changes.
 - Crash-safe JSONL sessions, branch reconstruction, redaction, and deterministic replay
 - Provider and credential contracts, thinking levels, tool dialects, a deterministic fake provider, and the full Pi-compatible Azure OpenAI model catalog
 - An agent loop with shell, read, and edit tools, stable prompts, cancellation, and operation ownership
-- An authoritative Unix-socket daemon with required operating-system sandboxing
-- A terminal client with multiline editing, responsive rendering, session metrics, compact tool output, syntax-highlighted line-numbered diffs, selectors, prompt queues, and reconnect support
+- An authoritative Unix-socket daemon with required operating-system sandboxing and resumable, forkable sessions
+- A terminal client with multiline editing, resize-safe rendering, session metrics, rich tool output, syntax-highlighted line-numbered diffs, full-width selectors, global preferences, prompt queues, and reconnect support
 - Agent Skills discovery, validation, progressive loading, and protected resource access
 - MCP 2025-11-25 support over stdio and Streamable HTTP, including OAuth, tools, resources, prompts, completion, roots, sampling, elicitation, tasks, progress, cancellation, and logs

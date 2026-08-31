@@ -10,6 +10,8 @@ import { join } from "node:path";
 import {
   AuthError,
   AZURE_OPENAI_MODELS,
+  AZURE_OPENAI_PROVIDER_ID,
+  azureOpenAiAuthMethod,
   clampThinkingLevel,
   createAzureOpenAiProvider,
   dialectBoundaryPayload,
@@ -19,10 +21,8 @@ import {
   nodeAuthContext,
   OPENAI_CHAT_TOOL_DIALECT,
   resolveProviderAuth,
-  azureOpenAiAuthMethod,
-  AZURE_OPENAI_PROVIDER_ID,
 } from "@kepler/ai";
-import { KeplerDaemon, DaemonClient } from "@kepler/daemon";
+import { DaemonClient, KeplerDaemon } from "@kepler/daemon";
 import { loadMcpConfig, McpManager, mcpSecretValues } from "@kepler/extension-mcp";
 import { discoverSkills, makeSkillTool, skillCatalogSection } from "@kepler/extension-skills";
 import {
@@ -33,28 +33,26 @@ import {
   ToolRegistry,
   type WorkspacePolicy,
 } from "@kepler/kernel";
-import { detectPlatformSandbox, SandboxUnavailableError } from "@kepler/sandbox";
 import type { ThinkingLevel } from "@kepler/protocol";
+import { detectPlatformSandbox, SandboxUnavailableError } from "@kepler/sandbox";
 
 import { KeplerApp } from "./app.ts";
+import { type KeplerSettings, readSettings, writeSettings } from "./settings.ts";
 import { runAzureSetup } from "./setup.ts";
+import { themeNames } from "./themes.ts";
 
 interface CliArguments {
   command?: "login" | "daemon";
   sessionId?: string;
   socket?: string;
-  model: string;
-  thinking: ThinkingLevel;
+  model?: string;
+  thinking?: ThinkingLevel;
   theme?: string;
   cwd: string;
 }
 
 function parseArguments(argv: readonly string[]): CliArguments {
-  const parsed: CliArguments = {
-    model: "gpt-5",
-    thinking: "medium",
-    cwd: process.cwd(),
-  };
+  const parsed: CliArguments = { cwd: process.cwd() };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index] as string;
     const next = (): string => {
@@ -273,7 +271,25 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const active: ActiveConfig = { modelId: cli.model, thinkingLevel: cli.thinking };
+  const settingsPath = join(keplerHome, "settings.json");
+  let settings = await readSettings(settingsPath);
+  const active: ActiveConfig = {
+    modelId: cli.model ?? settings.model ?? "gpt-5",
+    thinkingLevel: cli.thinking ?? settings.thinking ?? "medium",
+  };
+  const selectedTheme = cli.theme ?? settings.theme;
+  if (selectedTheme !== undefined && !themeNames().includes(selectedTheme)) {
+    throw new Error(`Unknown theme ${selectedTheme} in ${settingsPath}`);
+  }
+  let settingsWrite = Promise.resolve();
+  const saveSettings = (update: KeplerSettings): Promise<void> => {
+    settings = { ...settings, ...update };
+    const snapshot = settings;
+    const write = settingsWrite.then(() => writeSettings(settingsPath, snapshot));
+    settingsWrite = write.catch(() => undefined);
+    return write;
+  };
+
   if (cli.command === "daemon") {
     await ensureCredentials(store);
     const daemon = await makeLocalDaemon(keplerHome, socketPath, active, store);
@@ -303,12 +319,15 @@ async function main(): Promise<void> {
     input: process.stdin,
     output: process.stdout,
     cwd: cli.cwd,
-    ...(cli.theme === undefined ? {} : { theme: cli.theme }),
+    ...(selectedTheme === undefined ? {} : { theme: selectedTheme }),
     models: AZURE_OPENAI_MODELS.map((model) => model.modelId),
     modelCatalog: AZURE_OPENAI_MODELS,
     currentModel: active.modelId,
     currentThinking: active.thinkingLevel,
     credentials: { store, context: nodeAuthContext },
+    onModelChange: (model) => saveSettings({ model }),
+    onThinkingChange: (thinking) => saveSettings({ thinking }),
+    onThemeChange: (theme) => saveSettings({ theme }),
     ...(cli.sessionId === undefined ? {} : { sessionId: cli.sessionId }),
     onExit: () => process.exit(0),
   });
