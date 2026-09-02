@@ -57,7 +57,7 @@ Axl reads global configuration from `~/.axl`:
 - `skills/<name>/SKILL.md` for global Agent Skills
 - `mcp.json` for global MCP servers
 - `credentials.json` for credentials managed by `axl login`
-- `settings.json` for the selected model, thinking level, and theme
+- `settings.json` for model, thinking, theme, and terminal preferences
 
 Credentials and settings apply in every workspace. Axl also reads `AGENTS.md`, `.axl/skills`, and `.axl/mcp.json` from the workspace root. A project skill or MCP server replaces the global entry with the same name. Reload the session after changing instructions, skills, or MCP configuration.
 

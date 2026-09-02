@@ -272,7 +272,6 @@ Every `/goal` invocation checks slow-mode availability and displays the static s
 
 Image input is available by default in every client. Users can paste, drag, or reference a file. The active model determines how Axl handles it:
 
-- A vision-capable main model receives the image directly.
 - If the main model has vision support, it receives the image directly.
 - If the main model lacks vision support, Axl says so. An optional vision-description role can produce an attributed description for the main model.
 - OCR tasks can use a separate, cheaper OCR role. Without one, images go to the vision-capable main model.
@@ -1836,10 +1835,19 @@ The checked TUI items in this phase were pulled forward as an explicit exception
 
 #### Terminal experience
 
-- [x] Add differential rendering and synchronized output.
-- [x] Preserve normal terminal scrollback.
-- [ ] Add responsive layouts, inline diffs, inline images, overlays, and IME-safe cursor handling.
-- [ ] Keep alternate-screen mode optional.
+The detailed terminal contract and compatibility requirements live in [the TUI architecture](docs/architecture/tui.md).
+
+- [x] Add differential rendering, synchronized output, responsive layouts, overlays, and IME-safe cursor placement.
+- [x] Preserve normal terminal scrollback and keep fullscreen alternate-screen mode optional.
+- [x] Add grapheme-safe multiline editing, history, selection, undo and redo, clipboard text, external editing, and optional Vim controls.
+- [x] Add Markdown, syntax highlighting, Mermaid diagrams, retained tool transactions, detail modes, and adaptive diffs.
+- [x] Add transcript search, navigation, selection, safe links, mouse handling, and terminal cleanup.
+- [x] Add daemon reconnect, bounded resume, interrupted-operation recovery, and uncertain-prompt preservation.
+- [x] Add independently disableable prompt stash, model favorites, refocus recap, developer panel, and daemon-owned workspace review.
+- [x] Add the capability-scoped terminal extension API used by MCP and Agent Skills renderers.
+- [x] Add sequenced transient activity, content-addressed blob transport, image attachments, and bounded terminal media output.
+- [x] Add deterministic long-session, hostile-input, accessibility, and performance coverage.
+- [ ] Complete the manual real-terminal matrix and attach UI evidence.
 
 #### Exit gate
 
