@@ -2,18 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import test from "node:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test, { type TestContext } from "node:test";
 
 import { parseOperationId } from "@axl/protocol";
 
 import {
   detectImageMediaType,
   detectTerminalMedia,
+  droppedImages,
   imageDimensions,
   LiveAssistantComponent,
   MediaCache,
   PLAIN_PALETTE,
   renderInlineImage,
+  uploadBlob,
 } from "../src/index.ts";
 
 function png(width = 2, height = 1): Buffer {
@@ -25,12 +30,27 @@ function png(width = 2, height = 1): Buffer {
   return bytes;
 }
 
+const sessionId = "123e4567-e89b-42d3-a456-426614174000";
+
 const blob = {
   sha256: "a".repeat(64),
   mediaType: "image/png",
   sizeBytes: 32,
   name: "pixel.png",
 } as const;
+
+test("reads pasted image paths without treating mixed text as attachments", async (context: TestContext) => {
+  const directory = await mkdtemp(join(tmpdir(), "axl-media-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, "pixel.png");
+  await writeFile(path, png());
+
+  const attachments = await droppedImages(path, directory);
+  assert.equal(attachments.length, 1);
+  assert.equal(attachments[0]?.name, "pixel.png");
+  assert.deepEqual(attachments[0]?.bytes, png());
+  assert.deepEqual(await droppedImages(`${path}\nnot an image`, directory), []);
+});
 
 test("detects image bytes and conservative terminal protocols", () => {
   const bytes = png(12, 8);
@@ -58,6 +78,27 @@ test("renders bounded Kitty and iTerm2 images with metadata fallback", () => {
   );
   const fallback = renderInlineImage(bytes, blob, null, 20);
   assert.match(fallback[0] ?? "", /Image · pixel\.png/);
+});
+
+test("rejects a committed blob reference that does not match the upload", async () => {
+  const methods: string[] = [];
+  const client = {
+    request(method: string): Promise<unknown> {
+      methods.push(method);
+      if (method === "session.blob.start") {
+        return Promise.resolve({ uploadId: "upload-1", chunkBytes: 384 * 1024 });
+      }
+      if (method === "session.blob.chunk") return Promise.resolve({ nextOffset: 32 });
+      if (method === "session.blob.commit") return Promise.resolve(blob);
+      if (method === "session.blob.abort") return Promise.resolve({ aborted: false });
+      throw new Error(`Unexpected request ${method}`);
+    },
+  };
+  await assert.rejects(
+    uploadBlob(client as never, sessionId, png(), "image/png", "pixel.png"),
+    /does not match the upload/,
+  );
+  assert.equal(methods.at(-1), "session.blob.abort");
 });
 
 test("fullscreen suppresses inline image placement", () => {

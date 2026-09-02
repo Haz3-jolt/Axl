@@ -3,7 +3,8 @@
 
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -18,6 +19,7 @@ const execute = promisify(execFile);
 const PATCH_LIMIT = 64 * 1024;
 const RESPONSE_LIMIT = 128 * 1024;
 const FILE_LIMIT = 500;
+const WORKSPACE_BYTE_LIMIT = 256 * 1024 * 1024;
 
 export class WorkspaceCheckpointError extends Error {
   readonly code: string;
@@ -222,6 +224,24 @@ export class WorkspaceCheckpointStore {
         "checkpoint_too_large",
         "Workspace checkpoint exceeds the 20,000 file safety limit",
       );
+    }
+    let bytes = 0;
+    for (const path of files) {
+      let info: Stats;
+      try {
+        info = await lstat(join(cwd, path));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      if (!info.isFile()) continue;
+      bytes += info.size;
+      if (bytes > WORKSPACE_BYTE_LIMIT) {
+        throw new WorkspaceCheckpointError(
+          "checkpoint_too_large",
+          "Workspace checkpoint exceeds the 256 MiB safety limit",
+        );
+      }
     }
   }
 

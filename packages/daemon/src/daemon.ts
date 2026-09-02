@@ -242,6 +242,12 @@ export class AxlDaemon {
       }
       case "session.list":
         return this.sessions.list();
+      case "session.history":
+        return this.sessions.history(
+          request.params.sessionId,
+          request.params.afterEventId,
+          request.params.limit,
+        );
       case "session.fork":
         return this.sessions.fork(request.params.sessionId, request.params.fromEventId);
       case "session.clone":
@@ -301,6 +307,8 @@ export class AxlDaemon {
         );
       case "session.blob.commit":
         return this.sessions.commitBlobUpload(request.params.sessionId, request.params.uploadId);
+      case "session.blob.abort":
+        return this.sessions.abortBlobUpload(request.params.sessionId, request.params.uploadId);
       case "session.blob.read":
         return this.sessions.readBlob(
           request.params.sessionId,

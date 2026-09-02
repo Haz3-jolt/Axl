@@ -8,6 +8,7 @@ import {
   encodeWireMessage,
   ProtocolValidationError,
   parseServerMessage,
+  parseSessionHistoryPage,
   parseWireRequest,
   parseWorkspaceDiff,
   WIRE_PROTOCOL_VERSION,
@@ -26,6 +27,16 @@ test("validates every request shape", () => {
       params: { sessionId, includeEvents: false },
     },
     { kind: "request", id: 17, method: "session.list", params: {} },
+    {
+      kind: "request",
+      id: 20,
+      method: "session.history",
+      params: {
+        sessionId,
+        afterEventId: "00000000-0000-4000-8000-000000000001",
+        limit: 500,
+      },
+    },
     {
       kind: "request",
       id: 18,
@@ -104,6 +115,12 @@ test("validates every request shape", () => {
     },
     {
       kind: "request",
+      id: 21,
+      method: "session.blob.abort",
+      params: { sessionId, uploadId: "upload-1" },
+    },
+    {
+      kind: "request",
       id: 16,
       method: "session.blob.read",
       params: { sessionId, sha256: "a".repeat(64), offset: 0, length: 4 },
@@ -126,6 +143,18 @@ test("rejects malformed requests at the wire boundary", () => {
       params: { sessionId, includeEvents: "no" },
     },
     { kind: "request", id: 1, method: "session.list", params: { cwd: "/repo" } },
+    {
+      kind: "request",
+      id: 1,
+      method: "session.history",
+      params: { sessionId, limit: 0 },
+    },
+    {
+      kind: "request",
+      id: 1,
+      method: "session.history",
+      params: { sessionId, limit: 5_001 },
+    },
     { kind: "request", id: 1, method: "session.fork", params: { sessionId } },
     { kind: "request", id: 1, method: "session.send", params: { sessionId, content: "bad" } },
     {
@@ -180,6 +209,34 @@ test("rejects malformed requests at the wire boundary", () => {
   ]) {
     assert.throws(() => parseWireRequest(request), ProtocolValidationError);
   }
+});
+
+test("validates session history pages", () => {
+  const event = {
+    version: 1,
+    id: "00000000-0000-4000-8000-000000000001",
+    sessionId,
+    parentId: null,
+    timestamp: 1,
+    type: "session.created",
+    payload: { cwd: "/repo" },
+  };
+  assert.deepEqual(parseSessionHistoryPage({ events: [event], done: true }, sessionId), {
+    events: [event],
+    done: true,
+  });
+  assert.throws(
+    () => parseSessionHistoryPage({ events: [], done: false }, sessionId),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      parseSessionHistoryPage(
+        { events: [{ ...event, sessionId: "123e4567-e89b-42d3-a456-426614174001" }], done: true },
+        sessionId,
+      ),
+    ProtocolValidationError,
+  );
 });
 
 test("validates bounded workspace diff responses", () => {

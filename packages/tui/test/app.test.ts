@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough as NodePassThrough } from "node:stream";
@@ -143,15 +143,18 @@ test("a full round trip: type, send, render the reply, detach, resume", async (c
 
   const resumeInput = new PassThrough();
   const resumed = captureOutput();
+  const launchDirectory = join(directory, "different-launch-directory");
+  await mkdir(launchDirectory);
   const resumedApp = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input: resumeInput,
     output: resumed.output,
-    cwd: directory,
+    cwd: launchDirectory,
     sessionId: app.sessionId,
     color: false,
   });
   assert.equal(resumedApp.sessionId, app.sessionId);
+  assert.equal((resumedApp as unknown as { cwd: string }).cwd, directory);
   assert.match(resumed.text(), /│ hello axl/);
   assert.match(resumed.text(), /the answer/);
   resumedApp.stop();

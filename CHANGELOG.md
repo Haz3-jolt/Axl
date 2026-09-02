@@ -67,5 +67,6 @@ This file records notable user-facing changes.
 - Daemon disconnects now enter a visible reconnecting state, resume canonical history after restart, and preserve uncertain prompts for user review instead of resending them silently
 - Optional focus-aware terminal-bell attention signals for questions, failures, and completed turns
 - Interaction dialogs remain open when a daemon response fails, allowing the user to retry after reconnecting
-- Reconnect resume avoids resending the full session in one wire frame, reconstructs interleaved multi-tool turns correctly, and closes interrupted tool calls and interactions explicitly
+- Session resume pages canonical history instead of sending an unbounded wire frame, reconstructs interleaved multi-tool turns correctly, and closes interrupted tool calls and interactions explicitly
 - Reconnect retries remain a neutral in-progress state, wait longer for slow daemon startup, and force cursor-safe fullscreen redraws
+- Failed attachment uploads can be aborted, stale upload files are removed before the next upload after daemon restart, and workspace checkpoints reject oversized trees before copying data

@@ -29,10 +29,14 @@ import type {
   WorkspaceDiff,
   WorkspaceDiffScope,
 } from "@axl/protocol";
-import { parseWorkspaceDiff } from "@axl/protocol";
+import {
+  MAX_HISTORY_PAGE_EVENTS,
+  parseSessionHistoryPage,
+  parseWorkspaceDiff,
+} from "@axl/protocol";
 
 import { ActivityComponent } from "./activity.ts";
-import { droppedImagePaths, type LocalAttachment, readImageFile } from "./attachments.ts";
+import { droppedImages, type LocalAttachment, readImageFile } from "./attachments.ts";
 import { readClipboardText, writeClipboardText } from "./clipboard.ts";
 import { DeveloperPanelComponent } from "./developer-panel.ts";
 import { renderDialog } from "./dialog.ts";
@@ -90,6 +94,34 @@ const SESSION_SELECTOR_WINDOW = 10;
 const MAX_EXTENSION_COMPLETIONS = 100;
 const MAX_EXTENSION_SELECTOR_ITEMS = 1_000;
 const MAX_EXTENSION_TEXT_CHARACTERS = 512;
+
+async function resumeSnapshot(client: DaemonClient, sessionId: string): Promise<SessionSnapshot> {
+  const resumed = (await client.request("session.resume", {
+    sessionId,
+    includeEvents: false,
+  })) as SessionSnapshot;
+  if (resumed.sessionId !== sessionId) throw new Error("Daemon resumed the wrong session");
+
+  const events: CanonicalEvent[] = [];
+  let afterEventId: string | undefined;
+  for (;;) {
+    const page = parseSessionHistoryPage(
+      await client.request("session.history", {
+        sessionId,
+        ...(afterEventId === undefined ? {} : { afterEventId }),
+        limit: MAX_HISTORY_PAGE_EVENTS,
+      }),
+      sessionId,
+    );
+    events.push(...page.events);
+    if (page.done) return { sessionId: resumed.sessionId, events };
+    const lastEventId = page.events.at(-1)?.id;
+    if (lastEventId === undefined || lastEventId === afterEventId) {
+      throw new Error("Daemon returned a session history page without progress");
+    }
+    afterEventId = lastEventId;
+  }
+}
 
 function extensionSingleLine(value: string): string {
   return sanitizeTerminalText(value)
@@ -585,6 +617,7 @@ export class AxlApp {
   private constructor(
     options: AxlAppOptions,
     sessionId: string,
+    cwd: string,
     width: number,
     height: number,
     branch: string | undefined,
@@ -592,7 +625,7 @@ export class AxlApp {
     this.options = options;
     this.client = options.client;
     this.sessionId = sessionId;
-    this.cwd = options.cwd;
+    this.cwd = cwd;
     this.width = width;
     this.height = height;
     this.screen = new DifferentialScreen(width);
@@ -823,7 +856,6 @@ export class AxlApp {
 
   static async start(options: AxlAppOptions): Promise<AxlApp> {
     assertInteractiveTerminal(options.input, options.output);
-    const branch = readGitBranch(options.cwd);
     const snapshot = (await (options.sessionId === undefined
       ? options.client.request("session.create", {
           cwd: options.cwd,
@@ -832,14 +864,22 @@ export class AxlApp {
             ? {}
             : { thinkingLevel: options.currentThinking }),
         })
-      : options.client.request("session.resume", {
-          sessionId: options.sessionId,
-        }))) as SessionSnapshot;
+      : resumeSnapshot(options.client, options.sessionId))) as SessionSnapshot;
+    const created = snapshot.events[0];
+    if (created?.type !== "session.created") throw new Error("Session has no creation event");
+    const cwd = created.payload.cwd;
 
     const width =
       options.output.columns && options.output.columns > 0 ? options.output.columns : 80;
     const height = options.output.rows && options.output.rows > 0 ? options.output.rows : 24;
-    const app = new AxlApp(options, snapshot.sessionId, width, height, await branch);
+    const app = new AxlApp(
+      options,
+      snapshot.sessionId,
+      cwd,
+      width,
+      height,
+      await readGitBranch(cwd),
+    );
     try {
       await app.extensionHost.activate();
       const builtIns = new Set(COMMANDS.map((command) => command.name.slice(1)));
@@ -870,7 +910,7 @@ export class AxlApp {
       throw error;
     }
     if (options.clearStartupLine) options.output.write("\r\x1b[2K");
-    app.commitLines(app.welcomeLines(options.cwd, options.sessionId !== undefined), false);
+    app.commitLines(app.welcomeLines(cwd, options.sessionId !== undefined), false);
     for (const event of snapshot.events) {
       await app.prepareEventMedia(event);
       app.commitEvent(event, false);
@@ -1795,14 +1835,14 @@ export class AxlApp {
 
   private async handleBracketedPaste(text: string): Promise<void> {
     try {
-      const paths = await droppedImagePaths(text, this.cwd);
+      const attachments = await droppedImages(text, this.cwd);
       if (this.stopped) return;
-      if (paths.length === 0) {
+      if (attachments.length === 0) {
         this.editor.insertText(text.replace(/\r\n/g, "\n").replace(/\r/g, "\n"));
         this.redraw();
         return;
       }
-      for (const path of paths) await this.attachLocal(await readImageFile(path));
+      for (const attachment of attachments) await this.attachLocal(attachment);
     } catch (error) {
       this.notice = this.view.palette.error(
         `✖ ${error instanceof Error ? error.message : "dropped image failed"}`,
@@ -3041,10 +3081,11 @@ export class AxlApp {
 
   private async resumeSession(sessionId: string): Promise<void> {
     try {
-      const snapshot = (await this.client.request("session.resume", {
-        sessionId,
-      })) as SessionSnapshot;
-      await this.switchSession(snapshot, "", "· resumed session");
+      await this.switchSession(
+        await resumeSnapshot(this.client, sessionId),
+        "",
+        "· resumed session",
+      );
     } catch (error) {
       this.notice = this.view.palette.error(
         `✖ ${error instanceof Error ? error.message : "could not resume session"}`,

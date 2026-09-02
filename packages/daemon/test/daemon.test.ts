@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -15,6 +15,7 @@ import type {
   ModelStreamEvent,
   SessionActivityFrame,
   SessionForkResult,
+  SessionHistoryPage,
   SessionSummary,
   Usage,
 } from "@axl/protocol";
@@ -182,6 +183,10 @@ test("streams transient deltas and resumes the latest accumulated activity", asy
 
 test("uploads image blobs in chunks without persisting bytes in JSONL", async (context) => {
   const { socketPath, cwd, dataDirectory } = await startDaemon(context);
+  const orphanDirectory = join(dataDirectory, "blobs", "uploads");
+  const orphan = join(orphanDirectory, "orphaned-upload");
+  await mkdir(orphanDirectory, { recursive: true });
+  await writeFile(orphan, "partial");
   const client = await DaemonClient.connect(socketPath);
   context.after(() => client.close());
   const created = (await client.request("session.create", { cwd })) as SessionSnapshot;
@@ -196,6 +201,7 @@ test("uploads image blobs in chunks without persisting bytes in JSONL", async (c
     sizeBytes: bytes.length,
     name: "pixel.png",
   })) as { uploadId: string };
+  await assert.rejects(readFile(orphan), { code: "ENOENT" });
   await client.request("session.blob.chunk", {
     sessionId: created.sessionId,
     uploadId: started.uploadId,
@@ -312,6 +318,31 @@ test("uploads image blobs in chunks without persisting bytes in JSONL", async (c
   assert.ok(rejectedStart?.status === "rejected");
   assert.equal(rejectedStart.reason instanceof WireClientError, true);
   assert.equal((rejectedStart.reason as WireClientError).code, "too_many_uploads");
+
+  const active = starts.find(
+    (result): result is PromiseFulfilledResult<{ uploadId: string }> =>
+      result.status === "fulfilled",
+  );
+  assert.ok(active);
+  assert.deepEqual(
+    await client.request("session.blob.abort", {
+      sessionId: created.sessionId,
+      uploadId: active.value.uploadId,
+    }),
+    { aborted: true },
+  );
+  assert.deepEqual(
+    await client.request("session.blob.abort", {
+      sessionId: created.sessionId,
+      uploadId: active.value.uploadId,
+    }),
+    { aborted: false },
+  );
+  await client.request("session.blob.start", {
+    sessionId: created.sessionId,
+    mediaType: "application/octet-stream",
+    sizeBytes: 1,
+  });
 });
 
 test("a session survives daemon termination and resumes with full history", async (context) => {
@@ -348,6 +379,27 @@ test("a session survives daemon termination and resumes with full history", asyn
     includeEvents: false,
   })) as SessionSnapshot;
   assert.deepEqual(bounded, { sessionId: created.sessionId, events: [] });
+
+  const firstPage = (await reconnected.request("session.history", {
+    sessionId: created.sessionId,
+    limit: 2,
+  })) as SessionHistoryPage;
+  assert.deepEqual(types(firstPage.events), ["session.created", "user.message"]);
+  assert.equal(firstPage.done, false);
+  const secondPage = (await reconnected.request("session.history", {
+    sessionId: created.sessionId,
+    afterEventId: firstPage.events.at(-1)?.id,
+    limit: 2,
+  })) as SessionHistoryPage;
+  assert.deepEqual(types(secondPage.events), ["assistant.message"]);
+  assert.equal(secondPage.done, true);
+  await assert.rejects(
+    reconnected.request("session.history", {
+      sessionId: created.sessionId,
+      afterEventId: "00000000-0000-4000-8000-000000000099",
+    }),
+    (error) => error instanceof WireClientError && error.code === "unknown_cursor",
+  );
 
   const sent = (await reconnected.request("session.send", {
     sessionId: created.sessionId,
@@ -426,6 +478,21 @@ test("serves bounded working and last-turn workspace diffs", async (context) => 
     ["new.txt", "tracked.txt"],
   );
   await assert.rejects(readFile(textconvMarker), { code: "ENOENT" });
+
+  const oversized = join(workspace, "too-large.bin");
+  await writeFile(oversized, "");
+  await truncate(oversized, 256 * 1024 * 1024 + 1);
+  await client.request("session.send", {
+    sessionId: created.sessionId,
+    content: [{ type: "text", text: "bounded checkpoint" }],
+  });
+  await assert.rejects(
+    client.request("session.workspace.diff", {
+      sessionId: created.sessionId,
+      scope: "last-turn",
+    }),
+    (error) => error instanceof WireClientError && error.code === "checkpoint_too_large",
+  );
 });
 
 test("lists, forks, clones, and resumes sessions", async (context) => {

@@ -13,6 +13,8 @@ import {
 
 import {
   DifferentialScreen,
+  EditorFrameComponent,
+  LineEditor,
   LiveAssistantComponent,
   PLAIN_PALETTE,
   SessionView,
@@ -95,11 +97,19 @@ function benchmarkProjection(width: number): { milliseconds: number; rows: numbe
 
 function benchmarkKeystrokes(width: number): number {
   const screen = new DifferentialScreen(width);
-  screen.frame([{ render: () => ["prompt", "footer"] }], { row: 0, column: 1 });
+  const view = new SessionView(width, PLAIN_PALETTE);
+  const editor = new LineEditor();
+  const frame = new EditorFrameComponent(editor, () => view);
+  frame.update({ location: "~/benchmark" });
+  frame.render(width);
+  screen.frame([frame], frame.cursorPlacement());
   const timings: number[] = [];
   for (let index = 0; index < 200; index += 1) {
     const started = performance.now();
-    screen.frame([{ render: () => [`prompt ${index}`, "footer"] }], { row: 0, column: 8 });
+    editor.insertText(String(index % 10));
+    frame.invalidate();
+    frame.render(width);
+    screen.frame([frame], frame.cursorPlacement());
     timings.push(performance.now() - started);
   }
   return percentile(timings, 0.95);

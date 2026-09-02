@@ -25,11 +25,13 @@ import {
   type InteractionAction,
   type JsonObject,
   type JsonValue,
+  MAX_HISTORY_PAGE_EVENTS,
   parseEvent,
   parseEventId,
   parseSessionId,
   type SessionActivityFrame,
   type SessionForkResult,
+  type SessionHistoryPage,
   type SessionId,
   type SessionModelSelection,
   type SessionSummary,
@@ -40,6 +42,8 @@ import {
 
 import { BlobStore, BlobStoreError } from "./blob-store.ts";
 import { WorkspaceCheckpointError, WorkspaceCheckpointStore } from "./workspace-checkpoint.ts";
+
+const MAX_HISTORY_PAGE_BYTES = 768 * 1024;
 
 export class DaemonError extends Error {
   readonly code: string;
@@ -311,6 +315,46 @@ export class SessionManager {
     return summaries.sort((left, right) => right.updatedAt - left.updatedAt);
   }
 
+  history(
+    sessionId: unknown,
+    afterEventId?: unknown,
+    limit = MAX_HISTORY_PAGE_EVENTS,
+  ): SessionHistoryPage {
+    const managed = this.managed(sessionId);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_HISTORY_PAGE_EVENTS) {
+      throw new DaemonError(
+        "invalid_history_limit",
+        `History page limit must be between 1 and ${MAX_HISTORY_PAGE_EVENTS}`,
+      );
+    }
+    let start = 0;
+    if (afterEventId !== undefined) {
+      const cursor = parseEventId(afterEventId, "afterEventId");
+      const index = managed.events.findIndex((event) => event.id === cursor);
+      if (index < 0)
+        throw new DaemonError("unknown_cursor", `Event ${cursor} is not in this session`);
+      start = index + 1;
+    }
+
+    const events: CanonicalEvent[] = [];
+    let bytes = 0;
+    for (let index = start; index < managed.events.length && events.length < limit; index += 1) {
+      const event = managed.events[index];
+      if (event === undefined) break;
+      const eventBytes = Buffer.byteLength(JSON.stringify(event)) + 1;
+      if (events.length > 0 && bytes + eventBytes > MAX_HISTORY_PAGE_BYTES) break;
+      if (eventBytes > MAX_HISTORY_PAGE_BYTES) {
+        throw new DaemonError(
+          "history_event_too_large",
+          `Event ${event.id} exceeds the history page byte limit`,
+        );
+      }
+      events.push(event);
+      bytes += eventBytes;
+    }
+    return { events, done: start + events.length >= managed.events.length };
+  }
+
   async fork(sessionId: unknown, fromEventId: unknown): Promise<SessionForkResult> {
     const sourceId = parseSessionId(sessionId, "sessionId");
     await this.resume(sourceId);
@@ -565,54 +609,41 @@ export class SessionManager {
     return { enabled };
   }
 
-  async startBlobUpload(
+  startBlobUpload(
     sessionId: unknown,
     input: { readonly mediaType: string; readonly sizeBytes: number; readonly name?: string },
   ): Promise<{ uploadId: string; chunkBytes: number }> {
-    const managed = this.managed(sessionId);
-    try {
-      return await this.blobs.start(managed.session.log.sessionId, input);
-    } catch (error) {
-      if (error instanceof BlobStoreError) {
-        throw new DaemonError(error.code, error.message, { cause: error });
-      }
-      throw error;
-    }
+    return this.blobOperation(sessionId, (id) => this.blobs.start(id, input));
   }
 
-  async appendBlobChunk(
+  appendBlobChunk(
     sessionId: unknown,
     uploadId: string,
     offset: number,
     data: string,
   ): Promise<{ nextOffset: number }> {
-    const managed = this.managed(sessionId);
-    try {
-      return await this.blobs.append(managed.session.log.sessionId, uploadId, offset, data);
-    } catch (error) {
-      if (error instanceof BlobStoreError) {
-        throw new DaemonError(error.code, error.message, { cause: error });
-      }
-      throw error;
-    }
+    return this.blobOperation(sessionId, (id) => this.blobs.append(id, uploadId, offset, data));
   }
 
-  async commitBlobUpload(sessionId: unknown, uploadId: string): Promise<BlobReference> {
-    const managed = this.managed(sessionId);
-    try {
-      return await this.blobs.commit(managed.session.log.sessionId, uploadId);
-    } catch (error) {
-      if (error instanceof BlobStoreError) {
-        throw new DaemonError(error.code, error.message, { cause: error });
-      }
-      throw error;
-    }
+  commitBlobUpload(sessionId: unknown, uploadId: string): Promise<BlobReference> {
+    return this.blobOperation(sessionId, (id) => this.blobs.commit(id, uploadId));
   }
 
-  async readBlob(sessionId: unknown, digest: string, offset: number, length: number) {
+  abortBlobUpload(sessionId: unknown, uploadId: string): Promise<{ aborted: boolean }> {
+    return this.blobOperation(sessionId, (id) => this.blobs.abort(id, uploadId));
+  }
+
+  readBlob(sessionId: unknown, digest: string, offset: number, length: number) {
+    return this.blobOperation(sessionId, (id) => this.blobs.read(id, digest, offset, length));
+  }
+
+  private async blobOperation<Result>(
+    sessionId: unknown,
+    operation: (sessionId: SessionId) => Promise<Result>,
+  ): Promise<Result> {
     const managed = this.managed(sessionId);
     try {
-      return await this.blobs.read(managed.session.log.sessionId, digest, offset, length);
+      return await operation(managed.session.log.sessionId);
     } catch (error) {
       if (error instanceof BlobStoreError) {
         throw new DaemonError(error.code, error.message, { cause: error });

@@ -64,8 +64,11 @@ function unquote(value: string): string {
   return value;
 }
 
-/** Returns paths only when the whole paste consists of existing image files. */
-export async function droppedImagePaths(value: string, cwd: string): Promise<readonly string[]> {
+/** Reads images only when the whole paste consists of existing image files. */
+export async function droppedImages(
+  value: string,
+  cwd: string,
+): Promise<readonly LocalAttachment[]> {
   const candidates = value
     .trim()
     .split(/\r?\n/)
@@ -79,12 +82,9 @@ export async function droppedImagePaths(value: string, cwd: string): Promise<rea
       }
     });
   if (candidates.length === 0 || candidates.some((path) => !path)) return [];
-  for (const path of candidates) {
-    try {
-      await readImageFile(path);
-    } catch {
-      return [];
-    }
+  try {
+    return await Promise.all(candidates.map(readImageFile));
+  } catch {
+    return [];
   }
-  return candidates;
 }

@@ -215,24 +215,42 @@ export async function uploadBlob(
   if (!started.uploadId || !Number.isSafeInteger(chunkBytes) || chunkBytes <= 0) {
     throw new Error("Daemon returned an invalid blob upload contract");
   }
-  for (let offset = 0; offset < bytes.byteLength; offset += chunkBytes) {
-    const chunk = bytes.subarray(offset, Math.min(bytes.byteLength, offset + chunkBytes));
-    const response = (await client.request("session.blob.chunk", {
-      sessionId,
-      uploadId: started.uploadId,
-      offset,
-      data: Buffer.from(chunk).toString("base64"),
-    })) as { nextOffset: number };
-    if (response.nextOffset !== offset + chunk.byteLength) {
-      throw new Error("Daemon returned an invalid blob upload offset");
+  try {
+    for (let offset = 0; offset < bytes.byteLength; offset += chunkBytes) {
+      const chunk = bytes.subarray(offset, Math.min(bytes.byteLength, offset + chunkBytes));
+      const response = (await client.request("session.blob.chunk", {
+        sessionId,
+        uploadId: started.uploadId,
+        offset,
+        data: Buffer.from(chunk).toString("base64"),
+      })) as { nextOffset: number };
+      if (response.nextOffset !== offset + chunk.byteLength) {
+        throw new Error("Daemon returned an invalid blob upload offset");
+      }
     }
+    const reference = parseBlobReference(
+      await client.request("session.blob.commit", {
+        sessionId,
+        uploadId: started.uploadId,
+      }),
+    );
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (
+      reference.sha256 !== digest ||
+      reference.sizeBytes !== bytes.byteLength ||
+      reference.mediaType !== mediaType
+    ) {
+      throw new Error("Daemon returned a blob reference that does not match the upload");
+    }
+    return reference;
+  } catch (error) {
+    try {
+      await client.request("session.blob.abort", { sessionId, uploadId: started.uploadId });
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Blob upload and cleanup failed");
+    }
+    throw error;
   }
-  return parseBlobReference(
-    await client.request("session.blob.commit", {
-      sessionId,
-      uploadId: started.uploadId,
-    }),
-  );
 }
 
 export class AttachmentBarComponent implements Component {

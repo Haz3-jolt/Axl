@@ -405,16 +405,19 @@ Adoption is a model-driven compile, so its cost and repeatability are user-facin
 
 ### 5. Native extension runtime
 
-The first public extension API contains only operations with working consumers:
+The public extension API is capability-scoped and grows only from working consumers.
+
+The implemented client-local terminal presentation surface supports commands and completion, shortcuts, status and working labels, bounded widgets, lifecycle listeners, tool renderers, and tracked cleanup. It cannot mutate canonical session state or access daemon and kernel internals. MCP and Agent Skills currently use its public tool-renderer registration.
+
+The daemon/runtime surface begins in Phase 6 with operations that have runtime consumers:
 
 ```text
 registerTool
-registerCommand
 registerSkill
 on
 ```
 
-Every registration returns a disposer. Extensions declare capabilities before activation. `registerProvider`, `registerHook`, `registerTheme`, `registerRenderer`, and `registerWebPanel` are added only when their first implementation needs them.
+Every registration returns a disposer. Extensions declare capabilities before activation. Shared-state commands use typed daemon RPC, while presentation-only commands stay in the terminal API. `registerProvider`, `registerHook`, `registerTheme`, broader renderers, and `registerWebPanel` are added only when their first implementation needs them.
 
 Example manifest:
 
@@ -1727,7 +1730,7 @@ This is the final phase built primarily with the stable external harness.
 - [x] Make the daemon the sole owner of sessions, loops, logs, and operations.
 - [x] Implement create, resume, send, interrupt, subscribe, and dispose.
 - [x] Use a local Unix socket transport first.
-- [x] Implement snapshot plus event tail for client attachment.
+- [x] Implement bounded paged history plus event tail for client attachment.
 - [x] Keep the client free of agent-loop behavior.
 - [x] Move provider, tool, extension, and sandbox assembly into a client-independent runtime package; keep the executable and terminal projection separate.
 
@@ -1835,7 +1838,7 @@ The checked TUI items in this phase were pulled forward as an explicit exception
 
 #### Terminal experience
 
-The detailed terminal contract and compatibility requirements live in [the TUI architecture](docs/architecture/tui.md).
+Terminal usage and compatibility requirements live in [`packages/tui/README.md`](packages/tui/README.md) and [`docs/terminal-compatibility.md`](docs/terminal-compatibility.md).
 
 - [x] Add differential rendering, synchronized output, responsive layouts, overlays, and IME-safe cursor placement.
 - [x] Preserve normal terminal scrollback and keep fullscreen alternate-screen mode optional.
@@ -1859,13 +1862,26 @@ Build this before adding most first-party features so those features prove the p
 
 #### Extension API
 
-- [ ] Start with `registerTool`, `registerCommand`, `registerSkill`, and `on`.
-- [ ] Return a disposer from every registration.
-- [ ] Add `registerProvider`, `registerHook`, `registerTheme`, `registerRenderer`, and `registerWebPanel` only when the first working consumer needs each API.
-- [ ] Require an explicit capability manifest before activation.
+The client-local terminal presentation surface was brought forward with the TUI. It is separate from the daemon/runtime extension surface completed in this phase.
+
+##### Terminal presentation surface
+
+- [x] Add dependency-free, capability-scoped terminal commands and completion, shortcuts, status and working labels, bounded widgets, lifecycle listeners, tool renderers, and tracked cleanup.
+- [x] Return an idempotent disposer from every terminal registration.
+- [x] Require an explicit terminal capability manifest before activation.
+- [x] Keep daemon and kernel internals inaccessible from terminal extensions.
+- [x] Use the public tool-renderer registration for first-party MCP and Agent Skills presentation.
+- [x] Remove extension-owned UI, listeners, and tracked work on disable, reload, rollback, and exit.
+
+##### Remaining runtime and cross-client surface
+
+- [ ] Add `registerTool`, `registerSkill`, and runtime lifecycle listeners when their first working consumers need them.
+- [ ] Route shared-state extension commands through typed daemon RPC instead of client projection state.
+- [ ] Add `registerProvider`, `registerHook`, `registerTheme`, broader renderers, and `registerWebPanel` only when the first working consumer needs each API.
+- [ ] Require an explicit runtime capability manifest before activation.
 - [ ] Keep arbitrary kernel internals inaccessible.
-- [ ] Make first-party extensions use only the public extension API once that API exists.
-- [ ] Ensure disabling a feature removes its prompt tokens, UI, and background work.
+- [ ] Make first-party runtime features use only the public extension API once each extension point exists.
+- [ ] Ensure disabling a runtime feature removes its prompt tokens, UI, and background work.
 
 #### Resource formats
 
@@ -1924,7 +1940,7 @@ The checked standards items were brought forward by request. They do not complet
 
 #### Exit gate
 
-The initial public registrations have real first-party consumers, each registration returns a disposer, disabled features leave no prompt, UI, or background work, and untrusted executable extensions cannot run in the daemon process.
+The terminal presentation surface already has first-party renderer consumers and deterministic cleanup. Phase 6 completes when the runtime registrations have real first-party consumers, disabled runtime features leave no prompt, UI, or background work, and untrusted executable extensions cannot run in the daemon process.
 
 ### Phase 7: Complete permission and isolation system
 
@@ -2099,12 +2115,16 @@ Do not build public or multi-language SDKs before this phase. The second real cl
 
 #### Media transport and roles
 
-- [ ] Accept pasted, dropped, and referenced images.
-- [ ] Send images directly to capable main models.
+The local terminal image and blob path was brought forward. It does not complete cross-client media support.
+
+- [x] Accept dropped and explicitly referenced images in the terminal.
+- [ ] Add terminal-specific clipboard image paste and image input in later clients.
+- [x] Send terminal image attachments directly to capable main models.
 - [ ] Add explicit vision-description fallback events for non-vision models.
 - [ ] Add optional OCR, speech recognition, and speech synthesis roles.
 - [ ] Keep OCR and voice roles disabled with no default model.
-- [ ] Send media through the blob channel and log every cross-model handoff visibly.
+- [x] Keep terminal attachment bytes outside JSONL through the local blob RPC.
+- [ ] Complete the cross-client blob channel and log every cross-model handoff visibly.
 
 #### Exit gate
 

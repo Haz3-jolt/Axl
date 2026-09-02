@@ -11,6 +11,8 @@ import {
 import type { CanonicalEvent, InteractionAction, ThinkingLevel, UserContent } from "./events.ts";
 import { parseEvent, parseUserContent } from "./events.ts";
 
+export const MAX_HISTORY_PAGE_EVENTS = 5_000;
+
 export interface SessionModelSelection {
   readonly modelId?: string;
   readonly thinkingLevel?: ThinkingLevel;
@@ -170,6 +172,16 @@ export type WireRequest =
   | {
       readonly kind: "request";
       readonly id: number;
+      readonly method: "session.history";
+      readonly params: {
+        readonly sessionId: SessionId;
+        readonly afterEventId?: EventId;
+        readonly limit?: number;
+      };
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
       readonly method: "session.fork";
       readonly params: { readonly sessionId: SessionId; readonly fromEventId: EventId };
     }
@@ -261,7 +273,7 @@ export type WireRequest =
   | {
       readonly kind: "request";
       readonly id: number;
-      readonly method: "session.blob.commit";
+      readonly method: "session.blob.commit" | "session.blob.abort";
       readonly params: { readonly sessionId: SessionId; readonly uploadId: string };
     }
   | {
@@ -317,6 +329,49 @@ export interface SessionSnapshot {
 
 export interface SessionForkResult extends SessionSnapshot {
   readonly selectedText?: string;
+}
+
+export interface SessionHistoryPage {
+  readonly events: readonly CanonicalEvent[];
+  readonly done: boolean;
+}
+
+export function parseSessionHistoryPage(
+  value: unknown,
+  expectedSessionId?: unknown,
+): SessionHistoryPage {
+  const page = object(value, "sessionHistoryPage");
+  exact(page, "sessionHistoryPage", ["events", "done"]);
+  if (!Array.isArray(page.events) || page.events.length > MAX_HISTORY_PAGE_EVENTS) {
+    throw new ProtocolValidationError(
+      "sessionHistoryPage.events",
+      `must contain at most ${MAX_HISTORY_PAGE_EVENTS} events`,
+    );
+  }
+  if (typeof page.done !== "boolean") {
+    throw new ProtocolValidationError("sessionHistoryPage.done", "must be a boolean");
+  }
+  const sessionId =
+    expectedSessionId === undefined
+      ? undefined
+      : parseSessionId(expectedSessionId, "sessionHistoryPage.sessionId");
+  const events = page.events.map((event, index) => {
+    const parsed = parseEvent(event);
+    if (sessionId !== undefined && parsed.sessionId !== sessionId) {
+      throw new ProtocolValidationError(
+        `sessionHistoryPage.events[${index}].sessionId`,
+        `must match session ${sessionId}`,
+      );
+    }
+    return parsed;
+  });
+  if (!page.done && events.length === 0) {
+    throw new ProtocolValidationError(
+      "sessionHistoryPage.events",
+      "must make progress when more history remains",
+    );
+  }
+  return { events, done: page.done };
 }
 
 function object(value: unknown, path: string): Record<string, unknown> {
@@ -508,6 +563,30 @@ export function parseWireRequest(value: unknown): WireRequest {
     exact(params, "request.params", []);
     return { ...base, method, params: {} };
   }
+  if (method === "session.history") {
+    exact(params, "request.params", ["sessionId", "afterEventId", "limit"]);
+    const limit =
+      params.limit === undefined
+        ? undefined
+        : nonNegativeInteger(params.limit, "request.params.limit");
+    if (limit === 0 || (limit !== undefined && limit > MAX_HISTORY_PAGE_EVENTS)) {
+      throw new ProtocolValidationError(
+        "request.params.limit",
+        `must be between 1 and ${MAX_HISTORY_PAGE_EVENTS}`,
+      );
+    }
+    return {
+      ...base,
+      method,
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        ...(params.afterEventId === undefined
+          ? {}
+          : { afterEventId: parseEventId(params.afterEventId, "request.params.afterEventId") }),
+        ...(limit === undefined ? {} : { limit }),
+      },
+    };
+  }
   if (method === "session.fork") {
     exact(params, "request.params", ["sessionId", "fromEventId"]);
     return {
@@ -671,7 +750,7 @@ export function parseWireRequest(value: unknown): WireRequest {
       },
     };
   }
-  if (method === "session.blob.commit") {
+  if (method === "session.blob.commit" || method === "session.blob.abort") {
     exact(params, "request.params", ["sessionId", "uploadId"]);
     return {
       ...base,

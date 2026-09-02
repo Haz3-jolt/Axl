@@ -99,6 +99,7 @@ export class BlobStore {
   private readonly uploadDirectory: string;
   private readonly uploads = new Map<string, Upload>();
   private readonly uploadOperations = new Map<string, Promise<unknown>>();
+  private uploadInitialization: Promise<void> | undefined;
   private startingUploads = 0;
   private readonly owned = new Map<SessionId, Map<string, BlobReference>>();
 
@@ -136,6 +137,7 @@ export class BlobStore {
     sessionId: SessionId,
     input: { readonly mediaType: string; readonly sizeBytes: number; readonly name?: string },
   ): Promise<{ uploadId: string; chunkBytes: number }> {
+    await this.initializeUploads();
     if (
       !Number.isSafeInteger(input.sizeBytes) ||
       input.sizeBytes <= 0 ||
@@ -155,7 +157,6 @@ export class BlobStore {
     const uploadId = randomUUID();
     const path = join(this.uploadDirectory, uploadId);
     try {
-      await mkdir(this.uploadDirectory, { recursive: true, mode: 0o700 });
       const handle = await open(path, "wx", 0o600);
       await handle.close();
       this.uploads.set(uploadId, {
@@ -255,6 +256,19 @@ export class BlobStore {
     });
   }
 
+  abort(sessionId: SessionId, uploadId: string): Promise<{ aborted: boolean }> {
+    return this.serialized(uploadId, async () => {
+      const upload = this.uploads.get(uploadId);
+      if (upload === undefined) return { aborted: false };
+      if (upload.sessionId !== sessionId) {
+        throw new BlobStoreError("unknown_blob_upload", `Blob upload ${uploadId} is not active`);
+      }
+      await rm(upload.path, { force: true });
+      this.uploads.delete(uploadId);
+      return { aborted: true };
+    });
+  }
+
   async readAll(sessionId: SessionId, reference: BlobReference): Promise<Uint8Array> {
     await this.assertOwned(sessionId, reference);
     const bytes = await readFile(join(this.directory, reference.sha256));
@@ -321,6 +335,15 @@ export class BlobStore {
       this.uploads.delete(upload.id);
       await rm(upload.path, { force: true });
     }
+  }
+
+  private initializeUploads(): Promise<void> {
+    this.uploadInitialization ??= rm(this.uploadDirectory, { recursive: true, force: true }).then(
+      async () => {
+        await mkdir(this.uploadDirectory, { recursive: true, mode: 0o700 });
+      },
+    );
+    return this.uploadInitialization;
   }
 
   private async serialized<Result>(
