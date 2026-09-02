@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PLAIN_PALETTE, renderInline, renderMarkdown } from "../src/index.ts";
+import { PLAIN_PALETTE, renderInline, renderMarkdown, visibleWidth } from "../src/index.ts";
 
 test("plain paragraphs pass through untouched", () => {
   assert.deepEqual(renderMarkdown("just a sentence.", 80, PLAIN_PALETTE), ["just a sentence."]);
@@ -26,10 +26,129 @@ test("fenced code blocks are preserved verbatim behind a gutter", () => {
   assert.equal(dangling[dangling.length - 1], "╰─");
 });
 
+test("plain-text and Mermaid diagrams avoid code-block rails", () => {
+  const diagram = renderMarkdown("```text\nA long diagram label --> B\n```", 12, PLAIN_PALETTE);
+  assert.equal(
+    diagram.some((line) => line.includes("│") || line.includes("╭─ text")),
+    false,
+  );
+  assert.equal(
+    diagram.every((line) => visibleWidth(line) <= 12),
+    true,
+  );
+  assert.equal(diagram.join("").includes("diagram label"), true);
+
+  const mermaid = renderMarkdown("```mermaid\ngraph TD\nA-->B\n```", 40, PLAIN_PALETTE);
+  assert.equal(
+    mermaid.some((line) => line.includes("Mermaid source")),
+    false,
+  );
+  assert.equal(
+    mermaid.some((line) => line.includes("┌") || line.includes("╭")),
+    true,
+  );
+  assert.equal(
+    mermaid.some((line) => line.includes("A")),
+    true,
+  );
+  assert.equal(
+    mermaid.some((line) => line.includes("B")),
+    true,
+  );
+
+  const narrow = renderMarkdown("```mermaid\ngraph TD\nA-->B\n```", 4, PLAIN_PALETTE);
+  assert.equal(narrow.join("").includes("graph TD"), true);
+
+  const sequence = renderMarkdown(
+    [
+      "```mermaid",
+      "sequenceDiagram",
+      "actor U as User",
+      "participant C as TUI client",
+      "participant D as Daemon",
+      "participant K as Kernel",
+      "participant L as JSONL log",
+      "participant A as AI provider adapter",
+      "participant S as Sandbox / tools",
+      "U->>C: Submit prompt",
+      "K->>L: Append user/configuration events",
+      "K->>A: Canonical model request",
+      "A-->>K: Canonical stream events",
+      "K->>S: Validate and execute",
+      "S-->>K: Bounded result",
+      "C-->>U: Render transcript and status",
+      "```",
+    ].join("\n"),
+    100,
+    PLAIN_PALETTE,
+  );
+  assert.equal(
+    sequence.some((line) => line.includes("Mermaid source")),
+    false,
+  );
+  assert.equal(
+    sequence.some((line) => line.includes("Legend")),
+    true,
+  );
+  assert.equal(
+    sequence.every((line) => visibleWidth(line) <= 100),
+    true,
+  );
+});
+
 test("inline code, bold, and italic render as spans", () => {
   assert.equal(renderInline("run `ls` now", PLAIN_PALETTE), "run ls now");
   assert.equal(renderInline("**bold** words", PLAIN_PALETTE), "\x1b[1mbold\x1b[22m words");
   assert.equal(renderInline("*soft* words", PLAIN_PALETTE), "\x1b[3msoft\x1b[23m words");
+});
+
+test("web links are clickable, visible, and restricted to safe schemes", () => {
+  const safe = renderInline("read [the guide](https://example.com/docs)", PLAIN_PALETTE);
+  assert.equal(
+    safe.includes("\x1b]8;;https://example.com/docs\x1b\\the guide\x1b]8;;\x1b\\"),
+    true,
+  );
+  assert.match(safe, /https:\/\/example\.com\/docs/);
+  assert.equal(
+    renderInline("[run](javascript:alert(1))", PLAIN_PALETTE).includes("\x1b]8;;"),
+    false,
+  );
+});
+
+test("renders nested task lists, strikethrough, rules, and GFM tables", () => {
+  const markdown = [
+    "- [x] shipped",
+    "  - [ ] follow up",
+    "",
+    "~~obsolete~~",
+    "",
+    "---",
+    "",
+    "| Name | State |",
+    "| --- | --- |",
+    "| TUI | ready |",
+  ].join("\n");
+  const lines = renderMarkdown(markdown, 40, PLAIN_PALETTE);
+  assert.equal(
+    lines.some((line) => line.includes("☑ shipped")),
+    true,
+  );
+  assert.equal(
+    lines.some((line) => line.includes("☐ follow up")),
+    true,
+  );
+  assert.equal(
+    lines.some((line) => line.includes("\x1b[9mobsolete\x1b[29m")),
+    true,
+  );
+  assert.equal(
+    lines.some((line) => line.includes("Name") && line.includes("State")),
+    true,
+  );
+  assert.equal(
+    lines.every((line) => visibleWidth(line) <= 40),
+    true,
+  );
 });
 
 test("long markdown lines hard-wrap to the viewport", () => {
@@ -48,10 +167,16 @@ test("code fences syntax-highlight known languages", async () => {
 });
 
 test("themes exist and provide full palettes", async () => {
-  const { THEMES, themeNames, DEFAULT_THEME } = await import("../src/index.ts");
-  assert.equal(DEFAULT_THEME, "dark");
+  const { THEMES, THEME_DEFINITIONS, themeNames, DEFAULT_THEME } = await import("../src/index.ts");
+  assert.equal(DEFAULT_THEME, "axl-dark");
   assert.equal(themeNames().includes(DEFAULT_THEME), true);
   assert.equal(themeNames().length >= 4, true);
+  assert.deepEqual(
+    THEME_DEFINITIONS.filter((theme) =>
+      ["dark", "light", "system", "accessible", "plain"].includes(theme.appearance),
+    ).map((theme) => theme.version),
+    Array(THEME_DEFINITIONS.length).fill(1),
+  );
   const gruvbox = THEMES[DEFAULT_THEME] as NonNullable<(typeof THEMES)[string]>;
   assert.match(gruvbox.accent("x"), /38;2;254;128;25m/);
   assert.match(gruvbox.thinking?.("xhigh", "x") ?? "", /38;2;251;73;52m/);

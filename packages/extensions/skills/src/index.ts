@@ -5,6 +5,7 @@ import type { Dirent } from "node:fs";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import type { TerminalExtension } from "@axl/extension-api";
 import type { KernelTool, PromptSection, ToolExecutionResult } from "@axl/kernel";
 import type { JsonObject } from "@axl/protocol";
 import { parseDocument } from "yaml";
@@ -214,6 +215,27 @@ function stringField(input: JsonObject, name: string): string | undefined {
   const value = input[name];
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
+
+export const skillTerminalExtension: TerminalExtension = {
+  manifest: {
+    id: "axl.skills",
+    name: "Agent Skills",
+    capabilities: ["terminal.tool-renderers"],
+  },
+  activate(api) {
+    api.registerToolRenderer("skill", ({ arguments: input }) => {
+      const action = typeof input.action === "string" ? input.action : "load";
+      const name = typeof input.name === "string" ? input.name : undefined;
+      const path = typeof input.path === "string" ? input.path : undefined;
+      const target = [action, name ?? path].filter(Boolean).join(" · ");
+      return {
+        label: "SKILL",
+        target,
+        hideWhenSuccessfulInFocus: true,
+      };
+    });
+  },
+};
 
 export function makeSkillTool(skills: readonly AgentSkill[]): KernelTool {
   const byName = new Map(skills.map((skill) => [skill.name, skill]));

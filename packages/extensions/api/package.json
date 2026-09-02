@@ -1,0 +1,22 @@
+{
+  "name": "@axl/extension-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Public extension registration contracts for Axl",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json --force",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}

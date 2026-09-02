@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // First-run credential setup: interactive prompts instead of environment
-// exports. Input is decoded like the editor's: bracketed-paste markers and
-// escape sequences never leak into typed values. "Verified" means Azure
+// exports. Input is decoded like the editor's — bracketed-paste markers and
+// escape sequences never leak into typed values — and "verified" means Azure
 // actually accepted the key, checked with a token-free request.
 
 import {
-  type AuthContext,
   AZURE_OPENAI_PROVIDER_ID,
   azureOpenAiAuthMethod,
+  type AuthContext,
   type CredentialStore,
   login,
   normalizeAzureBaseUrl,
@@ -19,6 +19,7 @@ import {
 } from "@axl/ai";
 
 import { decodeOneKey } from "./editor.ts";
+import { TerminalInputBuffer } from "./input-buffer.ts";
 
 export interface SetupInput {
   on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -57,14 +58,18 @@ export function promptLine(
   output.write(label);
   input.setRawMode?.(true);
   return new Promise<string>((resolve, reject) => {
-    let buffer = "";
-    const finish = (value: string): void => {
+    let value = "";
+    let inputBuffer: TerminalInputBuffer | undefined;
+    const done = (): void => {
+      inputBuffer?.dispose();
+      input.off("data", listener);
+    };
+    const finish = (result: string): void => {
       output.write("\n");
       done();
-      resolve(value);
+      resolve(result);
     };
-    const listener = (chunk: Buffer | string): void => {
-      const data = chunk.toString("utf8");
+    const processSequence = (data: string): void => {
       let index = 0;
       while (index < data.length) {
         const { key, next } = decodeOneKey(data, index);
@@ -75,26 +80,34 @@ export function promptLine(
           return;
         }
         if (key.kind === "enter") {
-          const value = buffer.trim();
-          if (value.length === 0 && !options.allowEmpty) continue;
-          finish(value);
+          const result = value.trim();
+          if (result.length === 0 && !options.allowEmpty) continue;
+          finish(result);
           return;
         }
         if (key.kind === "backspace") {
-          if (buffer.length > 0) {
-            buffer = buffer.slice(0, -1);
+          if (value.length > 0) {
+            value = value.slice(0, -1);
             output.write("\b \b");
           }
         } else if (key.kind === "char") {
-          buffer += key.char;
+          value += key.char;
           output.write(options.mask ? "*" : key.char);
         }
         // Paste markers, arrows, and other escapes contribute nothing.
       }
     };
-    const done = (): void => {
-      input.off("data", listener);
+    const listener = (chunk: Buffer | string): void => {
+      inputBuffer?.push(chunk);
     };
+    inputBuffer = new TerminalInputBuffer({
+      onSequence: processSequence,
+      onError: (error) => {
+        output.write("\n");
+        done();
+        reject(error);
+      },
+    });
     input.on("data", listener);
   });
 }
@@ -115,7 +128,7 @@ export async function runAzureSetup(
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   output.write(
-    "\nAzure OpenAI setup: saved to ~/.axl/credentials.json (0600), redacted from logs.\n\n",
+    "\nAzure OpenAI setup — saved to ~/.axl/credentials.json (0600), redacted from logs.\n\n",
   );
 
   for (let attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt += 1) {
@@ -176,5 +189,5 @@ export async function runAzureSetup(
     );
     if (attempt < VERIFY_ATTEMPTS) output.write("  Let's try again.\n\n");
   }
-  output.write("\n  Credentials saved but NOT verified. Fix them with /login or `axl login`.\n\n");
+  output.write("\n  Credentials saved but NOT verified — fix them with /login or `axl login`.\n\n");
 }

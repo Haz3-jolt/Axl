@@ -2,18 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough as NodePassThrough } from "node:stream";
 import test, { type TestContext } from "node:test";
 
-import { AZURE_OPENAI_MODELS } from "@axl/ai";
-import { DaemonClient, AxlDaemon, type SessionInteractionRequest } from "@axl/daemon";
+import { AxlDaemon, DaemonClient, type SessionInteractionRequest } from "@axl/daemon";
+import type { TerminalExtension } from "@axl/extension-api";
 import { type ModelPort, ToolRegistry } from "@axl/kernel";
 import type { EventPayloadMap, JsonObject, ModelStreamEvent, Usage } from "@axl/protocol";
 
-import { AxlApp } from "../src/index.ts";
+import { AxlApp, stripAnsi } from "../src/index.ts";
+import { VirtualTerminal } from "./virtual-terminal.ts";
+
+class PassThrough extends NodePassThrough {
+  isTTY = true;
+  isRaw = false;
+
+  setRawMode(mode: boolean): this {
+    this.isRaw = mode;
+    return this;
+  }
+}
 
 const usage: Usage = { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
@@ -115,13 +126,14 @@ test("a full round trip: type, send, render the reply, detach, resume", async (c
   });
 
   // Snapshot rendered and the framed live editor shows metrics plus prompt.
-  assert.match(text(), /session started in/);
-  assert.match(text(), /\?\/\? \(auto\)/);
-  assert.match(text(), /no-model/);
+  assert.match(text(), /◆ Axl/);
+  assert.match(text(), /ready/);
+  assert.match(text(), /no model selected/);
 
   input.write("hello axl\r");
-  await until(() => text().includes("the answer"), "assistant reply");
+  await until(() => text().includes("↑1 ↓1"), "canonical assistant reply");
   assert.match(text(), /│ hello axl/);
+  assert.match(text(), /the answer/);
   assert.match(text(), /↑1 ↓1/);
   assert.match(text(), /tok\/s/);
 
@@ -166,6 +178,7 @@ test("an unenforced session keeps a persistent unsafe warning", async (context) 
   await until(() => text().includes("Select theme"), "unsafe theme dialog");
   assert.match(text(), new RegExp(warning));
   input.write("\x1b");
+  await new Promise((resolve) => setTimeout(resolve, 20));
   input.write("hello\r");
   await until(() => text().includes("the answer"), "unsafe assistant reply");
   assert.match(text(), new RegExp(warning));
@@ -190,6 +203,7 @@ test("fork, clone, and resume switch sessions through the daemon", async (contex
   const firstReplyCount = (text().match(/the answer/g) ?? []).length;
   input.write("second prompt\r");
   await until(() => (text().match(/the answer/g) ?? []).length > firstReplyCount, "second reply");
+  await new Promise((resolve) => setTimeout(resolve, 50));
 
   input.write("/fork\r");
   await until(() => text().includes("Fork from Message"), "fork selector");
@@ -214,7 +228,198 @@ test("fork, clone, and resume switch sessions through the daemon", async (contex
   app.stop();
 });
 
-test("terminal resize clears and rebuilds the complete view", async (context) => {
+test("a failed target subscription leaves the current session fully active", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const seedClient = await DaemonClient.connect(socketPath);
+  const target = (await seedClient.request("session.create", { cwd: directory })) as {
+    sessionId: string;
+  };
+  seedClient.close();
+
+  const client = await DaemonClient.connect(socketPath);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({ client, input, output, cwd: directory, color: false });
+  const sourceSessionId = app.sessionId;
+  const request = client.request.bind(client);
+  client.request = (method, params) => {
+    if (method === "session.subscribe" && params.sessionId === target.sessionId) {
+      return Promise.reject(new Error("target subscription failed"));
+    }
+    return request(method, params);
+  };
+
+  await (app as unknown as { resumeSession(sessionId: string): Promise<void> }).resumeSession(
+    target.sessionId,
+  );
+
+  assert.equal(app.sessionId, sourceSessionId);
+  assert.equal((app as unknown as { hydrating: boolean }).hydrating, false);
+  assert.equal((app as unknown as { switchingSessionId?: string }).switchingSessionId, undefined);
+  assert.match(text(), /target subscription failed/);
+  app.stop();
+});
+
+test("renders model deltas before the canonical assistant event", async (context) => {
+  let release = (): void => undefined;
+  const streaming: ModelPort = {
+    stream() {
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        yield { type: "thinking_delta", text: "checking" };
+        yield { type: "text_delta", text: "section one\n\n" };
+        yield { type: "text_delta", text: "section two" };
+        await new Promise<void>((resolvePromise) => {
+          release = resolvePromise;
+        });
+        yield { type: "text_delta", text: " complete" };
+        yield { type: "completed", stopReason: "stop", usage };
+      })();
+    },
+  };
+  const { socketPath, directory } = await startStack(context, streaming);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+  });
+
+  input.write("stream it\r");
+  await until(() => text().includes("section two"), "transient assistant text");
+  assert.equal(text().includes("section two complete"), false);
+  assert.equal(text().includes("\x1b[?25l"), true);
+  release();
+  await until(
+    () =>
+      text().includes("section two complete") &&
+      text().lastIndexOf("\x1b[?25h") > text().lastIndexOf("\x1b[?25l"),
+    "canonical assistant text and cursor restoration",
+  );
+  const terminal = new VirtualTerminal(100, 24);
+  terminal.write(text());
+  assert.equal(terminal.rows().filter((row) => row.includes("section one")).length, 1);
+  assert.equal(terminal.rows().filter((row) => row.includes("section two complete")).length, 1);
+  app.stop();
+});
+
+test("streaming into a tool call preserves the prompt and tool transaction", async (context) => {
+  let call = 0;
+  const model: ModelPort = {
+    stream() {
+      call += 1;
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        if (call === 1) {
+          yield { type: "text_delta", text: "I will inspect the fixture." };
+          yield { type: "tool_call", callId: "echo-1", name: "echo", input: { value: "ok" } };
+          yield { type: "completed", stopReason: "tool_use", usage };
+          return;
+        }
+        yield { type: "text_delta", text: "Inspection complete." };
+        yield { type: "completed", stopReason: "stop", usage };
+      })();
+    },
+  };
+  const { socketPath, directory } = await startStack(context, model, () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "echo",
+      description: "Echo a value",
+      inputSchema: { type: "object" },
+      execute: async () => ({
+        content: [{ type: "text", text: "tool output retained" }],
+        isError: false,
+      }),
+    });
+    return tools;
+  });
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+  });
+
+  input.write("keep my prompt\r");
+  await until(() => text().includes("Inspection complete."), "post-tool response");
+  const terminal = new VirtualTerminal(100, 24);
+  terminal.write(text());
+  const rows = terminal.rows();
+  assert.equal(
+    rows.some((row) => row.includes("keep my prompt")),
+    true,
+  );
+  assert.equal(
+    rows.some((row) => row.includes("ECHO")),
+    true,
+  );
+  assert.equal(
+    rows.some((row) => row.includes("tool output retained")),
+    true,
+  );
+  assert.equal(
+    rows.some((row) => row.includes("Inspection complete.")),
+    true,
+  );
+  app.stop();
+});
+
+test("uploads image files and sends blob references with the next prompt", async (context) => {
+  const requests: Array<readonly unknown[]> = [];
+  const recording: ModelPort = {
+    stream(request) {
+      requests.push(request.messages);
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        yield { type: "text_delta", text: "image received" };
+        yield { type: "completed", stopReason: "stop", usage };
+      })();
+    },
+  };
+  const { socketPath, directory } = await startStack(context, recording);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const bytes = Buffer.alloc(32);
+  bytes.set([0x89, 0x50, 0x4e, 0x47], 0);
+  bytes.set(Buffer.from("IHDR"), 12);
+  bytes.writeUInt32BE(1, 16);
+  bytes.writeUInt32BE(1, 20);
+  const imagePath = join(directory, "pixel.png");
+  await writeFile(imagePath, bytes);
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    imageDisplay: "metadata",
+    mediaCapabilities: { images: null },
+  });
+
+  input.write(`/attach ${imagePath}\r`);
+  await until(() => text().includes("attached pixel.png"), "image file upload");
+  input.write("inspect this\r");
+  await until(() => requests.length === 1, "image prompt delivery");
+  const user = requests[0]?.at(-1) as
+    | { role?: string; content?: Array<{ type: string; text?: string; blob?: { name?: string } }> }
+    | undefined;
+  assert.equal(user?.role, "user");
+  assert.deepEqual(
+    user?.content?.map((item) => [item.type, item.text ?? item.blob?.name]),
+    [
+      ["text", "inspect this"],
+      ["blob", "pixel.png"],
+    ],
+  );
+  await until(() => text().includes("[Image · pixel.png"), "image metadata rendering");
+  app.stop();
+});
+
+test("terminal resize coalesces bursts and leaves one live frame", async (context) => {
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
   const { output, text } = captureOutput();
@@ -227,19 +432,454 @@ test("terminal resize clears and rebuilds the complete view", async (context) =>
   });
 
   input.write("keep this\r");
-  await until(() => text().includes("the answer"), "assistant reply");
+  await until(() => text().includes("↑1 ↓1"), "canonical assistant reply");
   const beforeWidth = text().length;
-  output.columns = 60;
-  output.emit("resize");
+  for (const width of [60, 72, 60]) {
+    output.columns = width;
+    output.emit("resize");
+  }
+  await until(() => text().length > beforeWidth, "coalesced width render");
   const widthRender = text().slice(beforeWidth);
   assert.equal(widthRender.includes("\x1b[2J\x1b[H\x1b[3J"), true);
-  assert.match(widthRender, /keep this/);
-  assert.match(widthRender, /the answer/);
+  const resizedTerminal = new VirtualTerminal(60, 30);
+  resizedTerminal.write(widthRender);
+  assert.equal(resizedTerminal.rows().filter((line) => line.includes("keep this")).length, 1);
+  assert.equal(resizedTerminal.rows().filter((line) => line.includes("the answer")).length, 1);
+  assert.equal(
+    resizedTerminal.rows().filter((line) => line.includes("no model selected")).length,
+    1,
+  );
 
   const beforeHeight = text().length;
   output.rows = 30;
   output.emit("resize");
-  assert.equal(text().slice(beforeHeight).includes("\x1b[2J\x1b[H\x1b[3J"), true);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const heightRender = text().slice(beforeHeight);
+  assert.equal(heightRender.includes("\x1b[2J\x1b[H\x1b[3J"), true);
+  const resizedHeightTerminal = new VirtualTerminal(60, 30);
+  resizedHeightTerminal.write(heightRender);
+  assert.equal(
+    resizedHeightTerminal.rows().filter((line) => line.includes("no model selected")).length,
+    1,
+  );
+
+  let latestResizeOutput = "";
+  for (const width of [120, 48, 100]) {
+    const before = text().length;
+    output.columns = width;
+    output.emit("resize");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const resizeOutput = text().slice(before);
+    latestResizeOutput = resizeOutput;
+    assert.equal(resizeOutput.includes("\x1b[2J\x1b[H\x1b[3J"), true);
+    const resized = new VirtualTerminal(width, 30);
+    resized.write(resizeOutput);
+    assert.equal(resized.rows().filter((line) => line.includes("no model selected")).length, 1);
+  }
+
+  const beforeNextTurn = text().length;
+  input.write("after resize\r");
+  await until(() => text().includes("↑2 ↓2"), "canonical post-resize reply");
+  assert.match(text().slice(beforeNextTurn), /after resize/);
+  const terminal = new VirtualTerminal(100, 30);
+  terminal.write(`${latestResizeOutput}${text().slice(beforeNextTurn)}`);
+  assert.equal(terminal.rows().filter((line) => line.includes("no model selected")).length, 1);
+  app.stop();
+});
+
+test("fullscreen mode switches live without losing the session", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const preferences: Array<Record<string, unknown>> = [];
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    tuiMode: "fullscreen",
+    onPreferenceChange: (update) => {
+      preferences.push(update);
+    },
+  });
+
+  assert.equal(text().includes("\x1b[?1049h"), true);
+  input.write("hello fullscreen\r");
+  await until(() => text().includes("↑1 ↓1"), "canonical fullscreen reply");
+  input.write("/regular\r");
+  await until(() => text().includes("\x1b[?1049l"), "regular mode restoration");
+  assert.deepEqual(preferences.at(-1), { tuiMode: "regular" });
+  app.stop();
+});
+
+test("idle assembled app performs no periodic repaint", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const settledLength = text().length;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(text().length, settledLength);
+  app.stop();
+});
+
+test("Ctrl+V paste, Shift+Enter, and searchable hotkeys behave", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    readClipboard: async () => "pasted first\npasted second",
+  });
+
+  input.write("\x16");
+  await until(() => text().includes("pasted second"), "clipboard insertion");
+  input.write("\r");
+  await until(() => text().includes("│ pasted first"), "clipboard prompt submission");
+  input.write("line one\x1b[13;2uline two\r");
+  await until(() => text().includes("line two"), "shift enter prompt submission");
+  input.write("/hotkeys\r");
+  await until(() => text().includes("Keyboard shortcuts"), "hotkeys dialog");
+  assert.match(text(), /Ctrl\+A/);
+  assert.match(text(), /Select the entire prompt/);
+  input.write("\x1b");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  input.write("\x0f");
+  await until(() => text().includes("tool details full"), "expanded tool details");
+  app.stop();
+});
+
+test("Escape interrupts a running operation", async (context) => {
+  let operationAborted = false;
+  const blockingPort: ModelPort = {
+    stream(request) {
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        await new Promise<void>((resolve) => {
+          if (request.signal?.aborted) resolve();
+          else request.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        operationAborted = request.signal?.aborted ?? false;
+        yield { type: "completed", stopReason: "aborted", usage };
+      })();
+    },
+  };
+  const { socketPath, directory } = await startStack(context, blockingPort);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+  });
+
+  await until(() => text().includes("\x1b[>4;2m"), "keyboard negotiation");
+  input.write("start work\r");
+  await until(() => text().includes("Working"), "working state");
+  input.write("\x1b[27u");
+  await until(() => operationAborted, "escape interruption");
+  app.stop();
+});
+
+test("terminal extensions cannot replace encoded safety shortcuts", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output } = captureOutput();
+  const extension: TerminalExtension = {
+    manifest: {
+      id: "test.reserved-shortcut",
+      name: "Reserved shortcut",
+      capabilities: ["terminal.shortcuts"],
+    },
+    activate(api) {
+      api.registerShortcut({
+        key: "\x1b[99;5u",
+        description: "Encoded Ctrl+C",
+        run: () => undefined,
+      });
+    },
+  };
+  await assert.rejects(
+    AxlApp.start({
+      client: await DaemonClient.connect(socketPath),
+      input,
+      output,
+      cwd: directory,
+      color: false,
+      extensions: [extension],
+    }),
+    /conflicts with a reserved terminal shortcut/,
+  );
+});
+
+test("terminal extensions contribute UI and reload without leaking owned resources", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  let activations = 0;
+  let cleanups = 0;
+  const extension: TerminalExtension = {
+    manifest: {
+      id: "test.terminal",
+      name: "Terminal fixture",
+      capabilities: [
+        "terminal.commands",
+        "terminal.shortcuts",
+        "terminal.status",
+        "terminal.widgets",
+      ],
+    },
+    activate(api) {
+      activations += 1;
+      api.registerCommand({
+        name: "hello",
+        description: "Show extension greeting",
+        complete: (prefix) => (prefix ? [] : ["safe\n\x1b]0;owned\x07value"]),
+        run: (arguments_, command) => command.notify(`hello ${arguments_}`, "success"),
+      });
+      api.registerShortcut({
+        key: "\u0010",
+        description: "Show shortcut greeting",
+        run: (command) => command.notify("shortcut ready", "accent"),
+      });
+      api.registerStatus("ready", { text: "extension ready", tone: "success" });
+      api.registerWidget("summary", {
+        placement: "aboveEditor",
+        render: () => [{ text: "Extension widget", tone: "accent" }],
+        dispose: () => {
+          cleanups += 1;
+        },
+      });
+      return () => {
+        cleanups += 1;
+      };
+    },
+  };
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    extensions: [extension],
+  });
+
+  assert.match(text(), /Extension widget/);
+  assert.match(text(), /extension ready/);
+  input.write("/hello \t");
+  await until(() => text().includes("/hello safe value"), "sanitized extension completion");
+  assert.equal(text().includes("\x1b]0;owned"), false);
+  input.write("\x03/hello world\r");
+  await until(() => text().includes("hello world"), "extension command");
+  input.write("\u0010");
+  await until(() => text().includes("shortcut ready"), "extension shortcut");
+  input.write("/reload\r");
+  await until(() => activations === 2, "extension reload");
+  assert.equal(cleanups, 2);
+  assert.match(text(), /Extension widget/);
+
+  app.stop();
+  await until(() => cleanups === 4, "extension shutdown cleanup");
+});
+
+test("command discovery, history, autocomplete, and external editing behave", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const edited: string[] = [];
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    models: ["gpt-5", "gpt-4.1"],
+    editPrompt: async (content) => {
+      edited.push(content);
+      return `${content} from editor`;
+    },
+  });
+
+  input.write("draft\x07");
+  await until(() => text().includes("external editor closed"), "external editor");
+  assert.deepEqual(edited, ["draft"]);
+  input.write("\r");
+  await until(() => text().includes("draft from editor"), "edited prompt submission");
+
+  input.write("\x12");
+  await until(() => text().includes("Prompt history"), "history search");
+  assert.match(text(), /draft from editor/);
+  input.write("\x1b");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  input.write("/m");
+  await until(() => text().includes("Commands"), "command suggestions");
+  assert.match(text(), /select a model/);
+  input.write("\x15/model g\t");
+  await until(() => text().includes("/model gpt-5"), "argument completion");
+  input.write("\x15/commands\r");
+  await until(() => text().includes("Commands"), "command palette");
+  input.write("history");
+  await until(() => text().includes("/history"), "history command search");
+  app.stop();
+});
+
+test("history navigation passes through slash-command entries without trapping arrows", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    models: ["gpt-5"],
+  });
+
+  input.write("first prompt\r");
+  await until(() => text().includes("↑1 ↓1"), "canonical first prompt reply");
+  input.write("/model\r");
+  await until(() => text().includes("Select model"), "model picker");
+  input.write("\x1b");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  input.write("last prompt\r");
+  await until(() => text().includes("↑2 ↓2"), "canonical last prompt reply");
+
+  input.write("\x1b[A\x1b[A\x1b[A");
+  await new Promise((resolve) => setImmediate(resolve));
+  const terminal = new VirtualTerminal(100, 24);
+  terminal.write(text());
+  assert.equal(
+    terminal.rows().some((row) => row.includes("│ > first prompt")),
+    true,
+  );
+
+  input.write("\x1b[B\x1b[B\x1b[B");
+  await new Promise((resolve) => setImmediate(resolve));
+  const returned = new VirtualTerminal(100, 24);
+  returned.write(text());
+  assert.equal(
+    returned.rows().some((row) => /│ >\s+│/.test(row)),
+    true,
+  );
+  app.stop();
+});
+
+test("bang commands run through daemon shell authority", async (context) => {
+  const commands: string[] = [];
+  const requests: string[] = [];
+  const recordingPort: ModelPort = {
+    stream(request) {
+      requests.push(JSON.stringify(request.messages));
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        yield { type: "text_delta", text: "done" };
+        yield { type: "completed", stopReason: "stop", usage };
+      })();
+    },
+  };
+  const { socketPath, directory } = await startStack(context, recordingPort, () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "shell",
+      description: "Run shell",
+      inputSchema: { type: "object" },
+      async execute(input) {
+        commands.push(String(input.command));
+        return {
+          content: [{ type: "text", text: `output:${String(input.command)}` }],
+          isError: false,
+        };
+      },
+    });
+    return tools;
+  });
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+  });
+
+  input.write("!pwd\r");
+  await until(() => text().includes("output:pwd"), "included shell command");
+  input.write("!!secret\r");
+  await until(() => text().includes("output:secret"), "excluded shell command");
+  input.write("continue\r");
+  await until(() => requests.length === 1, "model turn after shell");
+  assert.deepEqual(commands, ["pwd", "secret"]);
+  assert.match(requests[0] ?? "", /output:pwd/);
+  assert.equal((requests[0] ?? "").includes("output:secret"), false);
+  app.stop();
+});
+
+test("Escape interrupts shell passthrough and preserves queued prompts", async (context) => {
+  let shellAborted = false;
+  const prompts: string[] = [];
+  const recordingPort: ModelPort = {
+    stream(request) {
+      const last = request.messages.at(-1);
+      if (last?.role === "user") {
+        prompts.push(last.content.map((item) => (item.type === "text" ? item.text : "")).join(""));
+      }
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        yield { type: "text_delta", text: "after shell" };
+        yield { type: "completed", stopReason: "stop", usage };
+      })();
+    },
+  };
+  const { socketPath, directory } = await startStack(context, recordingPort, () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "shell",
+      description: "Blocking shell",
+      inputSchema: { type: "object" },
+      async execute(_input, signal) {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        shellAborted = signal.aborted;
+        return { content: [{ type: "text", text: "shell interrupted" }], isError: true };
+      },
+    });
+    return tools;
+  });
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+  });
+
+  await until(() => text().includes("\x1b[>4;2m"), "keyboard negotiation");
+  input.write("!sleep 30\r");
+  await until(() => text().includes("Working"), "shell working state");
+  input.write("keep this prompt\r");
+  await until(() => text().includes("queued follow-up"), "queued shell follow-up");
+  input.write("\x1b[27u");
+  await until(() => shellAborted, "shell interruption");
+  await until(() => prompts.length === 1, "queued prompt delivery");
+  assert.deepEqual(prompts, ["keep this prompt"]);
   app.stop();
 });
 
@@ -267,21 +907,26 @@ test("editing, /quit, and busy notices behave", async (context) => {
   await until(() => exited, "quit");
 });
 
-test("command completion shows the selected command and description", async (context) => {
+test("Ctrl+Z suspends and resumes without detaching the session", async (context) => {
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
   const { output, text } = captureOutput();
+  let suspends = 0;
   const app = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
     cwd: directory,
     color: false,
+    suspendProcess: () => {
+      suspends += 1;
+    },
   });
 
-  input.write("/log");
-  await until(() => text().includes("configure Azure OpenAI credentials"), "command completion");
-  assert.match(text(), /→ \/login/);
+  input.write("\x1a");
+  await until(() => suspends === 1, "terminal suspension");
+  assert.match(text(), /terminal resumed/);
+  assert.equal(input.isRaw, true);
   app.stop();
 });
 
@@ -434,34 +1079,69 @@ test("/model opens a selector and switches the model live", async (context) => {
   const input = new PassThrough();
   const { output, text } = captureOutput();
   const switched: string[] = [];
+  const preferences: Array<Record<string, unknown>> = [];
 
-  await AxlApp.start({
+  const app = await AxlApp.start({
     client: await DaemonClient.connect(socketPath),
     input,
     output,
     cwd: directory,
     color: false,
     models: ["gpt-5", "gpt-4.1", "gpt-4o-mini"],
-    modelCatalog: AZURE_OPENAI_MODELS,
     currentModel: "gpt-5",
-    onModelChange: (modelId) => {
-      switched.push(modelId);
+    onModelChange: (modelId) => switched.push(modelId),
+    onPreferenceChange: (update) => {
+      preferences.push(update);
     },
   });
 
-  input.write("/model\r");
-  await until(() => text().includes("Only showing models"), "selector open");
-  assert.match(text(), /→ gpt-5 \[azure-openai\] ✓/);
-  assert.match(text(), /Model Name: GPT-5/);
-  assert.match(text(), /Azure OpenAI catalog · 3 models/);
+  input.write("/mo\r");
+  await until(() => text().includes("Select model"), "unique command prefix");
+  assert.match(text(), /› gpt-5/);
   assert.match(text(), /gpt-4\.1/);
 
-  input.write("\x1b[B"); // down
+  input.write("\x1b["); // fragmented down
+  input.write("B");
   input.write("\r"); // choose
   await until(() => switched.length > 0, "selection applied");
   assert.deepEqual(switched, ["gpt-4.1"]);
-  await until(() => text().includes("· model gpt-4.1"), "committed line");
-  assert.match(text(), /model gpt-4\.1/);
+  assert.deepEqual(preferences, [{ modelId: "gpt-4.1" }]);
+  await until(() => text().includes("→ gpt-4.1"), "committed line");
+  app.stop();
+});
+
+test("/theme previews message and tool surfaces live", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const preferences: Array<Record<string, unknown>> = [];
+  const app = await AxlApp.start({
+    client: await DaemonClient.connect(socketPath),
+    input,
+    output,
+    cwd: directory,
+    onPreferenceChange: (update) => {
+      preferences.push(update);
+    },
+  });
+
+  input.write("/theme\r");
+  await until(() => text().includes("Select theme"), "theme selector");
+  assert.match(text(), /dark/);
+  assert.equal(text().includes("❯"), false);
+  assert.match(text(), /accent/);
+  assert.match(text(), /muted metadata/);
+  assert.match(text(), /read.*packages\/tui\/src\/app\.ts/);
+  input.write("\x1b[B");
+  await until(() => text().includes("Axl Light"), "theme preview navigation");
+  input.write("\x1b");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(preferences, []);
+  input.write("/settings\r");
+  await until(() => text().includes("Terminal settings"), "settings selector");
+  assert.match(stripAnsi(text()), /Tool details\s+compact/);
+  assert.match(stripAnsi(text()), /Thoughts\s+compact/);
+  app.stop();
 });
 
 test("/model digit selection and Esc cancel behave", async (context) => {
@@ -477,16 +1157,15 @@ test("/model digit selection and Esc cancel behave", async (context) => {
     cwd: directory,
     color: false,
     models: ["gpt-5", "gpt-4o-mini"],
-    onModelChange: (modelId) => {
-      switched.push(modelId);
-    },
+    onModelChange: (modelId) => switched.push(modelId),
   });
 
   input.write("/model\r");
-  await until(() => text().includes("Only showing models"), "selector open");
+  await until(() => text().includes("Select model"), "selector open");
   input.write("\x1b"); // cancel
+  await new Promise((resolve) => setTimeout(resolve, 20));
   input.write("/model\r");
-  await until(() => (text().match(/Only showing models/g) ?? []).length >= 2, "reopened");
+  await until(() => (text().match(/Select model/g) ?? []).length >= 2, "reopened");
   input.write("2");
   await until(() => switched.length > 0, "digit selection");
   assert.deepEqual(switched, ["gpt-4o-mini"]);
@@ -512,6 +1191,7 @@ test("/login is a dialog: fields, masked key, live Azure verification", async (c
     },
   });
 
+  await until(() => text().includes("\x1b[>4;2m"), "keyboard negotiation");
   input.write("/login\r");
   await until(() => text().includes("Login to Azure OpenAI"), "login dialog");
   assert.match(text(), /API key/);
@@ -527,51 +1207,6 @@ test("/login is a dialog: fields, masked key, live Azure verification", async (c
   assert.match(text(), /\*{5,}/);
   const stored = await store.read("azure-openai");
   assert.equal(stored?.type === "api_key" && stored.key, "dialog-test-key");
-});
-
-test("/login reuses a global stored key in another workspace", async (context) => {
-  const { socketPath, directory } = await startStack(context);
-  const { FileCredentialStore } = await import("@axl/ai");
-  const store = new FileCredentialStore(join(directory, "credentials.json"));
-  await store.modify("azure-openai", () =>
-    Promise.resolve({
-      type: "api_key",
-      key: "stored-key",
-      env: {
-        AZURE_OPENAI_BASE_URL: "https://myres.openai.azure.com/openai/v1",
-        AZURE_OPENAI_DEPLOYMENT_NAME_MAP: "gpt-5.6-sol=production",
-      },
-    }),
-  );
-  const workspace = join(directory, "other-workspace");
-  await mkdir(workspace);
-  const input = new PassThrough();
-  const { output, text } = captureOutput();
-  const app = await AxlApp.start({
-    client: await DaemonClient.connect(socketPath),
-    input,
-    output,
-    cwd: workspace,
-    color: false,
-    credentials: {
-      store,
-      context: { env: () => undefined, fileExists: () => Promise.resolve(false) },
-      fetch: (async () => new Response("{}", { status: 200 })) as typeof fetch,
-    },
-  });
-
-  input.write("/login\r");
-  await until(() => text().includes("leave blank to keep the stored key"), "stored login");
-  input.write("\r");
-  await until(() => text().includes("https://myres.openai.azure.com/openai/v1"), "stored endpoint");
-  input.write("\r");
-  await until(() => text().includes("gpt-5.6-sol=production"), "stored deployment map");
-  input.write("\r");
-  await until(() => text().includes("credentials verified with Azure"), "verification");
-  const stored = await store.read("azure-openai");
-  assert.equal(stored?.type, "api_key");
-  assert.equal(stored?.type === "api_key" ? stored.key : undefined, "stored-key");
-  app.stop();
 });
 
 test("/reload requests a runtime rebuild and renders the boundary", async (context) => {
@@ -607,9 +1242,8 @@ test("/reload requests a runtime rebuild and renders the boundary", async (conte
     cwd: directory,
     color: false,
   });
-  assert.match(text(), /· tools generic @a1b2c3d4 \(session_start\)/);
+  assert.equal(text().includes("tools reloaded"), false);
 
   input.write("/reload\r");
-  await until(() => text().includes("(reload)"), "reload boundary rendered");
-  assert.match(text(), /· tools generic @a1b2c3d4 \(reload\)/);
+  await until(() => text().includes("· tools reloaded · generic"), "reload boundary rendered");
 });

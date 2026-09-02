@@ -8,7 +8,10 @@
     "baseUrl": ".",
     "paths": {
       "@axl/ai": ["./packages/ai/src/index.ts"],
+      "@axl/ai/models": ["./packages/ai/src/models.ts"],
       "@axl/daemon": ["./packages/daemon/src/index.ts"],
+      "@axl/daemon/client": ["./packages/daemon/src/client.ts"],
+      "@axl/extension-api": ["./packages/extensions/api/src/index.ts"],
       "@axl/extension-mcp": ["./packages/extensions/mcp/src/index.ts"],
       "@axl/extension-skills": ["./packages/extensions/skills/src/index.ts"],
       "@axl/kernel": ["./packages/kernel/src/index.ts"],

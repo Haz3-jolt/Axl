@@ -4,3 +4,7 @@ Copyright 2026 Hari Srinivasan
 Axl is an independent implementation. No third-party source code or fixtures are copied or adapted into this repository.
 
 Axl uses the official Model Context Protocol TypeScript SDK as an external dependency. It is distributed under its own MIT license.
+
+Axl uses Marked 18.0.11 as an external dependency for Markdown tokenization. It is distributed under its own MIT license.
+
+Axl uses grok-mermaid 0.2.2 as an external dependency for Unicode Mermaid rendering. It is distributed under its own Apache-2.0 license.

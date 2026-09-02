@@ -4,7 +4,9 @@
 /** Begin/end synchronized output. Supporting terminals apply the frame atomically. */
 export const SYNC_BEGIN = "\x1b[?2026h";
 export const SYNC_END = "\x1b[?2026l";
-export const RESET_LINE = "\x1b[0m\x1b]8;;\x07";
+export const AUTOWRAP_OFF = "\x1b[?7l";
+export const AUTOWRAP_ON = "\x1b[?7h";
+export const RESET_LINE = "\x1b[0m\x1b]8;;\x1b\\";
 export const CURSOR_MARKER = "\x1b_axl_cursor\x1b\\";
 
 export interface Component {
@@ -16,11 +18,14 @@ export interface Component {
 export interface CursorPlacement {
   readonly row: number;
   readonly column: number;
+  readonly visible?: boolean;
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-const emojiPattern = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u;
+const emojiPattern = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\uFE0F|\u20E3/u;
 const markPattern = /^\p{Mark}+$/u;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: detects text requiring sanitization
+const unsafeTerminalTextPattern = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u;
 
 function escapeLength(value: string, offset: number): number {
   if (value.charCodeAt(offset) !== 0x1b) return 0;
@@ -34,7 +39,7 @@ function escapeLength(value: string, offset: number): number {
     }
     return value.length - offset;
   }
-  if (next === "]" || next === "_") {
+  if (next === "]" || next === "_" || next === "P") {
     let index = offset + 2;
     while (index < value.length) {
       if (value.charCodeAt(index) === 0x07) return index - offset + 1;
@@ -76,12 +81,16 @@ export function graphemeWidth(value: string): number {
 
 function tokens(value: string): Array<{ value: string; width: number; escape: boolean }> {
   const result: Array<{ value: string; width: number; escape: boolean }> = [];
-  let textStart = 0;
   const appendText = (text: string): void => {
     for (const part of graphemes.segment(text)) {
       result.push({ value: part.segment, width: graphemeWidth(part.segment), escape: false });
     }
   };
+  if (!value.includes("\x1b")) {
+    appendText(value);
+    return result;
+  }
+  let textStart = 0;
   for (let index = 0; index < value.length; ) {
     const length = escapeLength(value, index);
     if (length === 0) {
@@ -98,6 +107,42 @@ function tokens(value: string): Array<{ value: string; width: number; escape: bo
   return result;
 }
 
+function hasComplexGraphemes(value: string): boolean {
+  if (
+    /\u200d|\u20e3|\p{Regional_Indicator}|\p{Emoji_Modifier}|[\u1100-\u11ff\ua960-\ua97f\ud7b0-\ud7ff\u{e0020}-\u{e007e}]/u.test(
+      value,
+    )
+  ) {
+    return true;
+  }
+  for (const mark of value.matchAll(/\p{Mark}/gu)) {
+    if (mark[0] !== "\ufe0f") return true;
+  }
+  return false;
+}
+
+function forEachPlainGrapheme(
+  value: string,
+  visit: (segment: string, width: number) => void,
+): void {
+  if (hasComplexGraphemes(value)) {
+    for (const part of graphemes.segment(value)) visit(part.segment, graphemeWidth(part.segment));
+    return;
+  }
+  for (const segment of value) {
+    if (segment === "\ufe0f") continue;
+    visit(segment, graphemeWidth(segment));
+  }
+}
+
+function plainWidth(value: string): number {
+  let width = 0;
+  forEachPlainGrapheme(value, (_segment, segmentWidth) => {
+    width += segmentWidth;
+  });
+  return width;
+}
+
 export function stripAnsi(value: string): string {
   return tokens(value)
     .filter((token) => !token.escape)
@@ -107,18 +152,82 @@ export function stripAnsi(value: string): string {
 
 /** Removes terminal control sequences from model and tool supplied text. */
 export function sanitizeTerminalText(value: string): string {
+  if (!unsafeTerminalTextPattern.test(value)) return value;
+  const stripped = value.includes("\x1b") ? stripAnsi(value) : value;
   return (
-    stripAnsi(value)
+    stripped
       .replaceAll("\t", "    ")
       .replaceAll("\r", "")
       // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal controls are the input being removed
       .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "")
+      .replace(/[\u202a-\u202e\u2066-\u2069]/g, "")
   );
 }
 
 /** Printable terminal-cell width, ignoring ANSI, OSC, and APC sequences. */
 export function visibleWidth(value: string): number {
-  return tokens(value).reduce((total, token) => total + token.width, 0);
+  return value.includes("\x1b")
+    ? tokens(value).reduce((total, token) => total + token.width, 0)
+    : plainWidth(value);
+}
+
+export interface CellStyleRange {
+  readonly start: number;
+  readonly end: number;
+  readonly style: (text: string) => string;
+  readonly priority?: number;
+}
+
+/** Applies presentation-only styles to visible terminal cells without splitting graphemes. */
+export function styleCellRanges(value: string, ranges: readonly CellStyleRange[]): string {
+  if (ranges.length === 0) return value;
+  let column = 0;
+  let output = "";
+  for (const token of tokens(value)) {
+    if (token.escape) {
+      output += token.value;
+      continue;
+    }
+    const end = column + token.width;
+    const range = ranges
+      .filter((candidate) => candidate.start < end && candidate.end > column)
+      .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0))[0];
+    output += range === undefined ? token.value : range.style(token.value);
+    column = end;
+  }
+  return output;
+}
+
+/** Returns plain text intersecting a terminal-cell range. */
+export function plainTextByCells(value: string, start: number, end: number): string {
+  if (end <= start) return "";
+  let column = 0;
+  let output = "";
+  for (const token of tokens(stripAnsi(value))) {
+    if (token.escape) continue;
+    const next = column + token.width;
+    if (column < end && next > start) output += token.value;
+    column = next;
+  }
+  return output;
+}
+
+/** Returns the OSC 8 destination covering a visible terminal cell. */
+export function linkAtCell(value: string, target: number): string | undefined {
+  let column = 0;
+  let link: string | undefined;
+  for (const token of tokens(value)) {
+    if (token.escape) {
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: OSC links use Escape and Bell
+      const match = /^\x1b\]8;;([^\x07\x1b]*)(?:\x07|\x1b\\)$/.exec(token.value);
+      if (match !== null) link = match[1] || undefined;
+      continue;
+    }
+    const end = column + token.width;
+    if (target >= column && target < end) return link;
+    column = end;
+  }
+  return undefined;
 }
 
 /** Backward-compatible name used by the existing components. */
@@ -126,32 +235,69 @@ export const visibleLength = visibleWidth;
 
 export function truncateToWidth(value: string, width: number, ellipsis = "…"): string {
   if (width <= 0) return "";
-  if (visibleWidth(value) <= width) return value;
+  const styled = value.includes("\x1b");
+  const parsed = styled ? tokens(value) : [];
+  const measured = styled
+    ? parsed.reduce((total, token) => total + token.width, 0)
+    : plainWidth(value);
+  if (measured <= width) return value;
   const suffixWidth = Math.min(width, visibleWidth(ellipsis));
   const limit = Math.max(0, width - suffixWidth);
   let output = "";
   let used = 0;
-  for (const token of tokens(value)) {
-    if (token.escape) {
+  if (!styled) {
+    let complete = true;
+    forEachPlainGrapheme(value, (segment, segmentWidth) => {
+      if (!complete) return;
+      if (used + segmentWidth > limit) {
+        complete = false;
+        return;
+      }
+      output += segment;
+      used += segmentWidth;
+    });
+  } else {
+    for (const token of parsed) {
+      if (token.escape) {
+        output += token.value;
+        continue;
+      }
+      if (used + token.width > limit) break;
       output += token.value;
-      continue;
+      used += token.width;
     }
-    if (used + token.width > limit) break;
-    output += token.value;
-    used += token.width;
   }
   return `${output}${suffixWidth > 0 ? ellipsis : ""}${RESET_LINE}`;
 }
 
 /** Hard-wraps on terminal-cell width while preserving active SGR styling. */
 export function wrapLine(value: string, width: number): string[] {
-  if (width <= 0 || visibleWidth(value) <= width) return [value];
+  if (width <= 0) return [value];
+  if (!value.includes("\x1b")) {
+    const lines: string[] = [];
+    let current = "";
+    let currentWidth = 0;
+    forEachPlainGrapheme(value, (segment, segmentWidth) => {
+      if (segmentWidth > 0 && currentWidth + segmentWidth > width) {
+        lines.push(current);
+        current = "";
+        currentWidth = 0;
+      }
+      current += segment;
+      currentWidth += segmentWidth;
+    });
+    if (lines.length === 0) return [value];
+    lines.push(current);
+    return lines;
+  }
+  const parsed = tokens(value);
+  if (parsed.reduce((total, token) => total + token.width, 0) <= width) return [value];
   const lines: string[] = [];
   let current = "";
   let currentWidth = 0;
   let activeSgr = "";
 
-  for (const token of tokens(value)) {
+  for (const token of parsed) {
     if (token.escape) {
       current += token.value;
       // biome-ignore lint/suspicious/noControlCharactersInRegex: SGR starts with ESC
@@ -183,6 +329,7 @@ export class DifferentialScreen {
   private forceFull = false;
   private placedRow: number | null = null;
   private placedColumn = 0;
+  private cursorVisible = true;
 
   constructor(width: number) {
     this.width = Math.max(1, width);
@@ -240,41 +387,63 @@ export class DifferentialScreen {
     const targetRow =
       cursor === undefined ? null : Math.min(cursor.row, Math.max(0, lines.length - 1));
     const targetColumn = cursor === undefined ? 0 : Math.min(cursor.column, this.width - 1);
-    if (
-      unchanged &&
-      this.placedRow === targetRow &&
-      (targetRow === null || this.placedColumn === targetColumn)
-    ) {
+    const targetVisibility = cursor?.visible;
+    const placementUnchanged =
+      this.placedRow === targetRow && (targetRow === null || this.placedColumn === targetColumn);
+    if (unchanged && placementUnchanged) {
+      if (targetVisibility !== undefined && targetVisibility !== this.cursorVisible) {
+        this.cursorVisible = targetVisibility;
+        return `${SYNC_BEGIN}${AUTOWRAP_OFF}${targetVisibility ? "\x1b[?25h" : "\x1b[?25l"}${AUTOWRAP_ON}${SYNC_END}`;
+      }
       return "";
     }
 
     let park = "";
     if (this.placedRow !== null) {
-      park = `\x1b[${previous.length - this.placedRow}E`;
+      const moveDown = Math.max(0, previous.length - 1 - this.placedRow);
+      park = moveDown > 0 ? `\x1b[${moveDown}E` : "\r";
       this.placedRow = null;
       this.placedColumn = 0;
     }
 
     let paint = "";
     if (!unchanged) {
-      const start = Math.min(this.forceFull ? 0 : firstChanged, lines.length);
-      const moveUp = previous.length - start;
+      const growing = previous.length > 0 && lines.length > previous.length;
+      const growth = Math.max(0, lines.length - previous.length);
+      const start = growing ? 0 : Math.min(this.forceFull ? 0 : firstChanged, lines.length);
+      const appending = !growing && previous.length > 0 && start >= previous.length;
+      const moveUp = growing
+        ? previous.length - 1 + growth
+        : Math.max(0, previous.length - 1 - start);
+      if (growing) paint += "\r\n".repeat(growth);
       if (moveUp > 0) paint += `\x1b[${moveUp}F`;
+      else if (!appending) paint += "\r";
+      if (appending) paint += "\r\n";
       for (let index = start; index < lines.length; index += 1) {
-        paint += `\x1b[2K${lines[index]}\n`;
+        if (index > start) paint += "\r\n";
+        paint += `\x1b[2K${lines[index]}`;
       }
-      if (lines.length < previous.length) paint += "\x1b[0J";
+      if (lines.length < previous.length) {
+        paint += "\x1b[0J";
+        if (lines.length > 0 && start >= lines.length) paint += "\x1b[1F";
+      }
       this.previous = [...lines];
       this.forceFull = false;
     }
 
     let place = "";
     if (targetRow !== null && this.previous.length > 0) {
-      place = `\x1b[${this.previous.length - targetRow}F\x1b[${targetColumn + 1}G`;
+      const moveUp = this.previous.length - 1 - targetRow;
+      place = `${moveUp > 0 ? `\x1b[${moveUp}F` : ""}\x1b[${targetColumn + 1}G`;
       this.placedRow = targetRow;
       this.placedColumn = targetColumn;
     }
-    if (!park && !paint && !place) return "";
-    return `${SYNC_BEGIN}${park}${paint}${place}${SYNC_END}`;
+    let visibility = "";
+    if (targetVisibility !== undefined && targetVisibility !== this.cursorVisible) {
+      visibility = targetVisibility ? "\x1b[?25h" : "\x1b[?25l";
+      this.cursorVisible = targetVisibility;
+    }
+    if (!park && !paint && !place && !visibility) return "";
+    return `${SYNC_BEGIN}${AUTOWRAP_OFF}${park}${paint}${place}${visibility}${AUTOWRAP_ON}${SYNC_END}`;
   }
 }

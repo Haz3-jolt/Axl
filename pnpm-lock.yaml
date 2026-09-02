@@ -35,6 +35,12 @@ importers:
       '@axl/daemon':
         specifier: workspace:*
         version: link:../daemon
+      '@axl/extension-mcp':
+        specifier: workspace:*
+        version: link:../extensions/mcp
+      '@axl/extension-skills':
+        specifier: workspace:*
+        version: link:../extensions/skills
       '@axl/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -58,8 +64,13 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  packages/extensions/api: {}
+
   packages/extensions/mcp:
     dependencies:
+      '@axl/extension-api':
+        specifier: workspace:*
+        version: link:../api
       '@axl/kernel':
         specifier: workspace:*
         version: link:../../kernel
@@ -72,6 +83,9 @@ importers:
 
   packages/extensions/skills:
     dependencies:
+      '@axl/extension-api':
+        specifier: workspace:*
+        version: link:../api
       '@axl/kernel':
         specifier: workspace:*
         version: link:../../kernel
@@ -131,10 +145,25 @@ importers:
       '@axl/daemon':
         specifier: workspace:*
         version: link:../daemon
+      '@axl/extension-api':
+        specifier: workspace:*
+        version: link:../extensions/api
       '@axl/protocol':
         specifier: workspace:*
         version: link:../protocol
+      grok-mermaid:
+        specifier: 0.2.2
+        version: 0.2.2
+      marked:
+        specifier: 18.0.11
+        version: 18.0.11
     devDependencies:
+      '@axl/extension-mcp':
+        specifier: workspace:*
+        version: link:../extensions/mcp
+      '@axl/extension-skills':
+        specifier: workspace:*
+        version: link:../extensions/skills
       '@axl/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -531,6 +560,10 @@ packages:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
 
+  grok-mermaid@0.2.2:
+    resolution: {integrity: sha512-XcJEP5dDC8liHBh52mlLjU18fNvu1ckFsu0QpIG3+APZ270fsj9wxpiA6cOURmbUEuoMVgjbC2+UYgTdCqqgzA==}
+    engines: {node: '>=18'}
+
   has-symbols@1.1.0:
     resolution: {integrity: sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==}
     engines: {node: '>= 0.4'}
@@ -576,6 +609,11 @@ packages:
 
   json-schema-typed@8.0.2:
     resolution: {integrity: sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA==}
+
+  marked@18.0.11:
+    resolution: {integrity: sha512-HnslJfsZkRPBDJRHvVtAaWlZHEpSu7u8LgQuJCELjRKuWR+hpq4A7sLq3p8HaI9ypVoXDXxV34CsQJEe1+J5Aw==}
+    engines: {node: '>= 20'}
+    hasBin: true
 
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
@@ -1098,6 +1136,8 @@ snapshots:
 
   gopd@1.2.0: {}
 
+  grok-mermaid@0.2.2: {}
+
   has-symbols@1.1.0: {}
 
   hasown@2.0.4:
@@ -1133,6 +1173,8 @@ snapshots:
   json-schema-traverse@1.0.0: {}
 
   json-schema-typed@8.0.2: {}
+
+  marked@18.0.11: {}
 
   math-intrinsics@1.1.0: {}
 

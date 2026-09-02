@@ -42,6 +42,16 @@ const axl: Palette = {
   border: sgr("90", "39"),
   success: sgr("32", "39"),
   warning: sgr("33", "39"),
+  text: sgr("97", "39"),
+  userMessage: background("#14252b"),
+  selection: foregroundOn("#e7f6ff", "#164e63"),
+  searchMatch: background("#3f3f46"),
+  searchCurrent: foregroundOn("#082f49", "#67e8f9"),
+  toolBackground: background("#111c20"),
+  toolPendingBackground: background("#2b2414"),
+  toolSuccessBackground: background("#14281d"),
+  toolErrorBackground: background("#30191c"),
+  toolDeniedBackground: background("#2c2314"),
   diffAdded: sgr("32", "39"),
   diffRemoved: sgr("31", "39"),
   diffContext: sgr("2", "22"),
@@ -58,6 +68,16 @@ const ember: Palette = {
   border: fg256(243),
   success: fg256(114),
   warning: fg256(220),
+  text: foreground("#fff1d6"),
+  userMessage: background("#302016"),
+  selection: foregroundOn("#fff7ed", "#9a3412"),
+  searchMatch: background("#4a2c1c"),
+  searchCurrent: foregroundOn("#431407", "#fdba74"),
+  toolBackground: background("#261b15"),
+  toolPendingBackground: background("#332617"),
+  toolSuccessBackground: background("#20301f"),
+  toolErrorBackground: background("#351b19"),
+  toolDeniedBackground: background("#352815"),
   diffAdded: fg256(114),
   diffRemoved: fg256(203),
   diffContext: fg256(243),
@@ -74,6 +94,16 @@ const ocean: Palette = {
   border: fg256(245),
   success: fg256(79),
   warning: fg256(221),
+  text: foreground("#e7f6ff"),
+  userMessage: background("#10283a"),
+  selection: foregroundOn("#eff6ff", "#1d4ed8"),
+  searchMatch: background("#173b57"),
+  searchCurrent: foregroundOn("#082f49", "#7dd3fc"),
+  toolBackground: background("#0c202f"),
+  toolPendingBackground: background("#2b2915"),
+  toolSuccessBackground: background("#112d27"),
+  toolErrorBackground: background("#351f29"),
+  toolDeniedBackground: background("#302815"),
   diffAdded: fg256(79),
   diffRemoved: fg256(210),
   diffContext: fg256(245),
@@ -90,6 +120,16 @@ const grove: Palette = {
   border: fg256(244),
   success: fg256(108),
   warning: fg256(180),
+  text: foreground("#edf4dc"),
+  userMessage: background("#20291a"),
+  selection: foregroundOn("#f7fee7", "#4d7c0f"),
+  searchMatch: background("#334025"),
+  searchCurrent: foregroundOn("#1a2e05", "#bef264"),
+  toolBackground: background("#192117"),
+  toolPendingBackground: background("#2d2918"),
+  toolSuccessBackground: background("#1b2d1b"),
+  toolErrorBackground: background("#331f1f"),
+  toolDeniedBackground: background("#302817"),
   diffAdded: fg256(108),
   diffRemoved: fg256(167),
   diffContext: fg256(244),
@@ -125,7 +165,14 @@ const dark: Palette = {
   warning: foreground(gruvbox.yellow),
   text: foreground(gruvbox.fg1),
   userMessage: foregroundOn(gruvbox.fg1, gruvbox.bg0Hard),
+  selection: foregroundOn(gruvbox.fg1, gruvbox.bg1),
+  searchMatch: background(gruvbox.bg1),
+  searchCurrent: foregroundOn(gruvbox.bg0Hard, gruvbox.yellow),
   toolBackground: background("#202324"),
+  toolPendingBackground: background("#332d20"),
+  toolSuccessBackground: background("#24332b"),
+  toolErrorBackground: background("#35282c"),
+  toolDeniedBackground: background("#352f20"),
   diffAdded: foreground(gruvbox.green),
   diffRemoved: foreground(gruvbox.red),
   diffContext: foreground(gruvbox.gray),
@@ -153,24 +200,116 @@ const dark: Palette = {
   literal: foreground(gruvbox.yellow),
 };
 
+const light: Palette = {
+  dim: foreground("#6b7280"),
+  accent: foreground("#075985"),
+  error: foreground("#b91c1c"),
+  bold,
+  border: foreground("#9ca3af"),
+  success: foreground("#047857"),
+  warning: foreground("#a16207"),
+  text: foreground("#111827"),
+  userMessage: foregroundOn("#111827", "#f3f4f6"),
+  selection: foregroundOn("#ffffff", "#075985"),
+  searchMatch: background("#e0f2fe"),
+  searchCurrent: foregroundOn("#ffffff", "#075985"),
+  toolBackground: background("#f8fafc"),
+  toolPendingBackground: background("#fff7ed"),
+  toolSuccessBackground: background("#ecfdf5"),
+  toolErrorBackground: background("#fef2f2"),
+  toolDeniedBackground: background("#fffbeb"),
+  diffAdded: foreground("#047857"),
+  diffRemoved: foreground("#b91c1c"),
+  diffContext: foreground("#6b7280"),
+  diffAddedBackground: background("#dcfce7"),
+  diffRemovedBackground: background("#fee2e2"),
+  mdHeading: foreground("#854d0e"),
+  mdCode: foreground("#0f766e"),
+  mdCodeBlockBorder: foreground("#9ca3af"),
+  mdQuote: foreground("#4b5563"),
+  mdQuoteBorder: foreground("#075985"),
+  mdListBullet: foreground("#075985"),
+  thinking: (_level, text) => foreground("#7c3aed")(text),
+  keyword: foreground("#be123c"),
+  literal: foreground("#a16207"),
+};
+
+const system: Palette = {
+  dim: sgr("2", "22"),
+  accent: sgr("36", "39"),
+  error: sgr("31", "39"),
+  bold,
+  border: sgr("2", "22"),
+  success: sgr("32", "39"),
+  warning: sgr("33", "39"),
+  selection: sgr("7", "27"),
+  searchMatch: sgr("4", "24"),
+  searchCurrent: sgr("1;7", "22;27"),
+  thinking: (_level, text) => sgr("36", "39")(text),
+};
+
+const highContrast: Palette = {
+  dim: sgr("37", "39"),
+  accent: sgr("96", "39"),
+  error: sgr("91", "39"),
+  bold,
+  border: sgr("97", "39"),
+  success: sgr("92", "39"),
+  warning: sgr("93", "39"),
+  text: sgr("97", "39"),
+  selection: sgr("7", "27"),
+  searchMatch: sgr("4", "24"),
+  searchCurrent: sgr("1;7", "22;27"),
+  diffAdded: sgr("92", "39"),
+  diffRemoved: sgr("91", "39"),
+  diffContext: sgr("37", "39"),
+  thinking: (_level, text) => sgr("95", "39")(text),
+  keyword: sgr("95", "39"),
+  literal: sgr("93", "39"),
+};
+
 const plain: Palette = {
   dim: (text) => text,
   accent: (text) => text,
   error: (text) => text,
   bold: (text) => text,
+  selection: (text) => `\x1b[7m${text}\x1b[27m`,
+  searchMatch: (text) => `\x1b[4m${text}\x1b[24m`,
+  searchCurrent: (text) => `\x1b[1;7m${text}\x1b[22;27m`,
 };
 
-export const THEMES: Readonly<Record<string, Palette>> = {
-  dark,
-  axl,
-  ember,
-  ocean,
-  grove,
-  plain,
-};
+export interface ThemeDefinition {
+  readonly version: 1;
+  readonly id: string;
+  readonly label: string;
+  readonly appearance: "dark" | "light" | "system" | "accessible" | "plain";
+  readonly palette: Palette;
+}
 
-export const DEFAULT_THEME = "dark";
+export const THEME_DEFINITIONS: readonly ThemeDefinition[] = [
+  { version: 1, id: "axl-dark", label: "Axl Dark", appearance: "dark", palette: dark },
+  { version: 1, id: "axl-light", label: "Axl Light", appearance: "light", palette: light },
+  { version: 1, id: "system", label: "Terminal System", appearance: "system", palette: system },
+  {
+    version: 1,
+    id: "high-contrast",
+    label: "High Contrast",
+    appearance: "accessible",
+    palette: highContrast,
+  },
+  { version: 1, id: "axl", label: "Axl ANSI", appearance: "system", palette: axl },
+  { version: 1, id: "ember", label: "Ember", appearance: "dark", palette: ember },
+  { version: 1, id: "ocean", label: "Ocean", appearance: "dark", palette: ocean },
+  { version: 1, id: "grove", label: "Grove", appearance: "dark", palette: grove },
+  { version: 1, id: "plain", label: "No Color", appearance: "plain", palette: plain },
+];
+
+export const THEMES: Readonly<Record<string, Palette>> = Object.fromEntries(
+  THEME_DEFINITIONS.map((theme) => [theme.id, theme.palette]),
+);
+
+export const DEFAULT_THEME = "axl-dark";
 
 export function themeNames(): readonly string[] {
-  return Object.keys(THEMES);
+  return THEME_DEFINITIONS.map((theme) => theme.id);
 }

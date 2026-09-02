@@ -7,21 +7,13 @@ import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import {
-  AuthError,
-  AZURE_OPENAI_MODELS,
-  AZURE_OPENAI_PROVIDER_ID,
-  azureOpenAiAuthMethod,
-  FileCredentialStore,
-  nodeAuthContext,
-  resolveProviderAuth,
-} from "@axl/ai";
-import { DaemonClient } from "@axl/daemon";
+import type { AuthContext, CredentialStore } from "@axl/ai";
+import { AZURE_OPENAI_MODELS } from "@axl/ai/models";
+import { DaemonClient, WireClientError } from "@axl/daemon/client";
 import type { ThinkingLevel } from "@axl/protocol";
 import { startLocalDaemon } from "@axl/runtime";
-import { AxlApp, runAzureSetup, themeNames } from "@axl/tui";
 
-import { type AxlSettings, readSettings, writeSettings } from "./settings.ts";
+import { loadTuiSettings, saveTuiSettings, type TuiSettings } from "./settings.ts";
 
 const AXL_VERSION = process.env.AXL_BUILD_VERSION ?? "0.0.0-dev";
 
@@ -34,6 +26,7 @@ Options:
   --model <id>       Select the initial model
   --thinking <level> Select the initial reasoning effort
   --theme <name>     Select the terminal theme
+  --tui-mode <mode>  Use regular or fullscreen terminal mode
   --socket <path>    Use a custom daemon socket
   --unsafe           Disable operating-system isolation
   --help             Show this help
@@ -47,6 +40,7 @@ interface CliArguments {
   model?: string;
   thinking?: ThinkingLevel;
   theme?: string;
+  tuiMode?: "regular" | "fullscreen";
   cwd: string;
   unsafe: boolean;
   showHelp: boolean;
@@ -73,7 +67,13 @@ function parseArguments(argv: readonly string[]): CliArguments {
     else if (argument === "--thinking") parsed.thinking = next() as ThinkingLevel;
     else if (argument === "--cwd") parsed.cwd = next();
     else if (argument === "--theme") parsed.theme = next();
-    else if (argument === "--unsafe") parsed.unsafe = true;
+    else if (argument === "--tui-mode") {
+      const mode = next();
+      if (mode !== "regular" && mode !== "fullscreen") {
+        throw new Error("--tui-mode requires regular or fullscreen");
+      }
+      parsed.tuiMode = mode;
+    } else if (argument === "--unsafe") parsed.unsafe = true;
     else if (argument === "--help" || argument === "-h") parsed.showHelp = true;
     else if (argument === "--version" || argument === "-v") parsed.showVersion = true;
     else if (argument === "login" || argument === "daemon") parsed.command = argument;
@@ -83,12 +83,14 @@ function parseArguments(argv: readonly string[]): CliArguments {
   return parsed;
 }
 
-/**
- * Ensures Azure credentials exist, launching interactive setup on a fresh
- * machine instead of demanding environment exports. Non-interactive contexts
- * (pipes, CI) get the loud error instead of a hanging prompt.
- */
-async function ensureCredentials(store: FileCredentialStore): Promise<void> {
+async function ensureCredentials(store: CredentialStore): Promise<void> {
+  const {
+    AuthError,
+    AZURE_OPENAI_PROVIDER_ID,
+    azureOpenAiAuthMethod,
+    nodeAuthContext,
+    resolveProviderAuth,
+  } = await import("@axl/ai");
   try {
     await resolveProviderAuth(
       AZURE_OPENAI_PROVIDER_ID,
@@ -98,6 +100,7 @@ async function ensureCredentials(store: FileCredentialStore): Promise<void> {
     );
   } catch (error) {
     if (error instanceof AuthError && error.code === "not_configured" && process.stdin.isTTY) {
+      const { runAzureSetup } = await import("@axl/tui");
       await runAzureSetup(process.stdin, process.stdout, store, nodeAuthContext);
       return;
     }
@@ -142,6 +145,7 @@ async function connectOrStartDaemon(input: {
     return await connectExpectedDaemon(input.socketPath, input.unsafe);
   } catch (error) {
     if (error instanceof SecurityModeMismatchError) throw error;
+    if (error instanceof WireClientError && error.code !== "connection_error") throw error;
     const entry = process.argv[1];
     if (entry === undefined) throw new Error("Cannot locate the Axl executable");
     const child = spawn(
@@ -160,23 +164,63 @@ async function connectOrStartDaemon(input: {
       ],
       { detached: true, stdio: "ignore" },
     );
+    let childFailure: Error | undefined;
+    child.once("error", (cause) => {
+      childFailure = new Error(`Axl daemon process failed: ${cause.message}`, { cause });
+    });
+    child.once("exit", (code, signal) => {
+      childFailure =
+        signal === null
+          ? new Error(`Axl daemon exited before accepting connections with code ${code}`)
+          : new Error(`Axl daemon exited from signal ${signal}`);
+    });
     child.unref();
+
+    const deadline = Date.now() + 30_000;
+    let lastError: unknown;
+    while (Date.now() < deadline) {
+      if (childFailure !== undefined) throw childFailure;
+      try {
+        return await connectExpectedDaemon(input.socketPath, input.unsafe);
+      } catch (retryError) {
+        if (retryError instanceof SecurityModeMismatchError) throw retryError;
+        lastError = retryError;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+      }
+    }
+    throw new Error("Axl daemon did not start within 30 seconds", { cause: lastError });
+  }
+}
+
+class StartupTimer {
+  private readonly enabled = process.env.AXL_STARTUP_TIMING === "1";
+  private readonly phases: Array<{ name: string; elapsedMs: number }> = [];
+
+  mark(name: string): void {
+    if (this.enabled) this.phases.push({ name, elapsedMs: process.uptime() * 1_000 });
   }
 
-  const deadline = Date.now() + 5_000;
-  let lastError: unknown;
-  while (Date.now() < deadline) {
-    try {
-      return await connectExpectedDaemon(input.socketPath, input.unsafe);
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
-    }
+  summary(): string | undefined {
+    if (!this.enabled || this.phases.length === 0) return undefined;
+    let previous = 0;
+    const phases = this.phases.map((phase) => {
+      const duration = Math.max(0, Math.round(phase.elapsedMs - previous));
+      previous = phase.elapsedMs;
+      return `${phase.name} ${duration}ms`;
+    });
+    return `startup timing · ${phases.join(" · ")} · total ${Math.round(previous)}ms`;
   }
-  throw new Error("Axl daemon did not start", { cause: lastError });
+}
+
+function showStartupIndicator(message: string): boolean {
+  if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) return false;
+  process.stdout.write(`\r\x1b[2K◆ Axl · ${message}`);
+  return true;
 }
 
 async function main(): Promise<void> {
+  const timing = new StartupTimer();
+  timing.mark("module load");
   const cli = parseArguments(process.argv.slice(2));
   if (cli.showHelp) {
     process.stdout.write(HELP);
@@ -187,37 +231,42 @@ async function main(): Promise<void> {
     return;
   }
 
+  const startupIndicator = cli.command === undefined && showStartupIndicator("starting…");
+  const tuiModule = cli.command === undefined ? import("@axl/tui") : undefined;
   const axlHome = join(homedir(), ".axl");
   const stateDirectory = cli.unsafe ? join(axlHome, "unsafe") : axlHome;
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
   const socketPath = cli.socket ?? join(stateDirectory, "axl.sock");
-  const store = new FileCredentialStore(join(axlHome, "credentials.json"));
+  const settingsPath = join(axlHome, "settings.json");
+  let settings = await loadTuiSettings(settingsPath);
+  timing.mark("settings");
+
+  let credentialsPromise: Promise<{ store: CredentialStore; context: AuthContext }> | undefined;
+  const credentials = () => {
+    credentialsPromise ??= import("@axl/ai").then(({ FileCredentialStore, nodeAuthContext }) => ({
+      store: new FileCredentialStore(join(axlHome, "credentials.json")),
+      context: nodeAuthContext,
+    }));
+    return credentialsPromise;
+  };
 
   if (cli.command === "login") {
-    await runAzureSetup(process.stdin, process.stdout, store, nodeAuthContext);
+    const [{ store, context }, { assertInteractiveTerminal, runAzureSetup }] = await Promise.all([
+      credentials(),
+      import("@axl/tui"),
+    ]);
+    assertInteractiveTerminal(process.stdin, process.stdout);
+    await runAzureSetup(process.stdin, process.stdout, store, context);
     process.exit(0);
   }
 
-  const settingsPath = join(axlHome, "settings.json");
-  let settings = await readSettings(settingsPath);
   const active: ActiveConfig = {
-    modelId: cli.model ?? settings.model ?? "gpt-5",
-    thinkingLevel: cli.thinking ?? settings.thinking ?? "medium",
-  };
-  const selectedTheme = cli.theme ?? settings.theme;
-  if (selectedTheme !== undefined && !themeNames().includes(selectedTheme)) {
-    throw new Error(`Unknown theme ${selectedTheme} in ${settingsPath}`);
-  }
-  let settingsWrite = Promise.resolve();
-  const saveSettings = (update: AxlSettings): Promise<void> => {
-    settings = { ...settings, ...update };
-    const snapshot = settings;
-    const write = settingsWrite.then(() => writeSettings(settingsPath, snapshot));
-    settingsWrite = write.catch(() => undefined);
-    return write;
+    modelId: cli.model ?? settings.modelId ?? "gpt-5",
+    thinkingLevel: cli.thinking ?? settings.thinkingLevel ?? "medium",
   };
 
   if (cli.command === "daemon") {
+    const { store } = await credentials();
     await ensureCredentials(store);
     if (cli.unsafe) {
       process.stderr.write(
@@ -244,8 +293,11 @@ async function main(): Promise<void> {
   let client: DaemonClient;
   try {
     client = await connectExpectedDaemon(socketPath, cli.unsafe);
+    timing.mark("daemon connect");
   } catch (error) {
     if (error instanceof SecurityModeMismatchError) throw error;
+    const { store } = await credentials();
+    timing.mark("credential load");
     await ensureCredentials(store);
     client = await connectOrStartDaemon({
       socketPath,
@@ -253,28 +305,76 @@ async function main(): Promise<void> {
       thinking: active.thinkingLevel,
       unsafe: cli.unsafe,
     });
+    timing.mark("daemon start");
   }
 
-  await AxlApp.start({
+  let settingsWrite: Promise<void> = Promise.resolve();
+  const persistSettings = (update: Partial<Omit<TuiSettings, "version">>): Promise<void> => {
+    settings = { ...settings, ...update, version: 1 };
+    const snapshot = settings;
+    settingsWrite = settingsWrite
+      .catch(() => undefined)
+      .then(() => saveTuiSettings(settingsPath, snapshot));
+    return settingsWrite;
+  };
+
+  const [{ AxlApp }, { mcpTerminalExtension }, { skillTerminalExtension }] = await Promise.all([
+    tuiModule ?? import("@axl/tui"),
+    import("@axl/extension-mcp"),
+    import("@axl/extension-skills"),
+  ]);
+  timing.mark("TUI modules");
+  const app = await AxlApp.start({
     client,
     input: process.stdin,
     output: process.stdout,
     cwd: cli.cwd,
-    ...(selectedTheme === undefined ? {} : { theme: selectedTheme }),
+    ...((cli.theme ?? settings.theme) === undefined ? {} : { theme: cli.theme ?? settings.theme }),
+    ...(settings.toolOutputDisplay === undefined
+      ? {}
+      : { toolOutputDisplay: settings.toolOutputDisplay }),
+    ...(settings.thinkingDisplay === undefined
+      ? {}
+      : { thinkingDisplay: settings.thinkingDisplay }),
+    tuiMode: cli.tuiMode ?? settings.tuiMode ?? "regular",
+    fullscreenExitOutput: settings.fullscreenExitOutput ?? "transcript",
+    fullscreenScrollbar: settings.fullscreenScrollbar ?? "auto",
+    fullscreenMouse: settings.fullscreenMouse ?? "capture",
+    attention: settings.attention ?? "off",
+    editorMode: settings.editorMode ?? "standard",
+    modelFavorites: settings.modelFavorites ?? [],
+    refocusRecap: settings.refocusRecap ?? false,
+    developerPanel: settings.developerPanel ?? false,
+    diffLayout: settings.diffLayout ?? "unified",
+    workspaceReview: settings.workspaceReview ?? false,
+    imageDisplay: settings.imageDisplay ?? "auto",
+    extensions: [mcpTerminalExtension, skillTerminalExtension],
+    clearStartupLine: startupIndicator,
+    reconnectClient: () =>
+      connectOrStartDaemon({
+        socketPath,
+        model: active.modelId,
+        thinking: active.thinkingLevel,
+        unsafe: cli.unsafe,
+      }),
+    onPreferenceChange: persistSettings,
     models: AZURE_OPENAI_MODELS.map((model) => model.modelId),
     modelCatalog: AZURE_OPENAI_MODELS,
     currentModel: active.modelId,
     currentThinking: active.thinkingLevel,
-    credentials: { store, context: nodeAuthContext },
-    onModelChange: (model) => saveSettings({ model }),
-    onThinkingChange: (thinking) => saveSettings({ thinking }),
-    onThemeChange: (theme) => saveSettings({ theme }),
+    loadCredentials: credentials,
     ...(cli.sessionId === undefined ? {} : { sessionId: cli.sessionId }),
-    onExit: () => process.exit(0),
+    onExit: () => {
+      void settingsWrite.finally(() => process.exit(0));
+    },
   });
+  timing.mark("first paint");
+  const timingSummary = timing.summary();
+  if (timingSummary !== undefined) app.showLocalNotice(timingSummary);
 }
 
 main().catch((error: unknown) => {
+  if (process.stdout.isTTY) process.stdout.write("\r\x1b[2K");
   process.stderr.write(`axl: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(1);
 });

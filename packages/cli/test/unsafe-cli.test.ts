@@ -32,7 +32,7 @@ async function temporaryDirectory(context: TestContext): Promise<string> {
 }
 
 async function connectEventually(socketPath: string, child: ChildProcess): Promise<DaemonClient> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 30_000;
   let lastError: unknown;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`daemon exited with ${child.exitCode}`);

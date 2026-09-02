@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test, { type TestContext } from "node:test";
 
-import { type AuthContext, FileCredentialStore } from "@axl/ai";
+import { FileCredentialStore, type AuthContext } from "@axl/ai";
 
 import { promptLine, runAzureSetup, SetupAbortedError } from "../src/index.ts";
 

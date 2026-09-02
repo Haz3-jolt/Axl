@@ -34,7 +34,12 @@ test("enforces protocol, kernel, runtime, TUI, and extension dependency boundari
   });
   writePackage(root, "tui", {
     name: "@axl/tui",
-    dependencies: { "@axl/runtime": "workspace:*" },
+    dependencies: {
+      "@axl/extension-api": "workspace:*",
+      "@axl/runtime": "workspace:*",
+      "grok-mermaid": "0.2.2",
+      marked: "18.0.11",
+    },
   });
   writePackage(
     root,

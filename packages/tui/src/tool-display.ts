@@ -3,15 +3,25 @@
 
 import { homedir } from "node:os";
 
+import type {
+  OwnedTerminalToolRenderer,
+  TerminalLine,
+  TerminalTone,
+  TerminalToolRenderResult,
+} from "@axl/extension-api";
+
 import { highlightLine } from "./highlight.ts";
 import { sanitizeTerminalText, truncateToWidth, visibleWidth, wrapLine } from "./render.ts";
 import type { Palette, ToolOutputDisplay } from "./transcript.ts";
 
-const HIDDEN_RESULT_TOOLS = new Set(["read", "grep", "find", "ls", "edit", "write"]);
-const COMPACT_PREVIEW_LINES = 8;
-const BASH_PREVIEW_LINES = 10;
-const DIFF_PREVIEW_LINES = 24;
+const HIDDEN_RESULT_TOOLS = new Set(["read", "grep", "find", "ls", "edit", "write", "skill"]);
+const COMPACT_PREVIEW_LINES = 6;
+const BASH_PREVIEW_LINES = 6;
+const DIFF_PREVIEW_LINES = 16;
 const SPLIT_DIFF_MIN_WIDTH = 120;
+const COMPACT_EXTENSION_LINES = 12;
+const FULL_EXTENSION_LINES = 200;
+const MAX_EXTENSION_LINE_CHARS = 16_384;
 
 function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
@@ -31,13 +41,18 @@ function pathLabel(input: Record<string, unknown>): string {
       : path;
 }
 
-function clipRows(lines: readonly string[], limit: number, palette: Palette): string[] {
+function clipRows(
+  lines: readonly string[],
+  limit: number,
+  palette: Palette,
+  hint = "lines hidden · Ctrl+O to expand",
+): string[] {
   if (lines.length <= limit) return [...lines];
   const head = Math.ceil((limit - 1) / 2);
   const tail = Math.floor((limit - 1) / 2);
   return [
     ...lines.slice(0, head),
-    palette.dim(`  … ${lines.length - head - tail} lines hidden`),
+    palette.dim(`  … ${lines.length - head - tail} ${hint}`),
     ...lines.slice(-tail),
   ];
 }
@@ -60,8 +75,22 @@ function fit(value: string, width: number): string {
 }
 
 function toolSurface(lines: readonly string[], width: number, palette: Palette): string[] {
-  if (palette.toolBackground === undefined) return [...lines];
-  return lines.map((line) => palette.toolBackground?.(fit(line, width)) ?? line);
+  if (width < 6) return lines.flatMap((line) => wrapLine(line, Math.max(1, width)));
+  const border = palette.border ?? palette.dim;
+  const inner = width - 6;
+  const body = lines
+    .flatMap((line) => wrapLine(line, inner))
+    .map((line) => {
+      const content = ` ${fit(line, inner)} `;
+      const surface = palette.toolBackground?.(content) ?? content;
+      return `  ${border("│")}${surface}${border("│")}`;
+    });
+  return [
+    "",
+    `  ${border(`╭${"─".repeat(width - 4)}╮`)}`,
+    ...body,
+    `  ${border(`╰${"─".repeat(width - 4)}╯`)}`,
+  ];
 }
 
 type DiffKind = "add" | "remove" | "context";
@@ -128,10 +157,6 @@ function changedLines(oldText: string, newText: string): ChangedLines {
     });
   }
   return { rows, removed: oldEnd - prefix, added: newEnd - prefix };
-}
-
-function plural(count: number, singular: string): string {
-  return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
 function diffSummary(
@@ -287,157 +312,277 @@ function title(palette: Palette, value: string): string {
   return (palette.bold ?? palette.accent)(value);
 }
 
-function changedLineCount(input: Record<string, unknown>): number {
-  const text = field(input, "newText") ?? field(input, "content");
-  return text === undefined || text === "" ? 0 : text.split("\n").length;
+export type ToolTransactionStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "denied"
+  | "aborted";
+
+function transactionColor(
+  status: ToolTransactionStatus,
+  palette: Palette,
+): (text: string) => string {
+  if (status === "pending") return palette.dim;
+  if (status === "running" || status === "denied") return palette.warning ?? palette.accent;
+  if (status === "succeeded") return palette.success ?? palette.accent;
+  return palette.error;
 }
 
-/** Rich tool header plus an adaptive edit or write preview. */
-export function renderToolCall(
-  name: string,
-  value: unknown,
-  width: number,
+function transactionBackground(
+  status: ToolTransactionStatus,
+  palette: Palette,
+): ((text: string) => string) | undefined {
+  if (status === "pending" || status === "running")
+    return palette.toolPendingBackground ?? palette.toolBackground;
+  if (status === "succeeded") return palette.toolSuccessBackground ?? palette.toolBackground;
+  if (status === "denied") return palette.toolDeniedBackground ?? palette.toolBackground;
+  return palette.toolErrorBackground ?? palette.toolBackground;
+}
+
+function transactionStatus(
+  status: ToolTransactionStatus,
+  durationMs: number | undefined,
+  palette: Palette,
+): string {
+  const duration =
+    durationMs === undefined
+      ? ""
+      : ` · ${durationMs < 1_000 ? `${durationMs}ms` : `${(durationMs / 1_000).toFixed(1)}s`}`;
+  const color = transactionColor(status, palette);
+  if (status === "pending") return color(`○ pending${duration}`);
+  if (status === "running") return color(`◌ running${duration}`);
+  if (status === "succeeded") return color(`✓ done${duration}`);
+  if (status === "denied") return color(`! denied${duration}`);
+  if (status === "aborted") return color(`■ aborted${duration}`);
+  return color(`! failed${duration}`);
+}
+
+function transactionTarget(name: string, input: Record<string, unknown>): string {
+  if (name === "shell" || name === "bash") return field(input, "command") ?? "";
+  if (name === "read") {
+    const offset = typeof input.offset === "number" ? input.offset : undefined;
+    const limit = typeof input.limit === "number" ? input.limit : undefined;
+    const range =
+      offset === undefined
+        ? ""
+        : `:${offset}${limit === undefined ? "" : `-${offset + limit - 1}`}`;
+    return `${pathLabel(input)}${range}`;
+  }
+  if (name === "grep") return `/${field(input, "pattern") ?? ""}/ · ${pathLabel(input)}`;
+  if (name === "find") return `${field(input, "pattern") ?? ""} · ${pathLabel(input)}`;
+  if (name === "mcp") {
+    return [field(input, "server"), field(input, "name") ?? field(input, "action")]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (name === "skill") {
+    const action = field(input, "action") ?? "load";
+    const target = field(input, "name") ?? field(input, "path") ?? "";
+    return `${action}${target ? ` · ${target}` : ""}`;
+  }
+  if (["edit", "write", "ls"].includes(name)) return pathLabel(input);
+  return "";
+}
+
+function toneColor(palette: Palette, tone: TerminalTone | undefined): (text: string) => string {
+  if (tone === "accent") return palette.accent;
+  if (tone === "success") return palette.success ?? palette.accent;
+  if (tone === "warning") return palette.warning ?? palette.accent;
+  if (tone === "error") return palette.error;
+  if (tone === "text") return palette.text ?? ((text) => text);
+  return palette.dim;
+}
+
+function customBody(
+  lines: readonly TerminalLine[],
+  mode: ToolOutputDisplay,
   palette: Palette,
 ): string[] {
-  const input = record(value);
-  const displayName = sanitizeTerminalText(name);
-  switch (name) {
-    case "shell":
-    case "bash": {
-      const command = field(input, "command") ?? "…";
-      const cwd = field(input, "cwd");
-      return toolSurface(
-        wrapLine(
-          `${title(palette, "$")} ${palette.accent(command)}${cwd ? palette.dim(`  in ${cwd}`) : ""}`,
-          width,
-        ),
-        width,
-        palette,
-      );
-    }
-    case "read": {
-      const offset = typeof input.offset === "number" ? input.offset : undefined;
-      const limit = typeof input.limit === "number" ? input.limit : undefined;
-      const range =
-        offset === undefined
-          ? ""
-          : `:${offset}${limit === undefined ? "" : `-${offset + limit - 1}`}`;
-      return toolSurface(
-        wrapLine(
-          `${title(palette, "read")} ${palette.accent(pathLabel(input))}${palette.warning?.(range) ?? range}`,
-          width,
-        ),
-        width,
-        palette,
-      );
-    }
-    case "grep":
-      return toolSurface(
-        wrapLine(
-          `${title(palette, "grep")} ${palette.accent(`/${field(input, "pattern") ?? ""}/`)} ${palette.dim(`in ${pathLabel(input)}`)}`,
-          width,
-        ),
-        width,
-        palette,
-      );
-    case "find":
-      return toolSurface(
-        wrapLine(
-          `${title(palette, "find")} ${palette.accent(field(input, "pattern") ?? "")} ${palette.dim(`in ${pathLabel(input)}`)}`,
-          width,
-        ),
-        width,
-        palette,
-      );
-    case "ls":
-      return toolSurface(
-        wrapLine(`${title(palette, "ls")} ${palette.accent(pathLabel(input))}`, width),
-        width,
-        palette,
-      );
-    case "mcp": {
-      const server = field(input, "server");
-      const action = field(input, "action") ?? "request";
-      const target = field(input, "name") ?? field(input, "uri");
-      return toolSurface(
-        wrapLine(
-          `${title(palette, "mcp")} ${palette.accent(
-            [server, action, target].filter(Boolean).join(" · "),
-          )}`,
-          width,
-        ),
-        width,
-        palette,
-      );
-    }
-    case "skill": {
-      const action = field(input, "action") ?? "list";
-      const target = field(input, "name") ?? field(input, "path");
-      return toolSurface(
-        wrapLine(
-          `${title(palette, "skill")} ${palette.accent(`${action}${target ? ` · ${target}` : ""}`)}`,
-          width,
-        ),
-        width,
-        palette,
-      );
-    }
-    case "edit":
-    case "write": {
-      const count = changedLineCount(input);
-      const suffix = count > 0 ? palette.dim(` (${plural(count, "line")})`) : "";
-      return toolSurface(
-        [
-          ...wrapLine(
-            `${title(palette, name)} ${palette.accent(pathLabel(input))}${suffix}`,
-            width,
-          ),
-          ...editPreview(input, width, palette),
-        ],
-        width,
-        palette,
-      );
-    }
-    default:
-      return toolSurface(
-        wrapLine(
-          `${title(palette, displayName)} ${palette.dim(sanitizeTerminalText(JSON.stringify(input)))}`,
-          width,
-        ),
-        width,
-        palette,
-      );
-  }
+  const limit = mode === "full" ? FULL_EXTENSION_LINES : COMPACT_EXTENSION_LINES;
+  const render = (line: TerminalLine): string =>
+    toneColor(
+      palette,
+      line.tone,
+    )(
+      sanitizeTerminalText(line.text.slice(0, MAX_EXTENSION_LINE_CHARS))
+        .replace(/\s+/gu, " ")
+        .trim(),
+    );
+  if (lines.length <= limit) return lines.map(render);
+  const head = Math.ceil((limit - 1) / 2);
+  const tail = Math.floor((limit - 1) / 2);
+  return [
+    ...lines.slice(0, head).map(render),
+    palette.dim(`  … ${lines.length - head - tail} extension rows hidden · Ctrl+O to expand`),
+    ...lines.slice(-tail).map(render),
+  ];
 }
 
-function isMcpTool(name: string): boolean {
-  return name === "mcp" || name.startsWith("mcp_") || name.includes("__mcp__");
-}
-
-/** Result rendering with reads and searches hidden and shell output previewed. */
-export function renderToolResult(input: {
+function transactionBody(input: {
   readonly name: string;
-  readonly text: string;
-  readonly isError: boolean;
+  readonly args: Record<string, unknown>;
+  readonly result?: string;
+  readonly isError?: boolean;
+  readonly status: ToolTransactionStatus;
   readonly width: number;
   readonly mode: ToolOutputDisplay;
   readonly palette: Palette;
 }): string[] {
-  const { name, isError, width, mode, palette } = input;
-  const text = sanitizeTerminalText(input.text);
-  if (!isError && mode === "compact" && (HIDDEN_RESULT_TOOLS.has(name) || isMcpTool(name))) {
-    return [];
+  const { name, args, result, isError, status, width, mode, palette } = input;
+  const bodyWidth = Math.max(1, width - 6);
+  const lines: string[] = [];
+  if (name === "edit" || name === "write") lines.push(...editPreview(args, bodyWidth, palette));
+  if (mode === "full" && (name === "shell" || name === "bash")) {
+    const command = field(args, "command");
+    if (command !== undefined) {
+      lines.push(
+        ...command
+          .split("\n")
+          .map((line, index) =>
+            index === 0
+              ? `${title(palette, "$")} ${palette.accent(line)}`
+              : `  ${palette.accent(line)}`,
+          ),
+      );
+    }
+  } else if (mode === "full" && !["read", "grep", "find", "ls", "edit", "write"].includes(name)) {
+    lines.push(...JSON.stringify(args, null, 2).split("\n").map(palette.dim));
   }
+  if (status === "denied" && result === undefined)
+    lines.push(palette.error("policy denied this operation"));
+  if (result === undefined) return lines;
+  if (mode === "focus" && status === "succeeded") return lines;
 
-  const rawLines = text.split("\n");
+  const resultLines = sanitizeTerminalText(result).split("\n");
+  const hidesSuccessfulBody =
+    status === "succeeded" &&
+    mode === "compact" &&
+    (HIDDEN_RESULT_TOOLS.has(name) || isMcpTool(name));
+  if (hidesSuccessfulBody && lines.length > 0) return lines;
+  if (hidesSuccessfulBody) return [];
   const limit =
     mode === "full"
-      ? rawLines.length
+      ? resultLines.length
       : name === "shell" || name === "bash"
         ? BASH_PREVIEW_LINES
         : COMPACT_PREVIEW_LINES;
-  const lines = clipRows(rawLines, limit, palette);
   const color = isError ? palette.error : (palette.text ?? palette.dim);
-  const rendered = lines.flatMap((line) => wrapLine(line || " ", width).map((part) => color(part)));
-  return toolSurface(rendered, width, palette);
+  lines.push(...clipRows(resultLines, limit, palette).map((line) => color(line || " ")));
+  return lines;
+}
+
+/** Renders one complete call/result transaction with a stable status header. */
+export function renderToolTransaction(input: {
+  readonly callId?: string;
+  readonly name: string;
+  readonly args: unknown;
+  readonly result?: string;
+  readonly isError?: boolean;
+  readonly status: ToolTransactionStatus;
+  readonly durationMs?: number;
+  readonly width: number;
+  readonly mode: ToolOutputDisplay;
+  readonly palette: Palette;
+  readonly renderer?: OwnedTerminalToolRenderer;
+}): string[] {
+  const args = record(input.args);
+  let custom: TerminalToolRenderResult | undefined;
+  let rendererError: string | undefined;
+  if (input.renderer !== undefined) {
+    try {
+      custom = input.renderer.renderer({
+        callId: input.callId ?? "unknown",
+        name: input.name,
+        arguments: args,
+        ...(input.result === undefined ? {} : { result: input.result }),
+        isError: input.isError ?? false,
+        status: input.status,
+        ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs }),
+        detail: input.mode,
+      });
+    } catch (error) {
+      rendererError = sanitizeTerminalText(
+        error instanceof Error ? error.message : "unknown renderer failure",
+      );
+    }
+  }
+  if (
+    input.mode === "focus" &&
+    input.status === "succeeded" &&
+    (custom?.hideWhenSuccessfulInFocus ??
+      ["read", "grep", "find", "ls", "mcp", "skill"].includes(input.name))
+  )
+    return [];
+  const target = sanitizeTerminalText(custom?.target ?? transactionTarget(input.name, args));
+  const status = transactionStatus(input.status, input.durationMs, input.palette);
+  const compactTarget = target.replace(/\s+/gu, " ").trim();
+  const label = sanitizeTerminalText(custom?.label ?? input.name)
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toUpperCase();
+  const heading = `${status}  ${title(input.palette, label)}${
+    compactTarget ? `  ${input.palette.accent(compactTarget)}` : ""
+  }`;
+  const rail = transactionColor(input.status, input.palette);
+  const surface = transactionBackground(input.status, input.palette);
+  const indent = input.width >= 3 ? "  " : "";
+  const bodyPrefix = input.width >= 4 ? `${indent}${rail("│")} ` : "";
+  const bodyWidth = Math.max(1, input.width - visibleWidth(bodyPrefix));
+  const renderedBody =
+    custom?.lines === undefined
+      ? transactionBody({ ...input, args })
+      : customBody(custom.lines, input.mode, input.palette);
+  if (rendererError !== undefined) {
+    renderedBody.push(
+      input.palette.error(
+        `renderer ${input.renderer?.extensionId ?? "unknown"} failed · ${truncateToWidth(rendererError, 120, "…")}`,
+      ),
+    );
+  }
+  const body = renderedBody.flatMap((line) =>
+    wrapLine(line, bodyWidth).map((part) =>
+      truncateToWidth(`${bodyPrefix}${truncateToWidth(part, bodyWidth, "")}`, input.width, ""),
+    ),
+  );
+  const surfaceWidth = Math.max(1, input.width - visibleWidth(indent));
+  const header = truncateToWidth(heading, surfaceWidth, "");
+  const headerRows =
+    surface === undefined
+      ? ["", `${indent}${header}`]
+      : [
+          "",
+          `${indent}${surface(" ".repeat(surfaceWidth))}`,
+          `${indent}${surface(fit(header, surfaceWidth))}`,
+          `${indent}${surface(" ".repeat(surfaceWidth))}`,
+        ];
+  return body.length === 0 ? headerRows : [...headerRows, "", ...body];
+}
+
+export function renderShellPassthrough(input: {
+  readonly command: string;
+  readonly text: string;
+  readonly isError: boolean;
+  readonly excluded: boolean;
+  readonly width: number;
+  readonly mode: ToolOutputDisplay;
+  readonly palette: Palette;
+}): string[] {
+  const { command, isError, excluded, width, mode, palette } = input;
+  const output = sanitizeTerminalText(input.text).split("\n");
+  const visible = mode === "full" ? output : clipRows(output, BASH_PREVIEW_LINES, palette);
+  const color = isError ? palette.error : (palette.text ?? ((value: string) => value));
+  return toolSurface(
+    [
+      `${title(palette, "$")} ${palette.accent(sanitizeTerminalText(command).replace(/\s+/gu, " ").trim())}${excluded ? palette.dim("  local only") : ""}`,
+      ...visible.map((line) => color(line || " ")),
+    ],
+    width,
+    palette,
+  );
+}
+
+function isMcpTool(name: string): boolean {
+  return name === "mcp" || name.startsWith("mcp_") || name.includes("__mcp__");
 }

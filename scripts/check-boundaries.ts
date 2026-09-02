@@ -108,7 +108,14 @@ export function checkWorkspace(root: string): string[] {
   }
 
   if (tui) {
-    const allowed = new Set(["@axl/ai", "@axl/daemon", protocolName]);
+    const allowed = new Set([
+      "@axl/ai",
+      "@axl/daemon",
+      "@axl/extension-api",
+      "grok-mermaid",
+      "marked",
+      protocolName,
+    ]);
     for (const dependency of runtimeDependencies(tui.manifest)) {
       if (!allowed.has(dependency)) {
         errors.push(

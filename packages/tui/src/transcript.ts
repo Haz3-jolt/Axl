@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelInfo } from "@axl/ai";
-import type { CanonicalEvent } from "@axl/protocol";
+import type { BlobReference, CanonicalEvent } from "@axl/protocol";
 
 import { renderMarkdown } from "./markdown.ts";
 import { sanitizeTerminalText, truncateToWidth, visibleWidth, wrapLine } from "./render.ts";
-import { renderToolCall, renderToolResult } from "./tool-display.ts";
+import { renderShellPassthrough } from "./tool-display.ts";
 
 export interface Palette {
   dim(text: string): string;
@@ -18,7 +18,14 @@ export interface Palette {
   warning?(text: string): string;
   text?(text: string): string;
   userMessage?(text: string): string;
+  selection?(text: string): string;
+  searchMatch?(text: string): string;
+  searchCurrent?(text: string): string;
   toolBackground?(text: string): string;
+  toolPendingBackground?(text: string): string;
+  toolSuccessBackground?(text: string): string;
+  toolErrorBackground?(text: string): string;
+  toolDeniedBackground?(text: string): string;
   diffAdded?(text: string): string;
   diffRemoved?(text: string): string;
   diffContext?(text: string): string;
@@ -41,6 +48,8 @@ export const PLAIN_PALETTE: Palette = {
   error: (text) => text,
   bold: (text) => text,
 };
+
+const EMPTY_ROWS: readonly string[] = Object.freeze([]);
 
 export const ANSI_PALETTE: Palette = {
   dim: (text) => `\x1b[2m${text}\x1b[22m`,
@@ -73,13 +82,20 @@ function compactNumber(value: number): string {
 }
 
 export type ThinkingDisplay = "show" | "compact" | "hide";
-export type ToolOutputDisplay = "compact" | "full";
+export type ToolOutputDisplay = "compact" | "full" | "focus";
+
+export type BlobRenderer = (
+  reference: BlobReference,
+  width: number,
+  palette: Palette,
+) => readonly string[];
 
 /** Pure event-to-terminal projection. The daemon remains the source of truth. */
 export class SessionView {
   palette: Palette;
   private width: number;
   private readonly models: readonly ModelInfo[];
+  private readonly renderBlob: BlobRenderer | undefined;
   model: string | undefined;
   thinking: string | undefined;
   sandbox: string | undefined;
@@ -98,10 +114,16 @@ export class SessionView {
   elapsedSeconds = 0;
   private responseStartedAt: number | undefined;
 
-  constructor(width: number, palette: Palette = PLAIN_PALETTE, models: readonly ModelInfo[] = []) {
+  constructor(
+    width: number,
+    palette: Palette = PLAIN_PALETTE,
+    models: readonly ModelInfo[] = [],
+    renderBlob?: BlobRenderer,
+  ) {
     this.width = width;
     this.palette = palette;
     this.models = models;
+    this.renderBlob = renderBlob;
   }
 
   setWidth(width: number): void {
@@ -119,7 +141,12 @@ export class SessionView {
   }
 
   toggleToolOutput(): ToolOutputDisplay {
-    this.toolOutputDisplay = this.toolOutputDisplay === "compact" ? "full" : "compact";
+    this.toolOutputDisplay =
+      this.toolOutputDisplay === "compact"
+        ? "full"
+        : this.toolOutputDisplay === "full"
+          ? "focus"
+          : "compact";
     return this.toolOutputDisplay;
   }
 
@@ -148,19 +175,23 @@ export class SessionView {
     if (this.totalCostUsd) parts.push(`$${this.totalCostUsd.toFixed(3)}`);
 
     const model = this.models.find((candidate) => candidate.modelId === this.model);
-    const percent =
-      model === undefined || this.contextTokens === 0
-        ? "?"
-        : `${((this.contextTokens / model.contextWindow) * 100).toFixed(1)}%`;
-    parts.push(`${percent}/${model ? compactNumber(model.contextWindow) : "?"} (auto)`);
+    if (model === undefined) {
+      if (parts.length === 0) parts.push("ready");
+    } else {
+      const percent =
+        this.contextTokens === 0
+          ? "0.0%"
+          : `${((this.contextTokens / model.contextWindow) * 100).toFixed(1)}%`;
+      parts.push(`${percent}/${compactNumber(model.contextWindow)} context`);
+    }
     return parts.join(" ");
   }
 
   modelLabel(): string {
-    const model = this.model ?? "no-model";
+    const model = this.model ?? "no model selected";
     const info = this.models.find((candidate) => candidate.modelId === model);
-    if (info && !info.reasoning) return model;
-    return `${model} • ${this.thinking === "off" ? "thinking off" : (this.thinking ?? "?")}`;
+    if (this.thinking === undefined || (info && !info.reasoning)) return model;
+    return `${model} • ${this.thinking === "off" ? "thinking off" : this.thinking}`;
   }
 
   tpsLabel(): string {
@@ -171,15 +202,29 @@ export class SessionView {
     return this.sandbox === "unenforced";
   }
 
-  apply(event: CanonicalEvent): string[] {
-    const { dim } = this.palette;
+  apply(event: CanonicalEvent): readonly string[] {
+    const { dim, error } = this.palette;
     switch (event.type) {
       case "session.created":
-        return this.wrap(dim(`· session started in ${sanitizeTerminalText(event.payload.cwd)}`));
       case "session.resumed":
-        return this.wrap(dim("· session resumed"));
+        return EMPTY_ROWS;
       case "user.message":
-        return this.userMessage(textOf(event.payload.content));
+        return [
+          ...this.userMessage(textOf(event.payload.content)),
+          ...event.payload.content.flatMap((item) =>
+            item.type === "blob" ? this.blobRows(item.blob) : [],
+          ),
+        ];
+      case "user.shell":
+        return renderShellPassthrough({
+          command: event.payload.command,
+          text: textOf(event.payload.content),
+          isError: event.payload.isError,
+          excluded: event.payload.excluded,
+          width: this.width,
+          mode: this.toolOutputDisplay,
+          palette: this.palette,
+        });
       case "assistant.message": {
         const usage = event.payload.usage;
         if (usage !== undefined) {
@@ -221,8 +266,14 @@ export class SessionView {
             }
           } else if (item.type === "text") {
             lines.push(
-              ...renderMarkdown(sanitizeTerminalText(item.text), this.width, this.palette),
+              ...renderMarkdown(
+                sanitizeTerminalText(item.text),
+                Math.max(1, this.width - 2),
+                this.palette,
+              ),
             );
+          } else {
+            lines.push(...this.blobRows(item.blob));
           }
         }
         if (event.payload.stopReason === "error") {
@@ -232,52 +283,88 @@ export class SessionView {
         } else if (event.payload.stopReason === "aborted") {
           lines.push(...this.wrap(dim("■ interrupted")));
         }
-        return lines;
+        if (lines.length === 0) return EMPTY_ROWS;
+        return [
+          "",
+          ...lines.map((line) => `  ${truncateToWidth(line, Math.max(1, this.width - 2), "")}`),
+        ];
       }
       case "tool.call":
-        return renderToolCall(event.payload.name, event.payload.input, this.width, this.palette);
-      case "tool.result": {
-        const lines = renderToolResult({
-          name: event.payload.name,
-          text: textOf(event.payload.content),
-          isError: event.payload.isError,
-          width: this.width,
-          mode: this.toolOutputDisplay,
-          palette: this.palette,
-        });
+        return EMPTY_ROWS;
+      case "tool.result":
         if (this.working) this.beginResponse();
-        return lines;
-      }
+        return EMPTY_ROWS;
       case "session.error":
         return this.errorLines(
           sanitizeTerminalText(event.payload.message),
           sanitizeTerminalText(event.payload.code),
         );
-      case "config.model":
+      case "config.model": {
+        const previous = this.model;
         this.model = sanitizeTerminalText(event.payload.modelId);
-        return this.wrap(dim(`· model ${event.payload.modelId}`));
+        return previous === undefined || previous === this.model
+          ? []
+          : this.wrap(dim(`· model ${previous} → ${this.model}`));
+      }
       case "config.thinking": {
+        const previous = this.thinking;
         const { requested, effective, clamped } = event.payload;
         this.thinking = effective;
+        if (clamped) {
+          return this.wrap(dim(`· thinking ${effective} (clamped from ${requested})`));
+        }
+        return previous === undefined || previous === effective
+          ? []
+          : this.wrap(dim(`· thinking ${previous} → ${effective}`));
+      }
+      case "config.dialect":
+        return event.payload.reason === "reload"
+          ? this.wrap(dim(`· tools reloaded · ${event.payload.dialectId}`))
+          : [];
+      case "permission.requested":
         return this.wrap(
-          dim(
-            clamped
-              ? `· thinking ${effective} (clamped from ${requested})`
-              : `· thinking ${effective}`,
+          (this.palette.warning ?? this.palette.accent)(
+            `? permission · ${sanitizeTerminalText(event.payload.capability)} · ${sanitizeTerminalText(event.payload.description)}`,
           ),
         );
-      }
-      case "config.dialect": {
-        const { dialectId, rosterFingerprint, reason } = event.payload;
-        return this.wrap(dim(`· tools ${dialectId} @${rosterFingerprint.slice(0, 8)} (${reason})`));
-      }
-      case "sandbox.configured":
+      case "permission.resolved":
+        return this.wrap(
+          dim(
+            `· permission ${event.payload.decision}${event.payload.reason ? ` · ${sanitizeTerminalText(event.payload.reason)}` : ""}`,
+          ),
+        );
+      case "sandbox.configured": {
+        const previous = this.sandbox;
         this.sandbox = event.payload.enforced ? event.payload.provider : "unenforced";
-        return this.wrap(dim(`· sandbox ${this.sandbox}`));
+        if (!event.payload.enforced) {
+          return this.wrap((this.palette.warning ?? error)("! sandbox is not enforced"));
+        }
+        return previous === undefined || previous === this.sandbox
+          ? []
+          : this.wrap(dim(`· sandbox ${previous} → ${this.sandbox}`));
+      }
+      case "sandbox.violation":
+        return this.wrap(
+          (this.palette.warning ?? error)(
+            `⊘ sandbox denied ${sanitizeTerminalText(event.payload.capability)}: ${sanitizeTerminalText(event.payload.reason)}`,
+          ),
+        );
       case "context.injected":
         return this.wrap(dim(`+ context [${sanitizeTerminalText(event.payload.source)}]`));
+      case "context.compacted":
+        return [
+          "",
+          this.palette.accent("◇ Context compacted"),
+          ...renderMarkdown(
+            sanitizeTerminalText(event.payload.summary),
+            Math.max(1, this.width - 2),
+            this.palette,
+          ).map((line) => `  ${line}`),
+        ];
+      case "session.closed":
+        return this.wrap(dim(`· session ${event.payload.reason}`));
       default:
-        return [];
+        return EMPTY_ROWS;
     }
   }
 
@@ -309,12 +396,19 @@ export class SessionView {
     return this.wrap(this.palette.error(`✖ ${code ? `${code}: ` : ""}${message}`));
   }
 
+  private blobRows(reference: BlobReference): string[] {
+    if (this.renderBlob !== undefined) {
+      return [...this.renderBlob(reference, this.width, this.palette)];
+    }
+    const label = sanitizeTerminalText(reference.name ?? reference.mediaType);
+    return [this.palette.dim(`[Attachment · ${label} · ${reference.sizeBytes} bytes]`)];
+  }
+
   private userMessage(text: string): string[] {
     if (this.width < 8) return this.wrap(text);
     const border = this.palette.border ?? this.palette.dim;
     const background = this.palette.userMessage ?? ((value: string) => value);
     const contentWidth = Math.max(1, this.width - 4);
-    const blank = background(`${border("│")} ${" ".repeat(contentWidth)} ${border("│")}`);
     const body = text
       .split("\n")
       .flatMap((line) => wrapLine(line, contentWidth))
@@ -324,18 +418,8 @@ export class SessionView {
           `${border("│")} ${(this.palette.text ?? ((value: string) => value))(line)}${padding} ${border("│")}`,
         );
       });
-    const title = " user ";
-    const top = `${border("╭")}${this.palette.accent(title)}${border(
-      `${"─".repeat(Math.max(0, this.width - 2 - title.length))}╮`,
-    )}`;
-    return [
-      "",
-      background(top),
-      blank,
-      ...body,
-      blank,
-      background(border(`╰${"─".repeat(this.width - 2)}╯`)),
-    ];
+    const top = border(`╭${"─".repeat(this.width - 2)}╮`);
+    return ["", background(top), ...body, background(border(`╰${"─".repeat(this.width - 2)}╯`))];
   }
 
   private wrap(line: string): string[] {

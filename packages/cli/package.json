@@ -25,6 +25,8 @@
   "dependencies": {
     "@axl/ai": "workspace:*",
     "@axl/daemon": "workspace:*",
+    "@axl/extension-mcp": "workspace:*",
+    "@axl/extension-skills": "workspace:*",
     "@axl/protocol": "workspace:*",
     "@axl/runtime": "workspace:*",
     "@axl/tui": "workspace:*"

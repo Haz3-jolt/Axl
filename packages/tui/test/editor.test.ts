@@ -22,11 +22,21 @@ test("decodes characters, controls, and CSI sequences", () => {
   assert.deepEqual(decodeKeys("\x1b[3~"), [{ kind: "delete" }]);
   assert.deepEqual(decodeKeys("\x1b\r"), [{ kind: "newline" }]);
   assert.deepEqual(decodeKeys("\x1b[13;2u"), [{ kind: "newline" }]);
+  assert.deepEqual(decodeKeys("\x1b[27;2;13~"), [{ kind: "newline" }]);
+  assert.deepEqual(decodeKeys("\x1b[13;2~"), [{ kind: "newline" }]);
   assert.deepEqual(decodeKeys("\x1b[13;3u"), [{ kind: "follow-up" }]);
+  assert.deepEqual(decodeKeys("\x01"), [{ kind: "ctrl", char: "a" }]);
+  assert.deepEqual(decodeKeys("\x1b[1;2D"), [{ kind: "select-left" }]);
+  assert.deepEqual(decodeKeys("\x1b[122;6u"), [{ kind: "redo" }]);
+  assert.deepEqual(decodeKeys("\x1b[127;5u"), [{ kind: "ctrl", char: "w" }]);
+  assert.deepEqual(decodeKeys("\x1b[27;5;127~"), [{ kind: "ctrl", char: "w" }]);
+  assert.deepEqual(decodeKeys("\x1b\x7f"), [{ kind: "ctrl", char: "w" }]);
   assert.deepEqual(decodeKeys("\t"), [{ kind: "tab" }]);
   assert.deepEqual(decodeKeys("\x1b[Z"), [{ kind: "shift-tab" }]);
   assert.deepEqual(decodeKeys("\x1b[200~"), [{ kind: "paste-start" }]);
   assert.deepEqual(decodeKeys("\x03"), [{ kind: "ctrl", char: "c" }]);
+  assert.deepEqual(decodeKeys("\x1f"), [{ kind: "ctrl", char: "_" }]);
+  assert.deepEqual(decodeKeys("\x00\u009b"), [{ kind: "unknown" }, { kind: "unknown" }]);
   assert.deepEqual(decodeKeys("\x1b"), [{ kind: "escape" }]);
 });
 
@@ -36,12 +46,37 @@ test("cursor editing: insert mid-line, delete, home and end", () => {
   type(editor, "\x1b[D"); // left, before the o
   type(editor, "l");
   assert.equal(editor.text, "hello");
-  type(editor, "\x01X"); // home + insert
+  type(editor, "\x1b[HX"); // Home + insert
   assert.equal(editor.text, "Xhello");
   type(editor, "\x1b[3~"); // delete at cursor
   assert.equal(editor.text, "Xello");
   type(editor, "\x05!"); // end + insert
   assert.equal(editor.text, "Xello!");
+  type(editor, "\x02?\x06!"); // Ctrl+B, insert, Ctrl+F, insert
+  assert.equal(editor.text, "Xello?!!");
+});
+
+test("Ctrl+A and shifted arrows create replaceable visible selections", () => {
+  const editor = new LineEditor();
+  type(editor, "hello world\x01");
+  assert.equal(editor.selectedText, "hello world");
+  assert.equal(editor.render(40).lines.join("").includes("\x1b[7m"), true);
+  type(editor, "replacement");
+  assert.equal(editor.text, "replacement");
+
+  type(editor, "\x1b[1;2D\x1b[1;2D");
+  assert.equal(editor.selectedText, "nt");
+  editor.apply({ kind: "backspace" });
+  assert.equal(editor.text, "replaceme");
+});
+
+test("Backspace removes one grapheme and Ctrl+Backspace removes one word", () => {
+  const editor = new LineEditor();
+  type(editor, "one two🙂");
+  type(editor, "\x7f");
+  assert.equal(editor.text, "one two");
+  type(editor, "\x1b[127;5u");
+  assert.equal(editor.text, "one ");
 });
 
 test("word operations: word-left/right, Ctrl+W, Ctrl+U, Ctrl+K", () => {
@@ -66,6 +101,8 @@ test("kill-ring yank and undo restore editor content", () => {
   type(editor, "!");
   editor.apply({ kind: "ctrl", char: "-" });
   assert.equal(editor.text, "one two");
+  editor.apply({ kind: "redo" });
+  assert.equal(editor.text, "one two!");
 });
 
 test("Alt+Enter and pasted newlines insert; Enter submits the whole text", () => {
@@ -84,6 +121,13 @@ test("Alt+Enter and pasted newlines insert; Enter submits the whole text", () =>
   type(editor, "\x1b[200~a\rb\x1b[201~"); // bracketed paste with a newline
   assert.equal(editor.text, "a\nb");
   assert.equal(type(editor, "\r"), "a\nb"); // enter after paste submits
+});
+
+test("backslash plus Enter inserts a portable newline", () => {
+  const editor = new LineEditor();
+  type(editor, "first\\\rsecond");
+  assert.equal(editor.text, "first\nsecond");
+  assert.equal(type(editor, "\r"), "first\nsecond");
 });
 
 test("up and down move between lines before touching history", () => {
@@ -107,7 +151,7 @@ test("rendering soft-wraps long lines and keeps the cursor visible", () => {
   assert.deepEqual(view.lines, ["abcde", "fghij", ""]);
   assert.equal(view.cursorRow, 2);
   assert.equal(view.cursorColumn, 0);
-  type(editor, "\x01");
+  type(editor, "\x1b[H");
   const start = editor.render(5);
   assert.deepEqual(start.lines, ["abcde", "fghij"]);
   assert.equal(start.cursorRow, 0);

@@ -10,6 +10,7 @@ import {
   type EventPayloadMap,
   type EventType,
   parseEvent,
+  parseEventId,
 } from "@axl/protocol";
 
 import { PLAIN_PALETTE, SessionView } from "../src/index.ts";
@@ -33,12 +34,10 @@ function makeEvent<Type extends EventType>(
 
 test("projects the conversation into transcript lines", () => {
   const view = new SessionView(80, PLAIN_PALETTE);
-  assert.deepEqual(view.apply(makeEvent("session.created", { cwd: "/repo" })), [
-    "· session started in /repo",
-  ]);
+  assert.deepEqual(view.apply(makeEvent("session.created", { cwd: "/repo" })), []);
   const user = view.apply(makeEvent("user.message", { content: [{ type: "text", text: "hi" }] }));
   assert.equal(user[0], "");
-  assert.match(user[1] ?? "", /╭ user /);
+  assert.match(user[1] ?? "", /╭─+╮/);
   assert.match(user.join("\n"), /│ hi\s+│/);
   assert.match(user.at(-1) ?? "", /╰─+╯/);
   assert.deepEqual(
@@ -51,15 +50,15 @@ test("projects the conversation into transcript lines", () => {
         stopReason: "stop",
       }),
     ),
-    ["∴ Thinking · 1 line", "hello"],
+    ["", "  ∴ Thinking · 1 line", "  hello"],
   );
 });
 
-test("shows tool activity compactly and errors loudly", () => {
+test("leaves tool presentation to retained transactions and renders errors loudly", () => {
   const view = new SessionView(80, PLAIN_PALETTE);
   assert.deepEqual(
     view.apply(makeEvent("tool.call", { callId: "c", name: "shell", input: { command: "ls" } })),
-    ["$ ls"],
+    [],
   );
   assert.deepEqual(
     view.apply(
@@ -67,17 +66,6 @@ test("shows tool activity compactly and errors loudly", () => {
         callId: "c",
         name: "shell",
         content: [{ type: "text", text: "a\nb\nc\nd\ne\nf" }],
-        isError: false,
-      }),
-    ),
-    ["a", "b", "c", "d", "e", "f"],
-  );
-  assert.deepEqual(
-    view.apply(
-      makeEvent("tool.result", {
-        callId: "read-1",
-        name: "read",
-        content: [{ type: "text", text: "hidden file contents" }],
         isError: false,
       }),
     ),
@@ -91,44 +79,65 @@ test("shows tool activity compactly and errors loudly", () => {
         errorMessage: "boom",
       }),
     ),
-    ["✖ boom"],
+    ["", "  ✖ boom"],
   );
   assert.deepEqual(
     view.apply(makeEvent("session.error", { code: "x", message: "y", retryable: false })),
     ["✖ x: y"],
   );
-  view.model = "gpt-5.6-sol";
-  const deploymentError = view.apply(
-    makeEvent("session.error", {
-      code: "http_404",
-      message: '{"error":{"code":"DeploymentNotFound"}}',
-      retryable: false,
-    }),
-  );
-  assert.equal(deploymentError[0], "✖ Azure deployment not found for gpt-5.6-sol");
-  assert.match(deploymentError.join(" "), /Use \/login .* or choose another\s+model with \/model/);
 });
 
-test("tracks model, thinking, and sandbox into the status line", () => {
+test("tracks model, thinking, and sandbox without noisy startup rows", () => {
   const view = new SessionView(200, PLAIN_PALETTE);
-  view.apply(makeEvent("config.model", { modelId: "gpt-5" }));
+  assert.deepEqual(view.apply(makeEvent("config.model", { modelId: "gpt-5" })), []);
   const clamp = view.apply(
     makeEvent("config.thinking", { requested: "max", effective: "high", clamped: true }),
   );
   assert.deepEqual(clamp, ["· thinking high (clamped from max)"]);
-  view.apply(
-    makeEvent("sandbox.configured", { provider: "bubblewrap", enforced: true, controls: [] }),
+  assert.deepEqual(
+    view.apply(
+      makeEvent("sandbox.configured", { provider: "bubblewrap", enforced: true, controls: [] }),
+    ),
+    [],
+  );
+  assert.deepEqual(view.apply(makeEvent("config.model", { modelId: "gpt-5.6" })), [
+    "· model gpt-5 → gpt-5.6",
+  ]);
+  assert.deepEqual(
+    view.apply(
+      makeEvent("config.dialect", {
+        dialectId: "openai-chat",
+        rosterFingerprint: "fingerprint",
+        reason: "reload",
+      }),
+    ),
+    ["· tools reloaded · openai-chat"],
   );
 
   const status = view.statusLine("123e4567-e89b-42d3-a456-426614174000");
   assert.match(status, /idle/);
   assert.match(status, /session 123e4567/);
-  assert.match(status, /model gpt-5/);
+  assert.match(status, /model gpt-5\.6/);
   assert.match(status, /thinking high/);
   assert.match(status, /sandbox bubblewrap/);
 
   view.working = true;
   assert.match(view.statusLine("123e4567-e89b-42d3-a456-426614174000"), /working…/);
+
+  const unsafe = new SessionView(80, PLAIN_PALETTE);
+  assert.deepEqual(
+    unsafe.apply(
+      makeEvent("sandbox.configured", { provider: "none", enforced: false, controls: [] }),
+    ),
+    ["! sandbox is not enforced"],
+  );
+});
+
+test("cycles compact, full, and focus transcript detail modes", () => {
+  const view = new SessionView(80, PLAIN_PALETTE);
+  assert.equal(view.toggleToolOutput(), "full");
+  assert.equal(view.toggleToolOutput(), "focus");
+  assert.equal(view.toggleToolOutput(), "compact");
 });
 
 test("reports cumulative usage, cache hit rate, cost, and local throughput", () => {
@@ -147,8 +156,47 @@ test("reports cumulative usage, cache hit rate, cost, and local throughput", () 
       },
     }),
   );
-  assert.equal(view.usageLabel(), "↑10 ↓5 R20 W2 CH62.5% $0.125 ?/? (auto)");
+  assert.equal(view.usageLabel(), "↑10 ↓5 R20 W2 CH62.5% $0.125");
   assert.match(view.tpsLabel(), /tok\/s$/);
+});
+
+test("renders permission lifecycle without relying on color", () => {
+  const view = new SessionView(80, PLAIN_PALETTE);
+  assert.deepEqual(
+    view.apply(
+      makeEvent("permission.requested", {
+        capability: "filesystem.write",
+        description: "Write outside workspace",
+      }),
+    ),
+    ["? permission · filesystem.write · Write outside workspace"],
+  );
+  assert.deepEqual(
+    view.apply(
+      makeEvent("permission.resolved", {
+        requestId: parseEventId("00000000-0000-4000-8000-000000000001"),
+        decision: "deny",
+        reason: "outside policy",
+      }),
+    ),
+    ["· permission deny · outside policy"],
+  );
+});
+
+test("renders compaction and session lifecycle entries distinctly", () => {
+  const view = new SessionView(80, PLAIN_PALETTE);
+  const compacted = view.apply(
+    makeEvent("context.compacted", {
+      summary: "## Continued work\n\n- keep the sandbox active",
+      replacedEventIds: [parseEventId("00000000-0000-4000-8000-000000000001")],
+    }),
+  );
+  assert.match(compacted.join("\n"), /◇ Context compacted/);
+  assert.match(compacted.join("\n"), /Continued work/);
+  assert.match(compacted.join("\n"), /• keep the sandbox active/);
+  assert.deepEqual(view.apply(makeEvent("session.closed", { reason: "completed" })), [
+    "· session completed",
+  ]);
 });
 
 test("prompt sections contribute nothing and long lines wrap", () => {

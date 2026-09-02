@@ -1,0 +1,457 @@
+// SPDX-FileCopyrightText: 2026 Hari Srinivasan
+// SPDX-License-Identifier: Apache-2.0
+
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import test from "node:test";
+
+import type { DaemonClient, SessionSnapshot } from "@axl/daemon";
+import {
+  type CanonicalEvent,
+  EVENT_FORMAT_VERSION,
+  type EventPayloadMap,
+  type EventType,
+  parseEvent,
+  parseSessionId,
+} from "@axl/protocol";
+
+import { AxlApp } from "../src/index.ts";
+import { VirtualTerminal } from "./virtual-terminal.ts";
+
+const sessionId = parseSessionId("123e4567-e89b-42d3-a456-426614174000");
+let eventCounter = 0;
+
+function event<Type extends EventType>(
+  type: Type,
+  payload: EventPayloadMap[Type],
+  operationId?: string,
+): CanonicalEvent<Type> {
+  eventCounter += 1;
+  return parseEvent({
+    version: EVENT_FORMAT_VERSION,
+    id: `00000000-0000-4000-8000-${eventCounter.toString(16).padStart(12, "0")}`,
+    sessionId,
+    ...(operationId === undefined ? {} : { operationId }),
+    parentId: null,
+    timestamp: eventCounter * 1_000,
+    type,
+    payload,
+  }) as CanonicalEvent<Type>;
+}
+
+class Input extends PassThrough {
+  isTTY = true;
+  isRaw = false;
+
+  setRawMode(mode: boolean): this {
+    this.isRaw = mode;
+    return this;
+  }
+}
+
+class Output extends EventEmitter {
+  isTTY = true;
+  columns = 80;
+  rows = 16;
+  text = "";
+
+  write(value: string): boolean {
+    this.text += value;
+    return true;
+  }
+}
+
+function client(
+  events: readonly CanonicalEvent[],
+  requests: unknown[] = [],
+  sendError?: Error,
+): DaemonClient {
+  return {
+    async request(method: string, params: unknown) {
+      requests.push({ method, params });
+      if (method === "session.create") return { sessionId, events } satisfies SessionSnapshot;
+      if (method === "session.subscribe") return { snapshot: [] };
+      if (method === "session.send") {
+        if (sendError !== undefined) throw sendError;
+        return { stopReason: "stop" };
+      }
+      if (method === "session.interrupt") return { interrupted: false };
+      if (method === "session.workspace.checkpoint") return { enabled: true };
+      if (method === "session.workspace.diff") {
+        const scope = (params as { scope: "working" | "last-turn" }).scope;
+        return {
+          scope,
+          files: [
+            {
+              path: "src/example.ts",
+              status: "modified",
+              additions: 1,
+              deletions: 1,
+              patch: "@@ -1 +1 @@\n-old\n+new",
+              truncated: false,
+            },
+          ],
+        };
+      }
+      if (method === "session.interaction.respond") throw new Error("interaction response failed");
+      throw new Error(`Unexpected request ${method}`);
+    },
+    onEvent() {
+      return () => undefined;
+    },
+    close() {},
+  } as unknown as DaemonClient;
+}
+
+class ReconnectClient {
+  private disconnectListener: ((error: Error) => void) | undefined;
+  private eventListener:
+    | ((message: { sessionId: typeof sessionId; event: CanonicalEvent }) => void)
+    | undefined;
+  readonly requests: string[] = [];
+  private readonly events: readonly CanonicalEvent[];
+
+  constructor(events: readonly CanonicalEvent[]) {
+    this.events = events;
+  }
+
+  async request(method: string): Promise<unknown> {
+    this.requests.push(method);
+    if (method === "session.create" || method === "session.resume") {
+      return { sessionId, events: this.events } satisfies SessionSnapshot;
+    }
+    if (method === "session.subscribe") return { snapshot: [] };
+    if (method === "session.workspace.checkpoint") return { enabled: false };
+    throw new Error(`Unexpected request ${method}`);
+  }
+
+  onEvent(
+    listener: (message: { sessionId: typeof sessionId; event: CanonicalEvent }) => void,
+  ): () => void {
+    this.eventListener = listener;
+    return () => {
+      this.eventListener = undefined;
+    };
+  }
+
+  onDisconnect(listener: (error: Error) => void): () => void {
+    this.disconnectListener = listener;
+    return () => {
+      this.disconnectListener = undefined;
+    };
+  }
+
+  disconnect(): void {
+    this.disconnectListener?.(new Error("fixture disconnected"));
+  }
+
+  emit(value: CanonicalEvent): void {
+    this.eventListener?.({ sessionId, event: value });
+  }
+
+  close(): void {}
+
+  daemonClient(): DaemonClient {
+    return this as unknown as DaemonClient;
+  }
+}
+
+test("projects a call and result as one settled transaction", async () => {
+  const operationId = "00000000-0000-4000-8000-000000000010";
+  const snapshot = [
+    event("session.created", { cwd: process.cwd() }),
+    event(
+      "tool.call",
+      { callId: "call-1", name: "shell", input: { command: "pnpm test" } },
+      operationId,
+    ),
+    event(
+      "tool.result",
+      {
+        callId: "call-1",
+        name: "shell",
+        content: [{ type: "text", text: "passed" }],
+        isError: false,
+        details: { durationMs: 250, endedBy: "exit" },
+      },
+      operationId,
+    ),
+  ];
+  const input = new Input();
+  const output = new Output();
+  const app = await AxlApp.start({
+    client: client(snapshot),
+    input,
+    output,
+    cwd: process.cwd(),
+    color: false,
+  });
+
+  assert.equal(output.text.split("pnpm test").length - 1, 1);
+  assert.equal(output.text.split("passed").length - 1, 1);
+  assert.match(output.text, /✓ done · 1\.0s/);
+  app.stop();
+});
+
+test("slash completion arrows select and execute the highlighted command", async () => {
+  const input = new Input();
+  const output = new Output();
+  const app = await AxlApp.start({
+    client: client([event("session.created", { cwd: process.cwd() })]),
+    input,
+    output,
+    cwd: process.cwd(),
+    color: false,
+  });
+
+  input.write("/");
+  input.write("\x1b[B");
+  input.write("\r");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.match(output.text, /Select thinking level/);
+  app.stop();
+});
+
+test("restores prompts instead of retrying uncertain daemon delivery", async () => {
+  const input = new Input();
+  const output = new Output();
+  const disconnect = Object.assign(new Error("connection lost"), { code: "disconnected" });
+  const app = await AxlApp.start({
+    client: client([event("session.created", { cwd: process.cwd() })], [], disconnect),
+    input,
+    output,
+    cwd: process.cwd(),
+    color: false,
+  });
+
+  input.write("preserve me\r");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.match(output.text, /delivery unknown · prompts restored for review/);
+  assert.match(output.text, /preserve me/);
+  app.stop();
+});
+
+test("keeps an interaction recoverable when its daemon response fails", async () => {
+  const requests: unknown[] = [];
+  const input = new Input();
+  const output = new Output();
+  const app = await AxlApp.start({
+    client: client(
+      [
+        event("session.created", { cwd: process.cwd() }),
+        event("interaction.requested", {
+          interactionId: "approval-1",
+          kind: "mcp_tool",
+          source: "fixture",
+          message: "Allow the fixture action?",
+        }),
+      ],
+      requests,
+    ),
+    input,
+    output,
+    cwd: process.cwd(),
+    color: false,
+  });
+
+  input.write("y");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  input.write("x\r");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(
+    requests.some(
+      (request) =>
+        typeof request === "object" &&
+        request !== null &&
+        (request as { method?: string }).method === "session.send",
+    ),
+    false,
+  );
+  assert.match(output.text, /interaction response failed/);
+  app.stop();
+});
+
+test("reconnects, resumes, and resubscribes after daemon loss", async () => {
+  const events = [event("session.created", { cwd: process.cwd() })];
+  const initial = new ReconnectClient(events);
+  const replacement = new ReconnectClient(events);
+  const input = new Input();
+  const output = new Output();
+  const app = await AxlApp.start({
+    client: initial.daemonClient(),
+    reconnectClient: async () => replacement.daemonClient(),
+    input,
+    output,
+    cwd: process.cwd(),
+    color: false,
+    tuiMode: "fullscreen",
+  });
+
+  initial.disconnect();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const reconnectingTerminal = new VirtualTerminal(80, 16);
+  reconnectingTerminal.write(output.text);
+  assert.equal(
+    reconnectingTerminal.cursorRow >= 10,
+    true,
+    `reconnecting cursor row ${reconnectingTerminal.cursorRow}`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.deepEqual(replacement.requests, [
+    "session.resume",
+    "session.workspace.checkpoint",
+    "session.subscribe",
+  ]);
+  assert.match(output.text, /daemon reconnected/);
+  const connectedTerminal = new VirtualTerminal(80, 16);
+  connectedTerminal.write(output.text);
+  assert.equal(
+    connectedTerminal.cursorRow >= 10,
+    true,
+    `connected cursor row ${connectedTerminal.cursorRow}`,
+  );
+  app.stop();
+});
+
+test("rings once for an unfocused error when attention is enabled", async () => {
+  const events = [event("session.created", { cwd: process.cwd() })];
+  const daemon = new ReconnectClient(events);
+  const input = new Input();
+  const output = new Output();
+  const app = await AxlApp.start({
+    client: daemon.daemonClient(),
+    input,
+    output,
+    cwd: process.cwd(),
+    color: false,
+    attention: "bell",
+  });
+
+  input.write("\x1b[O");
+  daemon.emit(event("session.error", { code: "failed", message: "boom", retryable: false }));
+  daemon.emit(event("session.error", { code: "failed", message: "again", retryable: false }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(output.text.split("\x07").length - 1, 1);
+  app.stop();
+});
+
+test("prompt stash, favorites, and refocus recap stay client-local", async () => {
+  const events = [event("session.created", { cwd: process.cwd() })];
+  const daemon = new ReconnectClient(events);
+  const preferences: unknown[] = [];
+  const input = new Input();
+  const output = new Output();
+  const app = await AxlApp.start({
+    client: daemon.daemonClient(),
+    input,
+    output,
+    cwd: process.cwd(),
+    color: false,
+    models: ["gpt-5", "gpt-4.1"],
+    currentModel: "gpt-5",
+    refocusRecap: true,
+    onPreferenceChange: (update) => {
+      preferences.push(update);
+    },
+  });
+
+  input.write("draft\x1bs");
+  assert.match(output.text, /prompt stashed/);
+  input.write("replacement\x1bs");
+  assert.match(output.text, /prompt swapped with stash/);
+  assert.match(output.text, /draft/);
+
+  input.write("\x15/favorite gpt-5\r");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(preferences.at(-1), { modelFavorites: ["gpt-5"] });
+
+  input.write("\x1b[O");
+  daemon.emit(
+    event("assistant.message", { content: [{ type: "text", text: "done" }], stopReason: "stop" }),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  input.write("\x1b[I");
+  assert.match(output.text, /while away: 1 turn completed/);
+  app.stop();
+});
+
+test("workspace review opens from daemon data and the developer panel is opt-in", async () => {
+  const requests: unknown[] = [];
+  const input = new Input();
+  const output = new Output();
+  output.columns = 120;
+  const app = await AxlApp.start({
+    client: client(
+      [
+        event("session.created", { cwd: process.cwd() }),
+        event("tool.call", {
+          callId: "pending-review",
+          name: "read",
+          input: { path: "src/app.ts" },
+        }),
+      ],
+      requests,
+    ),
+    input,
+    output,
+    cwd: process.cwd(),
+    color: false,
+    developerPanel: true,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(output.text, /Workspace/);
+  const terminal = new VirtualTerminal(120, 16);
+  terminal.write(output.text);
+  const rows = terminal.rows();
+  const promptRow = rows.findIndex((row) => row.includes("│ >"));
+  assert.equal(promptRow >= 0, true);
+  assert.equal(terminal.cursorRow, promptRow);
+  const workspaceRow = rows.findIndex((row) => row.includes("Workspace"));
+  assert.equal(workspaceRow > 0 && rows[workspaceRow - 1]?.trim() === "", true);
+  input.write("/review working\r");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(output.text, /Review · working tree/);
+  assert.equal(
+    requests.some(
+      (request) =>
+        typeof request === "object" &&
+        request !== null &&
+        (request as { method?: string }).method === "session.workspace.checkpoint",
+    ),
+    true,
+  );
+  app.stop();
+});
+
+test("fullscreen consumes mouse reports before editor input", async () => {
+  const requests: unknown[] = [];
+  const input = new Input();
+  const output = new Output();
+  const app = await AxlApp.start({
+    client: client([event("session.created", { cwd: process.cwd() })], requests),
+    input,
+    output,
+    cwd: process.cwd(),
+    color: false,
+    tuiMode: "fullscreen",
+  });
+
+  input.write("/settings\r");
+  assert.match(output.text, /Terminal settings/);
+  input.write("\x1b[<0;4;4M");
+  input.write("\x1b[<0;4;4m");
+  assert.match(output.text, /Terminal settings/);
+  input.write("\x1b");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  input.write("ok\r");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const send = requests.find(
+    (request): request is { method: string; params: { content: Array<{ text: string }> } } =>
+      typeof request === "object" &&
+      request !== null &&
+      (request as { method?: string }).method === "session.send",
+  );
+  assert.equal(send?.params.content[0]?.text, "ok");
+  app.stop();
+});
