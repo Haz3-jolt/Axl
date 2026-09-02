@@ -16,6 +16,7 @@ import {
   type OperationId,
   parseEvent,
   parseOperationId,
+  type SessionActivityFrame,
   type TerminalModelStreamEvent,
   type ToolCallRequest,
   type Usage,
@@ -41,6 +42,26 @@ export class OperationConflictError extends Error {
 /** The maximum model calls one turn may make before the kernel stops loudly. */
 const DEFAULT_MAX_MODEL_CALLS_PER_TURN = 50;
 
+function unansweredToolCalls(events: readonly CanonicalEvent[]): CanonicalEvent<"tool.call">[] {
+  const pending = new Map<string, CanonicalEvent<"tool.call">>();
+  for (const event of events) {
+    if (event.type === "tool.call") pending.set(event.payload.callId, event);
+    else if (event.type === "tool.result") pending.delete(event.payload.callId);
+  }
+  return [...pending.values()];
+}
+
+function unansweredInteractions(
+  events: readonly CanonicalEvent[],
+): CanonicalEvent<"interaction.requested">[] {
+  const pending = new Map<string, CanonicalEvent<"interaction.requested">>();
+  for (const event of events) {
+    if (event.type === "interaction.requested") pending.set(event.payload.interactionId, event);
+    else if (event.type === "interaction.resolved") pending.delete(event.payload.interactionId);
+  }
+  return [...pending.values()];
+}
+
 export interface AgentSessionOptions {
   readonly model: ModelPort;
   readonly tools: ToolRegistry;
@@ -64,6 +85,8 @@ export interface AgentSessionOptions {
   readonly configDialect?: EventPayloadMap["config.dialect"];
   /** Live tail: invoked after each event is durably appended, in append order. */
   readonly onEvent?: (event: CanonicalEvent) => void;
+  /** Non-durable model deltas for responsive attached clients. */
+  readonly onActivity?: (frame: SessionActivityFrame) => void;
 }
 
 export interface TurnResult {
@@ -75,17 +98,35 @@ export interface TurnResult {
 /** Projects a branch lineage onto the model-facing message history. */
 export function messagesFromLineage(events: readonly CanonicalEvent[]): readonly ModelMessage[] {
   const messages: ModelMessage[] = [];
+  let toolCallingAssistant: Extract<ModelMessage, { role: "assistant" }> | undefined;
   for (const event of events) {
     if (event.type === "user.message") {
+      toolCallingAssistant = undefined;
       messages.push({ role: "user", content: event.payload.content });
+    } else if (event.type === "user.shell") {
+      toolCallingAssistant = undefined;
+      if (!event.payload.excluded) {
+        messages.push({
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `[shell]\n$ ${event.payload.command}\n${event.payload.content
+                .filter((item) => item.type === "text")
+                .map((item) => item.text)
+                .join("")}`,
+            },
+          ],
+        });
+      }
     } else if (event.type === "assistant.message") {
-      messages.push({ role: "assistant", content: event.payload.content, toolCalls: [] });
+      toolCallingAssistant = { role: "assistant", content: event.payload.content, toolCalls: [] };
+      messages.push(toolCallingAssistant);
     } else if (event.type === "tool.call") {
-      const last = messages[messages.length - 1];
-      if (last?.role !== "assistant") {
+      if (toolCallingAssistant === undefined) {
         throw new ReplayError(`Tool call ${event.id} has no preceding assistant turn`);
       }
-      (last.toolCalls as ToolCallRequest[]).push({
+      (toolCallingAssistant.toolCalls as ToolCallRequest[]).push({
         callId: event.payload.callId,
         name: event.payload.name,
         input: event.payload.input,
@@ -99,6 +140,7 @@ export function messagesFromLineage(events: readonly CanonicalEvent[]): readonly
         isError: event.payload.isError,
       });
     } else if (event.type === "context.injected") {
+      toolCallingAssistant = undefined;
       messages.push({
         role: "user",
         content: [{ type: "text", text: `[${event.payload.source}]\n${event.payload.content}` }],
@@ -128,6 +170,7 @@ export class AgentSession {
   private readonly tools: ToolRegistry;
   private readonly host: ExtensionHost;
   private readonly onEvent: ((event: CanonicalEvent) => void) | undefined;
+  private readonly onActivity: ((frame: SessionActivityFrame) => void) | undefined;
   private readonly system: string | undefined;
   private readonly maxModelCalls: number;
   private tip: EventId | null;
@@ -144,6 +187,7 @@ export class AgentSession {
     this.tools = options.tools;
     this.host = options.extensionHost ?? NOOP_EXTENSION_HOST;
     this.onEvent = options.onEvent;
+    this.onActivity = options.onActivity;
     this.system = options.prompt?.text ?? options.system;
     this.maxModelCalls = options.maxModelCallsPerTurn ?? DEFAULT_MAX_MODEL_CALLS_PER_TURN;
     if (!Number.isSafeInteger(this.maxModelCalls) || this.maxModelCalls < 1) {
@@ -169,6 +213,33 @@ export class AgentSession {
     const tip = opened.events.at(-1)?.id;
     const lineage = tip === undefined ? [] : tree.lineage(tip);
     const session = new AgentSession(opened.log, lineage, options);
+    for (const interaction of unansweredInteractions(lineage)) {
+      await session.append(interaction.operationId, "interaction.resolved", {
+        interactionId: interaction.payload.interactionId,
+        action: "cancel",
+      });
+    }
+    for (const call of unansweredToolCalls(lineage)) {
+      const result = await session.append(call.operationId, "tool.result", {
+        callId: call.payload.callId,
+        name: call.payload.name,
+        content: [
+          {
+            type: "text",
+            text: "Tool execution was aborted because the daemon stopped before recording a result.",
+          },
+        ],
+        isError: true,
+        details: { endedBy: "abort", reason: "daemon_restart" },
+      });
+      session.messages.push({
+        role: "tool",
+        callId: call.payload.callId,
+        name: call.payload.name,
+        content: result.payload.content,
+        isError: true,
+      });
+    }
     if (opened.events.length === 0) {
       await session.append(undefined, "session.created", { cwd: options.cwd });
       // The stable prompt freezes at session start; its sections are logged once.
@@ -241,6 +312,45 @@ export class AgentSession {
     await this.log.drain();
   }
 
+  /** Runs a user-requested shell command through the registered sandboxed shell tool. */
+  async runShell(
+    command: string,
+    excluded: boolean,
+    signal?: AbortSignal,
+  ): Promise<CanonicalEvent<"user.shell">> {
+    if (this.activeOperation !== null) {
+      throw new OperationConflictError(
+        `Operation ${this.activeOperation} already owns this branch`,
+      );
+    }
+    const shell = this.tools.get("shell");
+    if (!shell) throw new Error("The shell tool is unavailable in this session");
+    const operationId = parseOperationId(randomUUID(), "operationId");
+    this.activeOperation = operationId;
+    try {
+      const result = await shell.execute({ command }, signal ?? new AbortController().signal);
+      const event = await this.append(operationId, "user.shell", {
+        command,
+        content: result.content,
+        isError: result.isError,
+        excluded,
+      });
+      if (!excluded) {
+        const output = result.content
+          .filter((item) => item.type === "text")
+          .map((item) => item.text)
+          .join("");
+        this.messages.push({
+          role: "user",
+          content: [{ type: "text", text: `[shell]\n$ ${command}\n${output}` }],
+        });
+      }
+      return event;
+    } finally {
+      this.activeOperation = null;
+    }
+  }
+
   /** Runs one user turn: model calls and tool executions until a final stop. */
   async runTurn(content: readonly UserContent[], signal?: AbortSignal): Promise<TurnResult> {
     if (this.activeOperation !== null) {
@@ -255,6 +365,7 @@ export class AgentSession {
       appended.push(await this.append(operationId, "user.message", { content }));
       this.messages.push({ role: "user", content });
 
+      const activity = { sequence: 0 };
       for (let call = 0; ; call += 1) {
         if (call >= this.maxModelCalls) {
           appended.push(
@@ -267,7 +378,7 @@ export class AgentSession {
           return { events: appended, stopReason: "error" };
         }
 
-        const outcome = await this.modelTurn(signal);
+        const outcome = await this.modelTurn(operationId, activity, signal);
         appended.push(
           await this.append(operationId, "assistant.message", {
             content: outcome.content,
@@ -280,6 +391,11 @@ export class AgentSession {
           role: "assistant",
           content: outcome.content,
           toolCalls: outcome.toolCalls,
+        });
+        this.onActivity?.({
+          operationId,
+          sequence: ++activity.sequence,
+          type: "clear",
         });
 
         if (outcome.stopReason !== "tool_use") {
@@ -308,7 +424,11 @@ export class AgentSession {
     }
   }
 
-  private async modelTurn(signal: AbortSignal | undefined): Promise<TurnOutcome> {
+  private async modelTurn(
+    operationId: OperationId,
+    activity: { sequence: number },
+    signal: AbortSignal | undefined,
+  ): Promise<TurnOutcome> {
     let thinking = "";
     let text = "";
     const toolCalls: ToolCallRequest[] = [];
@@ -322,10 +442,30 @@ export class AgentSession {
         tools: this.tools.declarations(),
         signal,
       })) {
-        if (event.type === "text_delta") text += event.text;
-        else if (event.type === "thinking_delta") thinking += event.text;
-        else if (event.type === "tool_call") {
+        if (event.type === "text_delta") {
+          text += event.text;
+          this.onActivity?.({
+            operationId,
+            sequence: ++activity.sequence,
+            type: "text_delta",
+            text: event.text,
+          });
+        } else if (event.type === "thinking_delta") {
+          thinking += event.text;
+          this.onActivity?.({
+            operationId,
+            sequence: ++activity.sequence,
+            type: "thinking_delta",
+            text: event.text,
+          });
+        } else if (event.type === "tool_call") {
           toolCalls.push({ callId: event.callId, name: event.name, input: event.input });
+          this.onActivity?.({
+            operationId,
+            sequence: ++activity.sequence,
+            type: "tool_call",
+            call: { callId: event.callId, name: event.name },
+          });
         }
         if (isTerminalModelStreamEvent(event)) {
           terminal = event;

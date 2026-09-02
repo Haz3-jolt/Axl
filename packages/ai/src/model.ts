@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelMessage, ThinkingLevel, ToolDeclaration } from "@axl/protocol";
+import type { BlobReference, ModelMessage, ThinkingLevel, ToolDeclaration } from "@axl/protocol";
 
 // The canonical stream and message shapes live in @axl/protocol so the
 // kernel can consume them without depending on this package. Re-exported here
@@ -67,6 +67,8 @@ export interface ModelRequest {
   readonly thinkingLevel?: ThinkingLevel;
   readonly maxOutputTokens?: number;
   readonly toolChoice?: "auto" | "required" | "none";
+  /** Resolves content-addressed media without placing bytes in canonical events. */
+  readonly readBlob?: (reference: BlobReference) => Promise<Uint8Array>;
   /** Cancellation for an in-flight stream travels through this signal. */
   readonly signal?: AbortSignal;
 }

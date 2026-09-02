@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { EVENT_FORMAT_VERSION, WIRE_PROTOCOL_VERSION } from "../src/index.ts";
 
-test("keeps event format 1 and uses wire protocol 2", () => {
+test("keeps event format 1 and uses wire protocol 3 for new shared contracts", () => {
   assert.equal(EVENT_FORMAT_VERSION, 1);
-  assert.equal(WIRE_PROTOCOL_VERSION, 2);
+  assert.equal(WIRE_PROTOCOL_VERSION, 3);
 });

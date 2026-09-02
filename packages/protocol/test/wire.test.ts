@@ -9,6 +9,7 @@ import {
   ProtocolValidationError,
   parseServerMessage,
   parseWireRequest,
+  parseWorkspaceDiff,
   WIRE_PROTOCOL_VERSION,
 } from "../src/index.ts";
 
@@ -18,22 +19,33 @@ test("validates every request shape", () => {
   const requests = [
     { kind: "request", id: 0, method: "daemon.info", params: {} },
     { kind: "request", id: 1, method: "session.create", params: { cwd: "/repo" } },
-    { kind: "request", id: 2, method: "session.resume", params: { sessionId } },
-    { kind: "request", id: 11, method: "session.list", params: {} },
     {
       kind: "request",
-      id: 12,
+      id: 2,
+      method: "session.resume",
+      params: { sessionId, includeEvents: false },
+    },
+    { kind: "request", id: 17, method: "session.list", params: {} },
+    {
+      kind: "request",
+      id: 18,
       method: "session.fork",
       params: { sessionId, fromEventId: "00000000-0000-4000-8000-000000000001" },
     },
-    { kind: "request", id: 13, method: "session.clone", params: { sessionId } },
+    { kind: "request", id: 19, method: "session.clone", params: { sessionId } },
     {
       kind: "request",
       id: 3,
       method: "session.send",
       params: { sessionId, content: [{ type: "text", text: "hello" }] },
     },
-    { kind: "request", id: 4, method: "session.interrupt", params: { sessionId } },
+    {
+      kind: "request",
+      id: 4,
+      method: "session.shell",
+      params: { sessionId, command: "pwd", excluded: false },
+    },
+    { kind: "request", id: 5, method: "session.interrupt", params: { sessionId } },
     { kind: "request", id: 5, method: "session.subscribe", params: { sessionId } },
     { kind: "request", id: 6, method: "session.reload", params: { sessionId } },
     { kind: "request", id: 7, method: "session.dispose", params: { sessionId } },
@@ -52,6 +64,18 @@ test("validates every request shape", () => {
     {
       kind: "request",
       id: 10,
+      method: "session.workspace.diff",
+      params: { sessionId, scope: "last-turn" },
+    },
+    {
+      kind: "request",
+      id: 11,
+      method: "session.workspace.checkpoint",
+      params: { sessionId, enabled: true },
+    },
+    {
+      kind: "request",
+      id: 12,
       method: "session.interaction.respond",
       params: {
         sessionId,
@@ -59,6 +83,30 @@ test("validates every request shape", () => {
         action: "accept",
         content: { answer: "yes" },
       },
+    },
+    {
+      kind: "request",
+      id: 13,
+      method: "session.blob.start",
+      params: { sessionId, mediaType: "image/png", sizeBytes: 4, name: "clip.png" },
+    },
+    {
+      kind: "request",
+      id: 14,
+      method: "session.blob.chunk",
+      params: { sessionId, uploadId: "upload-1", offset: 0, data: "YWJjZA==" },
+    },
+    {
+      kind: "request",
+      id: 15,
+      method: "session.blob.commit",
+      params: { sessionId, uploadId: "upload-1" },
+    },
+    {
+      kind: "request",
+      id: 16,
+      method: "session.blob.read",
+      params: { sessionId, sha256: "a".repeat(64), offset: 0, length: 4 },
     },
   ];
   for (const request of requests) assert.deepEqual(parseWireRequest(request), request);
@@ -71,9 +119,27 @@ test("rejects malformed requests at the wire boundary", () => {
     { kind: "request", id: 1, method: "unknown", params: {} },
     { kind: "request", id: 1, method: "session.create", params: { cwd: "" } },
     { kind: "request", id: 1, method: "session.resume", params: { sessionId: "bad" } },
+    {
+      kind: "request",
+      id: 1,
+      method: "session.resume",
+      params: { sessionId, includeEvents: "no" },
+    },
     { kind: "request", id: 1, method: "session.list", params: { cwd: "/repo" } },
     { kind: "request", id: 1, method: "session.fork", params: { sessionId } },
     { kind: "request", id: 1, method: "session.send", params: { sessionId, content: "bad" } },
+    {
+      kind: "request",
+      id: 1,
+      method: "session.shell",
+      params: { sessionId, command: "", excluded: false },
+    },
+    {
+      kind: "request",
+      id: 1,
+      method: "session.shell",
+      params: { sessionId, command: "pwd", excluded: "no" },
+    },
     { kind: "request", id: 1, method: "session.configure", params: { sessionId } },
     {
       kind: "request",
@@ -87,9 +153,59 @@ test("rejects malformed requests at the wire boundary", () => {
       method: "session.interaction.respond",
       params: { sessionId, interactionId: "interaction-1", action: "maybe" },
     },
+    {
+      kind: "request",
+      id: 1,
+      method: "session.workspace.diff",
+      params: { sessionId, scope: "everything" },
+    },
+    {
+      kind: "request",
+      id: 1,
+      method: "session.workspace.checkpoint",
+      params: { sessionId, enabled: "yes" },
+    },
+    {
+      kind: "request",
+      id: 1,
+      method: "session.blob.start",
+      params: { sessionId, mediaType: "bad", sizeBytes: -1 },
+    },
+    {
+      kind: "request",
+      id: 1,
+      method: "session.blob.read",
+      params: { sessionId, sha256: "bad", offset: 0, length: 4 },
+    },
   ]) {
     assert.throws(() => parseWireRequest(request), ProtocolValidationError);
   }
+});
+
+test("validates bounded workspace diff responses", () => {
+  const value = {
+    scope: "last-turn",
+    checkpointId: "123e4567-e89b-42d3-a456-426614174001",
+    files: [
+      {
+        path: "src/app.ts",
+        status: "modified",
+        additions: 2,
+        deletions: 1,
+        patch: "@@ -1 +1 @@",
+        truncated: false,
+      },
+    ],
+  };
+  assert.deepEqual(parseWorkspaceDiff(value), value);
+  assert.throws(
+    () => parseWorkspaceDiff({ ...value, files: [{ ...value.files[0], path: "" }] }),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () => parseWorkspaceDiff({ ...value, files: [{ ...value.files[0], additions: -1 }] }),
+    ProtocolValidationError,
+  );
 });
 
 test("validates server messages and newline framing", () => {
@@ -102,6 +218,26 @@ test("validates server messages and newline framing", () => {
   });
   assert.throws(
     () => parseServerMessage({ kind: "hello", wireVersion: 0 }),
+    ProtocolValidationError,
+  );
+
+  const activity = {
+    kind: "activity",
+    sessionId,
+    frame: {
+      operationId: "123e4567-e89b-42d3-a456-426614174001",
+      sequence: 3,
+      type: "text_delta",
+      text: "streaming",
+    },
+  } as const;
+  assert.deepEqual(parseServerMessage(activity), activity);
+  assert.throws(
+    () =>
+      parseServerMessage({
+        ...activity,
+        frame: { ...activity.frame, sequence: -1 },
+      }),
     ProtocolValidationError,
   );
 });

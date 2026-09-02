@@ -17,7 +17,12 @@ test("binds model choice and thinking level into kernel-shaped turns", async () 
       ],
     ],
   });
-  const modelPort = modelPortForSession(provider, { modelId: "fake-model", thinkingLevel: "high" });
+  const readBlob = async () => new Uint8Array([1]);
+  const modelPort = modelPortForSession(provider, {
+    modelId: "fake-model",
+    thinkingLevel: "high",
+    readBlob,
+  });
 
   const events: ModelStreamEvent[] = [];
   for await (const event of modelPort.stream({
@@ -34,6 +39,7 @@ test("binds model choice and thinking level into kernel-shaped turns", async () 
   assert.equal(request?.modelId, "fake-model");
   assert.equal(request?.thinkingLevel, "high");
   assert.equal(request?.system, "You are Axl.");
+  assert.equal(request?.readBlob, readBlob);
 });
 
 test("normalization guarantees a terminal even when the provider misbehaves", async () => {

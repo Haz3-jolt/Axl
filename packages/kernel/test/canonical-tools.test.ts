@@ -137,7 +137,8 @@ test("shell abort terminates descendant processes and never starts with a spent 
     const status = await readFile(`/proc/${childPid as number}/stat`, "utf8");
     state = status.split(" ")[2];
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ESRCH") throw error;
   }
   assert.equal(state === undefined || state === "Z", true);
 });

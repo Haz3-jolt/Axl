@@ -1,8 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { EventId, JsonObject, SessionId } from "./event-envelope.ts";
-import { ProtocolValidationError, parseEventId, parseSessionId } from "./event-envelope.ts";
+import type { EventId, JsonObject, OperationId, SessionId } from "./event-envelope.ts";
+import {
+  ProtocolValidationError,
+  parseEventId,
+  parseOperationId,
+  parseSessionId,
+} from "./event-envelope.ts";
 import type { CanonicalEvent, InteractionAction, ThinkingLevel, UserContent } from "./events.ts";
 import { parseEvent, parseUserContent } from "./events.ts";
 
@@ -22,6 +27,121 @@ export interface SessionSummary {
   readonly parentSessionId?: SessionId;
 }
 
+export interface TransientToolCall {
+  readonly callId: string;
+  readonly name: string;
+}
+
+/** Sequenced, non-durable model output for one active operation. */
+export type SessionActivityFrame =
+  | {
+      readonly operationId: OperationId;
+      readonly sequence: number;
+      readonly type: "text_delta" | "thinking_delta";
+      readonly text: string;
+    }
+  | {
+      readonly operationId: OperationId;
+      readonly sequence: number;
+      readonly type: "tool_call";
+      readonly call: TransientToolCall;
+    }
+  | {
+      readonly operationId: OperationId;
+      readonly sequence: number;
+      readonly type: "snapshot";
+      readonly text: string;
+      readonly thinking: string;
+      readonly toolCalls: readonly TransientToolCall[];
+    }
+  | {
+      readonly operationId: OperationId;
+      readonly sequence: number;
+      readonly type: "clear";
+    };
+
+export interface BlobReadResult {
+  readonly data: string;
+  readonly offset: number;
+  readonly nextOffset: number;
+  readonly eof: boolean;
+}
+
+export function parseBlobReadResult(value: unknown): BlobReadResult {
+  const result = object(value, "blobRead");
+  exact(result, "blobRead", ["data", "offset", "nextOffset", "eof"]);
+  if (typeof result.eof !== "boolean") {
+    throw new ProtocolValidationError("blobRead.eof", "must be a boolean");
+  }
+  return {
+    data: boundedText(result.data, "blobRead.data", 700_000),
+    offset: nonNegativeInteger(result.offset, "blobRead.offset"),
+    nextOffset: nonNegativeInteger(result.nextOffset, "blobRead.nextOffset"),
+    eof: result.eof,
+  };
+}
+
+export type WorkspaceDiffScope = "working" | "last-turn";
+
+export interface WorkspaceFileDiff {
+  readonly path: string;
+  readonly status: "added" | "modified" | "deleted";
+  readonly additions: number;
+  readonly deletions: number;
+  readonly patch: string;
+  readonly truncated: boolean;
+}
+
+export interface WorkspaceDiff {
+  readonly scope: WorkspaceDiffScope;
+  readonly checkpointId?: string;
+  readonly files: readonly WorkspaceFileDiff[];
+}
+
+export function parseWorkspaceDiff(value: unknown): WorkspaceDiff {
+  const diff = object(value, "workspaceDiff");
+  exact(diff, "workspaceDiff", ["scope", "checkpointId", "files"]);
+  if (diff.scope !== "working" && diff.scope !== "last-turn") {
+    throw new ProtocolValidationError("workspaceDiff.scope", "must be working or last-turn");
+  }
+  if (diff.checkpointId !== undefined) string(diff.checkpointId, "workspaceDiff.checkpointId");
+  if (!Array.isArray(diff.files) || diff.files.length > 500) {
+    throw new ProtocolValidationError("workspaceDiff.files", "must contain at most 500 files");
+  }
+  const files = diff.files.map((value, index): WorkspaceFileDiff => {
+    const path = `workspaceDiff.files[${index}]`;
+    const file = object(value, path);
+    exact(file, path, ["path", "status", "additions", "deletions", "patch", "truncated"]);
+    if (file.status !== "added" && file.status !== "modified" && file.status !== "deleted") {
+      throw new ProtocolValidationError(`${path}.status`, "must be added, modified, or deleted");
+    }
+    for (const field of ["additions", "deletions"] as const) {
+      if (!Number.isSafeInteger(file[field]) || (file[field] as number) < 0) {
+        throw new ProtocolValidationError(`${path}.${field}`, "must be a non-negative integer");
+      }
+    }
+    if (typeof file.patch !== "string") {
+      throw new ProtocolValidationError(`${path}.patch`, "must be a string");
+    }
+    if (typeof file.truncated !== "boolean") {
+      throw new ProtocolValidationError(`${path}.truncated`, "must be a boolean");
+    }
+    return {
+      path: string(file.path, `${path}.path`),
+      status: file.status,
+      additions: file.additions as number,
+      deletions: file.deletions as number,
+      patch: file.patch,
+      truncated: file.truncated,
+    };
+  });
+  return {
+    scope: diff.scope,
+    ...(diff.checkpointId === undefined ? {} : { checkpointId: diff.checkpointId as string }),
+    files,
+  };
+}
+
 export type WireRequest =
   | {
       readonly kind: "request";
@@ -39,7 +159,7 @@ export type WireRequest =
       readonly kind: "request";
       readonly id: number;
       readonly method: "session.resume";
-      readonly params: { readonly sessionId: SessionId };
+      readonly params: { readonly sessionId: SessionId; readonly includeEvents?: boolean };
     }
   | {
       readonly kind: "request";
@@ -64,6 +184,16 @@ export type WireRequest =
       readonly id: number;
       readonly method: "session.send";
       readonly params: { readonly sessionId: SessionId; readonly content: readonly UserContent[] };
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
+      readonly method: "session.shell";
+      readonly params: {
+        readonly sessionId: SessionId;
+        readonly command: string;
+        readonly excluded: boolean;
+      };
     }
   | {
       readonly kind: "request";
@@ -93,6 +223,57 @@ export type WireRequest =
       readonly id: number;
       readonly method: "session.subscribe";
       readonly params: { readonly sessionId: SessionId; readonly afterEventId?: EventId };
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
+      readonly method: "session.workspace.diff";
+      readonly params: { readonly sessionId: SessionId; readonly scope: WorkspaceDiffScope };
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
+      readonly method: "session.workspace.checkpoint";
+      readonly params: { readonly sessionId: SessionId; readonly enabled: boolean };
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
+      readonly method: "session.blob.start";
+      readonly params: {
+        readonly sessionId: SessionId;
+        readonly mediaType: string;
+        readonly sizeBytes: number;
+        readonly name?: string;
+      };
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
+      readonly method: "session.blob.chunk";
+      readonly params: {
+        readonly sessionId: SessionId;
+        readonly uploadId: string;
+        readonly offset: number;
+        readonly data: string;
+      };
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
+      readonly method: "session.blob.commit";
+      readonly params: { readonly sessionId: SessionId; readonly uploadId: string };
+    }
+  | {
+      readonly kind: "request";
+      readonly id: number;
+      readonly method: "session.blob.read";
+      readonly params: {
+        readonly sessionId: SessionId;
+        readonly sha256: string;
+        readonly offset: number;
+        readonly length: number;
+      };
     };
 
 export type WireMethod = WireRequest["method"];
@@ -116,12 +297,18 @@ export interface WireEvent {
   readonly event: CanonicalEvent;
 }
 
+export interface WireActivity {
+  readonly kind: "activity";
+  readonly sessionId: SessionId;
+  readonly frame: SessionActivityFrame;
+}
+
 export interface WireHello {
   readonly kind: "hello";
   readonly wireVersion: number;
 }
 
-export type ServerMessage = WireResponse | WireError | WireEvent | WireHello;
+export type ServerMessage = WireResponse | WireError | WireEvent | WireActivity | WireHello;
 
 export interface SessionSnapshot {
   readonly sessionId: SessionId;
@@ -150,6 +337,104 @@ function string(value: unknown, path: string): string {
     throw new ProtocolValidationError(path, "must be a non-empty string");
   }
   return value;
+}
+
+function nonNegativeInteger(value: unknown, path: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new ProtocolValidationError(path, "must be a non-negative safe integer");
+  }
+  return value as number;
+}
+
+function boundedString(value: unknown, path: string, maximum: number): string {
+  const result = string(value, path);
+  if (new TextEncoder().encode(result).byteLength > maximum) {
+    throw new ProtocolValidationError(path, `must not exceed ${maximum} UTF-8 bytes`);
+  }
+  return result;
+}
+
+function boundedText(value: unknown, path: string, maximum: number): string {
+  if (typeof value !== "string") throw new ProtocolValidationError(path, "must be a string");
+  if (new TextEncoder().encode(value).byteLength > maximum) {
+    throw new ProtocolValidationError(path, `must not exceed ${maximum} UTF-8 bytes`);
+  }
+  return value;
+}
+
+function sha256(value: unknown, path: string): string {
+  const result = string(value, path);
+  if (!/^[0-9a-f]{64}$/.test(result)) {
+    throw new ProtocolValidationError(path, "must be a lowercase SHA-256 digest");
+  }
+  return result;
+}
+
+function parseTransientToolCall(value: unknown, path: string): TransientToolCall {
+  const call = object(value, path);
+  exact(call, path, ["callId", "name"]);
+  return {
+    callId: boundedString(call.callId, `${path}.callId`, 256),
+    name: boundedString(call.name, `${path}.name`, 256),
+  };
+}
+
+export function parseSessionActivityFrame(value: unknown): SessionActivityFrame {
+  const frame = object(value, "activity.frame");
+  const operationId = parseOperationId(frame.operationId, "activity.frame.operationId");
+  const sequence = nonNegativeInteger(frame.sequence, "activity.frame.sequence");
+  if (frame.type === "text_delta" || frame.type === "thinking_delta") {
+    exact(frame, "activity.frame", ["operationId", "sequence", "type", "text"]);
+    return {
+      operationId,
+      sequence,
+      type: frame.type,
+      text: boundedText(frame.text, "activity.frame.text", 262_144),
+    };
+  }
+  if (frame.type === "tool_call") {
+    exact(frame, "activity.frame", ["operationId", "sequence", "type", "call"]);
+    return {
+      operationId,
+      sequence,
+      type: frame.type,
+      call: parseTransientToolCall(frame.call, "activity.frame.call"),
+    };
+  }
+  if (frame.type === "snapshot") {
+    exact(frame, "activity.frame", [
+      "operationId",
+      "sequence",
+      "type",
+      "text",
+      "thinking",
+      "toolCalls",
+    ]);
+    if (!Array.isArray(frame.toolCalls) || frame.toolCalls.length > 64) {
+      throw new ProtocolValidationError(
+        "activity.frame.toolCalls",
+        "must contain at most 64 calls",
+      );
+    }
+    return {
+      operationId,
+      sequence,
+      type: frame.type,
+      text: boundedText(frame.text, "activity.frame.text", 262_144),
+      thinking: boundedText(frame.thinking, "activity.frame.thinking", 262_144),
+      toolCalls: frame.toolCalls.map((call, index) =>
+        parseTransientToolCall(call, `activity.frame.toolCalls[${index}]`),
+      ),
+    };
+  }
+  if (frame.type === "clear") {
+    exact(frame, "activity.frame", ["operationId", "sequence", "type"]);
+    return { operationId, sequence, type: frame.type };
+  }
+  throw new ProtocolValidationError(
+    "activity.frame.type",
+    "must be text_delta, thinking_delta, tool_call, snapshot, or clear",
+  );
 }
 
 const thinkingLevels: readonly ThinkingLevel[] = [
@@ -205,12 +490,18 @@ export function parseWireRequest(value: unknown): WireRequest {
       },
     };
   }
-  if (method === "session.resume" || method === "session.clone") {
-    exact(params, "request.params", ["sessionId"]);
+  if (method === "session.resume") {
+    exact(params, "request.params", ["sessionId", "includeEvents"]);
+    if (params.includeEvents !== undefined && typeof params.includeEvents !== "boolean") {
+      throw new ProtocolValidationError("request.params.includeEvents", "must be a boolean");
+    }
     return {
       ...base,
       method,
-      params: { sessionId: parseSessionId(params.sessionId, "request.params.sessionId") },
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        ...(params.includeEvents === undefined ? {} : { includeEvents: params.includeEvents }),
+      },
     };
   }
   if (method === "session.list") {
@@ -228,6 +519,14 @@ export function parseWireRequest(value: unknown): WireRequest {
       },
     };
   }
+  if (method === "session.clone") {
+    exact(params, "request.params", ["sessionId"]);
+    return {
+      ...base,
+      method,
+      params: { sessionId: parseSessionId(params.sessionId, "request.params.sessionId") },
+    };
+  }
   if (method === "session.send") {
     exact(params, "request.params", ["sessionId", "content"]);
     return {
@@ -236,6 +535,21 @@ export function parseWireRequest(value: unknown): WireRequest {
       params: {
         sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
         content: parseUserContent(params.content, "request.params.content"),
+      },
+    };
+  }
+  if (method === "session.shell") {
+    exact(params, "request.params", ["sessionId", "command", "excluded"]);
+    if (typeof params.excluded !== "boolean") {
+      throw new ProtocolValidationError("request.params.excluded", "must be a boolean");
+    }
+    return {
+      ...base,
+      method,
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        command: string(params.command, "request.params.command"),
+        excluded: params.excluded,
       },
     };
   }
@@ -295,6 +609,92 @@ export function parseWireRequest(value: unknown): WireRequest {
       },
     };
   }
+  if (method === "session.workspace.checkpoint") {
+    exact(params, "request.params", ["sessionId", "enabled"]);
+    if (typeof params.enabled !== "boolean") {
+      throw new ProtocolValidationError("request.params.enabled", "must be a boolean");
+    }
+    return {
+      ...base,
+      method,
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        enabled: params.enabled,
+      },
+    };
+  }
+  if (method === "session.workspace.diff") {
+    exact(params, "request.params", ["sessionId", "scope"]);
+    if (params.scope !== "working" && params.scope !== "last-turn") {
+      throw new ProtocolValidationError(
+        "request.params.scope",
+        "must be one of: working, last-turn",
+      );
+    }
+    return {
+      ...base,
+      method,
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        scope: params.scope,
+      },
+    };
+  }
+  if (method === "session.blob.start") {
+    exact(params, "request.params", ["sessionId", "mediaType", "sizeBytes", "name"]);
+    const mediaType = boundedString(params.mediaType, "request.params.mediaType", 127);
+    const name =
+      params.name === undefined
+        ? undefined
+        : boundedString(params.name, "request.params.name", 255);
+    return {
+      ...base,
+      method,
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        mediaType,
+        sizeBytes: nonNegativeInteger(params.sizeBytes, "request.params.sizeBytes"),
+        ...(name === undefined ? {} : { name }),
+      },
+    };
+  }
+  if (method === "session.blob.chunk") {
+    exact(params, "request.params", ["sessionId", "uploadId", "offset", "data"]);
+    return {
+      ...base,
+      method,
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        uploadId: boundedString(params.uploadId, "request.params.uploadId", 128),
+        offset: nonNegativeInteger(params.offset, "request.params.offset"),
+        data: boundedString(params.data, "request.params.data", 700_000),
+      },
+    };
+  }
+  if (method === "session.blob.commit") {
+    exact(params, "request.params", ["sessionId", "uploadId"]);
+    return {
+      ...base,
+      method,
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        uploadId: boundedString(params.uploadId, "request.params.uploadId", 128),
+      },
+    };
+  }
+  if (method === "session.blob.read") {
+    exact(params, "request.params", ["sessionId", "sha256", "offset", "length"]);
+    return {
+      ...base,
+      method,
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        sha256: sha256(params.sha256, "request.params.sha256"),
+        offset: nonNegativeInteger(params.offset, "request.params.offset"),
+        length: nonNegativeInteger(params.length, "request.params.length"),
+      },
+    };
+  }
   if (
     method === "session.interrupt" ||
     method === "session.reload" ||
@@ -345,6 +745,14 @@ export function parseServerMessage(value: unknown): ServerMessage {
       throw new ProtocolValidationError("message.event.sessionId", "must match message.sessionId");
     }
     return { kind, sessionId, event };
+  }
+  if (kind === "activity") {
+    exact(message, "message", ["kind", "sessionId", "frame"]);
+    return {
+      kind,
+      sessionId: parseSessionId(message.sessionId, "message.sessionId"),
+      frame: parseSessionActivityFrame(message.frame),
+    };
   }
   throw new ProtocolValidationError("message.kind", `unknown message kind ${JSON.stringify(kind)}`);
 }

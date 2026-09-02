@@ -22,6 +22,12 @@ const validPayloads = {
   "session.resumed": {},
   "session.closed": { reason: "completed" },
   "user.message": { content: [{ type: "text", text: "hello" }] },
+  "user.shell": {
+    command: "pwd",
+    content: [{ type: "text", text: "/workspace" }],
+    isError: false,
+    excluded: false,
+  },
   "assistant.message": {
     content: [
       { type: "thinking", text: "reasoning" },

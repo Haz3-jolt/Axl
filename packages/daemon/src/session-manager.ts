@@ -17,6 +17,7 @@ import {
   type ToolRegistry,
 } from "@axl/kernel";
 import {
+  type BlobReference,
   type CanonicalEvent,
   EVENT_FORMAT_VERSION,
   type EventId,
@@ -27,12 +28,18 @@ import {
   parseEvent,
   parseEventId,
   parseSessionId,
+  type SessionActivityFrame,
   type SessionForkResult,
   type SessionId,
   type SessionModelSelection,
   type SessionSummary,
   type UserContent,
+  type WorkspaceDiff,
+  type WorkspaceDiffScope,
 } from "@axl/protocol";
+
+import { BlobStore, BlobStoreError } from "./blob-store.ts";
+import { WorkspaceCheckpointError, WorkspaceCheckpointStore } from "./workspace-checkpoint.ts";
 
 export class DaemonError extends Error {
   readonly code: string;
@@ -80,6 +87,7 @@ export type SessionRuntimeFactory = (input: {
     request: SessionInteractionRequest,
     signal?: AbortSignal,
   ) => Promise<SessionInteractionResponse>;
+  readonly readBlob: (reference: BlobReference) => Promise<Uint8Array>;
 }) => SessionRuntime | Promise<SessionRuntime>;
 
 export interface SessionManagerOptions {
@@ -103,10 +111,19 @@ interface ManagedSession {
   readonly cwd: string;
   readonly events: CanonicalEvent[];
   readonly listeners: Set<(event: CanonicalEvent) => void>;
+  readonly activityListeners: Set<(frame: SessionActivityFrame) => void>;
+  readonly activityState: {
+    current?: SessionActivityFrame;
+    text: string;
+    thinking: string;
+    tools: Array<{ callId: string; name: string }>;
+  };
   selection: SessionModelSelection;
   activeTurn?: ActiveTurn;
   rebuilding?: Promise<void>;
   readonly interactions: Map<string, PendingInteraction>;
+  checkpointError?: WorkspaceCheckpointError;
+  workspaceCheckpointsEnabled: boolean;
 }
 
 function deferredTurn(): ActiveTurn {
@@ -157,9 +174,13 @@ export class SessionManager {
   private readonly options: SessionManagerOptions;
   private readonly sessions = new Map<SessionId, ManagedSession>();
   private readonly opening = new Map<SessionId, Promise<ManagedSession>>();
+  private readonly workspaceCheckpoints: WorkspaceCheckpointStore;
+  private readonly blobs: BlobStore;
 
   constructor(options: SessionManagerOptions) {
     this.options = { ...options, dataDirectory: resolve(options.dataDirectory) };
+    this.workspaceCheckpoints = new WorkspaceCheckpointStore(this.options.dataDirectory);
+    this.blobs = new BlobStore(this.options.dataDirectory);
   }
 
   private logPath(sessionId: SessionId): string {
@@ -171,6 +192,13 @@ export class SessionManager {
     cwd: string,
     events: CanonicalEvent[],
     listeners: Set<(event: CanonicalEvent) => void>,
+    activityListeners: Set<(frame: SessionActivityFrame) => void>,
+    activityState: {
+      current?: SessionActivityFrame;
+      text: string;
+      thinking: string;
+      tools: Array<{ callId: string; name: string }>;
+    },
     boundary: SessionRuntimeBoundary,
     selection: SessionModelSelection,
   ): Promise<AgentSession> {
@@ -180,6 +208,7 @@ export class SessionManager {
       boundary,
       selection,
       interact: (request, signal) => this.interact(sessionId, request, signal),
+      readBlob: (reference) => this.blobs.readAll(sessionId, reference),
     });
     return AgentSession.open(this.logPath(sessionId), sessionId, {
       model: runtime.model,
@@ -195,7 +224,12 @@ export class SessionManager {
       ...(runtime.configDialect === undefined ? {} : { configDialect: runtime.configDialect }),
       onEvent: (event) => {
         events.push(event);
+        this.authorizeEventBlobs(sessionId, event);
         for (const listener of listeners) listener(event);
+      },
+      onActivity: (frame) => {
+        if (!this.applyActivity(activityState, frame)) return;
+        for (const listener of activityListeners) listener(frame);
       },
     });
   }
@@ -207,24 +241,36 @@ export class SessionManager {
   ): Promise<ManagedSession> {
     const events: CanonicalEvent[] = [];
     const listeners = new Set<(event: CanonicalEvent) => void>();
+    const activityListeners = new Set<(frame: SessionActivityFrame) => void>();
+    const activityState = {
+      text: "",
+      thinking: "",
+      tools: [] as Array<{ callId: string; name: string }>,
+    };
     const session = await this.buildSession(
       sessionId,
       cwd,
       events,
       listeners,
+      activityListeners,
+      activityState,
       "session_start",
       selection,
     );
     const stored = await session.log.read();
     events.length = 0;
     events.push(...stored.events);
+    for (const event of events) this.authorizeEventBlobs(sessionId, event);
     const managed: ManagedSession = {
       session,
       cwd,
       events,
       listeners,
+      activityListeners,
+      activityState,
       selection,
       interactions: new Map(),
+      workspaceCheckpointsEnabled: false,
     };
     this.sessions.set(sessionId, managed);
     return managed;
@@ -456,17 +502,157 @@ export class SessionManager {
 
   async send(sessionId: unknown, content: readonly UserContent[]): Promise<{ stopReason: string }> {
     const managed = this.managed(sessionId);
+    for (const item of content) {
+      if (item.type === "blob")
+        await this.blobs.assertOwned(managed.session.log.sessionId, item.blob);
+    }
     if (managed.activeTurn || managed.rebuilding) {
       throw new DaemonError("operation_active", "An operation already owns this branch");
     }
     const active = deferredTurn();
     managed.activeTurn = active;
     try {
+      await this.captureWorkspaceCheckpoint(managed);
       const result = await managed.session.runTurn(content, active.controller.signal);
       return { stopReason: result.stopReason };
     } finally {
       if (managed.activeTurn === active) delete managed.activeTurn;
       active.finish();
+    }
+  }
+
+  async shell(
+    sessionId: unknown,
+    command: string,
+    excluded: boolean,
+  ): Promise<{ isError: boolean }> {
+    const managed = this.managed(sessionId);
+    if (managed.activeTurn || managed.rebuilding) {
+      throw new DaemonError("operation_active", "An operation already owns this branch");
+    }
+    const active = deferredTurn();
+    managed.activeTurn = active;
+    try {
+      await this.captureWorkspaceCheckpoint(managed);
+      const event = await managed.session.runShell(command, excluded, active.controller.signal);
+      return { isError: event.payload.isError };
+    } finally {
+      if (managed.activeTurn === active) delete managed.activeTurn;
+      active.finish();
+    }
+  }
+
+  async setWorkspaceCheckpoints(
+    sessionId: unknown,
+    enabled: boolean,
+  ): Promise<{ enabled: boolean }> {
+    const managed = this.managed(sessionId);
+    if (managed.activeTurn || managed.rebuilding) {
+      throw new DaemonError(
+        "operation_active",
+        "Change workspace checkpoint capture after the active operation",
+      );
+    }
+    managed.workspaceCheckpointsEnabled = enabled;
+    if (enabled && !(await this.workspaceCheckpoints.has(managed.session.log.sessionId))) {
+      await this.captureWorkspaceCheckpoint(managed);
+      if (managed.checkpointError !== undefined) {
+        throw new DaemonError(managed.checkpointError.code, managed.checkpointError.message, {
+          cause: managed.checkpointError,
+        });
+      }
+    }
+    return { enabled };
+  }
+
+  async startBlobUpload(
+    sessionId: unknown,
+    input: { readonly mediaType: string; readonly sizeBytes: number; readonly name?: string },
+  ): Promise<{ uploadId: string; chunkBytes: number }> {
+    const managed = this.managed(sessionId);
+    try {
+      return await this.blobs.start(managed.session.log.sessionId, input);
+    } catch (error) {
+      if (error instanceof BlobStoreError) {
+        throw new DaemonError(error.code, error.message, { cause: error });
+      }
+      throw error;
+    }
+  }
+
+  async appendBlobChunk(
+    sessionId: unknown,
+    uploadId: string,
+    offset: number,
+    data: string,
+  ): Promise<{ nextOffset: number }> {
+    const managed = this.managed(sessionId);
+    try {
+      return await this.blobs.append(managed.session.log.sessionId, uploadId, offset, data);
+    } catch (error) {
+      if (error instanceof BlobStoreError) {
+        throw new DaemonError(error.code, error.message, { cause: error });
+      }
+      throw error;
+    }
+  }
+
+  async commitBlobUpload(sessionId: unknown, uploadId: string): Promise<BlobReference> {
+    const managed = this.managed(sessionId);
+    try {
+      return await this.blobs.commit(managed.session.log.sessionId, uploadId);
+    } catch (error) {
+      if (error instanceof BlobStoreError) {
+        throw new DaemonError(error.code, error.message, { cause: error });
+      }
+      throw error;
+    }
+  }
+
+  async readBlob(sessionId: unknown, digest: string, offset: number, length: number) {
+    const managed = this.managed(sessionId);
+    try {
+      return await this.blobs.read(managed.session.log.sessionId, digest, offset, length);
+    } catch (error) {
+      if (error instanceof BlobStoreError) {
+        throw new DaemonError(error.code, error.message, { cause: error });
+      }
+      throw error;
+    }
+  }
+
+  async workspaceDiff(sessionId: unknown, scope: WorkspaceDiffScope): Promise<WorkspaceDiff> {
+    const managed = this.managed(sessionId);
+    if (scope === "last-turn" && managed.checkpointError !== undefined) {
+      throw new DaemonError(managed.checkpointError.code, managed.checkpointError.message, {
+        cause: managed.checkpointError,
+      });
+    }
+    try {
+      return await this.workspaceCheckpoints.diff(
+        managed.session.log.sessionId,
+        managed.cwd,
+        scope,
+      );
+    } catch (error) {
+      if (error instanceof WorkspaceCheckpointError) {
+        throw new DaemonError(error.code, error.message, { cause: error });
+      }
+      throw error;
+    }
+  }
+
+  private async captureWorkspaceCheckpoint(managed: ManagedSession): Promise<void> {
+    if (!managed.workspaceCheckpointsEnabled) return;
+    try {
+      await this.workspaceCheckpoints.capture(managed.session.log.sessionId, managed.cwd);
+      delete managed.checkpointError;
+    } catch (error) {
+      if (error instanceof WorkspaceCheckpointError) {
+        managed.checkpointError = error;
+        return;
+      }
+      throw error;
     }
   }
 
@@ -481,7 +667,12 @@ export class SessionManager {
     sessionId: unknown,
     listener: (event: CanonicalEvent) => void,
     afterEventId?: EventId,
-  ): { snapshot: readonly CanonicalEvent[]; unsubscribe: () => void } {
+    activityListener?: (frame: SessionActivityFrame) => void,
+  ): {
+    snapshot: readonly CanonicalEvent[];
+    activity?: SessionActivityFrame;
+    unsubscribe: () => void;
+  } {
     const managed = this.managed(sessionId);
     let snapshot = [...managed.events];
     if (afterEventId !== undefined) {
@@ -491,7 +682,27 @@ export class SessionManager {
       snapshot = snapshot.slice(index + 1);
     }
     managed.listeners.add(listener);
-    return { snapshot, unsubscribe: () => managed.listeners.delete(listener) };
+    if (activityListener !== undefined) managed.activityListeners.add(activityListener);
+    const current = managed.activityState.current;
+    const activity =
+      current === undefined || current.type === "clear"
+        ? undefined
+        : {
+            operationId: current.operationId,
+            sequence: current.sequence,
+            type: "snapshot" as const,
+            text: managed.activityState.text,
+            thinking: managed.activityState.thinking,
+            toolCalls: [...managed.activityState.tools],
+          };
+    return {
+      snapshot,
+      ...(activity === undefined ? {} : { activity }),
+      unsubscribe: () => {
+        managed.listeners.delete(listener);
+        if (activityListener !== undefined) managed.activityListeners.delete(activityListener);
+      },
+    };
   }
 
   private async interact(
@@ -565,6 +776,8 @@ export class SessionManager {
         managed.cwd,
         managed.events,
         managed.listeners,
+        managed.activityListeners,
+        managed.activityState,
         boundary,
         selection,
       );
@@ -592,6 +805,61 @@ export class SessionManager {
     await managed.activeTurn?.done;
     this.sessions.delete(parsed);
     await managed.session.dispose();
+    await this.blobs.disposeSession(parsed);
+  }
+
+  private applyActivity(
+    state: ManagedSession["activityState"],
+    frame: SessionActivityFrame,
+  ): boolean {
+    if (
+      state.current !== undefined &&
+      state.current.operationId === frame.operationId &&
+      frame.sequence <= state.current.sequence
+    ) {
+      return false;
+    }
+    if (state.current?.operationId !== frame.operationId) {
+      state.text = "";
+      state.thinking = "";
+      state.tools.length = 0;
+    }
+    if (frame.type === "clear") {
+      state.current = frame;
+      state.text = "";
+      state.thinking = "";
+      state.tools.length = 0;
+      return true;
+    }
+    if (frame.type === "snapshot") {
+      state.text = frame.text;
+      state.thinking = frame.thinking;
+      state.tools.splice(0, state.tools.length, ...frame.toolCalls);
+    } else if (frame.type === "text_delta") {
+      state.text = `${state.text}${frame.text}`.slice(-65_536);
+    } else if (frame.type === "thinking_delta") {
+      state.thinking = `${state.thinking}${frame.text}`.slice(-65_536);
+    } else if (frame.type === "tool_call") {
+      state.tools.push(frame.call);
+      if (state.tools.length > 64) state.tools.shift();
+    }
+    state.current = frame;
+    return true;
+  }
+
+  private authorizeEventBlobs(sessionId: SessionId, event: CanonicalEvent): void {
+    if (
+      event.type !== "user.message" &&
+      event.type !== "user.shell" &&
+      event.type !== "assistant.message" &&
+      event.type !== "tool.result"
+    ) {
+      return;
+    }
+    const references = event.payload.content.flatMap((item) =>
+      item.type === "blob" ? [item.blob] : [],
+    );
+    this.blobs.authorize(sessionId, references);
   }
 
   async disposeAll(): Promise<void> {

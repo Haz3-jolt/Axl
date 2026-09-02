@@ -2,29 +2,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
+import { promisify } from "node:util";
 
 import { type ModelPort, ToolRegistry } from "@axl/kernel";
 import type {
   CanonicalEvent,
   ModelStreamEvent,
+  SessionActivityFrame,
   SessionForkResult,
   SessionSummary,
   Usage,
 } from "@axl/protocol";
 
 import {
-  DaemonClient,
   AxlDaemon,
+  DaemonClient,
   type SessionSnapshot,
   WireClientError,
   type WireEvent,
 } from "../src/index.ts";
 
 const usage: Usage = { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 };
+const execute = promisify(execFile);
 
 function replyPort(): ModelPort {
   let calls = 0;
@@ -123,6 +127,193 @@ test("creates a session, streams the live tail, and answers sends", async (conte
   assert.equal(pushed[0]?.sessionId, created.sessionId);
 });
 
+test("streams transient deltas and resumes the latest accumulated activity", async (context) => {
+  let release = (): void => undefined;
+  const streaming: ModelPort = {
+    stream() {
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        yield { type: "thinking_delta", text: "checking " };
+        yield { type: "text_delta", text: "x".repeat(65_535) };
+        yield { type: "text_delta", text: "partial" };
+        await new Promise<void>((resolvePromise) => {
+          release = resolvePromise;
+        });
+        yield { type: "text_delta", text: " answer" };
+        yield { type: "completed", stopReason: "stop", usage };
+      })();
+    },
+  };
+  const { socketPath, cwd } = await startDaemon(context, streaming);
+  const first = await DaemonClient.connect(socketPath);
+  const second = await DaemonClient.connect(socketPath);
+  context.after(() => {
+    first.close();
+    second.close();
+  });
+  const created = (await first.request("session.create", { cwd })) as SessionSnapshot;
+  const frames: string[] = [];
+  first.onActivity((message) => frames.push(message.frame.type));
+  await first.request("session.subscribe", { sessionId: created.sessionId });
+  const sending = first.request("session.send", {
+    sessionId: created.sessionId,
+    content: [{ type: "text", text: "go" }],
+  });
+  for (let attempt = 0; frames.length < 3 && attempt < 100; attempt += 1) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+  }
+  assert.deepEqual(frames, ["thinking_delta", "text_delta", "text_delta"]);
+  const resumed = (await second.request("session.subscribe", {
+    sessionId: created.sessionId,
+  })) as { activity?: SessionActivityFrame };
+  assert.equal(resumed.activity?.type, "snapshot");
+  assert.ok(resumed.activity?.operationId);
+  assert.equal(resumed.activity?.sequence, 3);
+  assert.equal(resumed.activity?.type, "snapshot");
+  if (resumed.activity?.type === "snapshot") {
+    assert.equal(resumed.activity.text.length, 65_536);
+    assert.equal(resumed.activity.text.endsWith("partial"), true);
+    assert.equal(resumed.activity.thinking, "checking ");
+    assert.deepEqual(resumed.activity.toolCalls, []);
+  }
+  release();
+  await sending;
+  assert.equal(frames.at(-1), "clear");
+});
+
+test("uploads image blobs in chunks without persisting bytes in JSONL", async (context) => {
+  const { socketPath, cwd, dataDirectory } = await startDaemon(context);
+  const client = await DaemonClient.connect(socketPath);
+  context.after(() => client.close());
+  const created = (await client.request("session.create", { cwd })) as SessionSnapshot;
+  const bytes = Buffer.alloc(32);
+  bytes.set([0x89, 0x50, 0x4e, 0x47], 0);
+  bytes.set(Buffer.from("IHDR"), 12);
+  bytes.writeUInt32BE(1, 16);
+  bytes.writeUInt32BE(1, 20);
+  const started = (await client.request("session.blob.start", {
+    sessionId: created.sessionId,
+    mediaType: "image/png",
+    sizeBytes: bytes.length,
+    name: "pixel.png",
+  })) as { uploadId: string };
+  await client.request("session.blob.chunk", {
+    sessionId: created.sessionId,
+    uploadId: started.uploadId,
+    offset: 0,
+    data: bytes.toString("base64"),
+  });
+  const blob = (await client.request("session.blob.commit", {
+    sessionId: created.sessionId,
+    uploadId: started.uploadId,
+  })) as { sha256: string; mediaType: string; sizeBytes: number; name: string };
+  assert.equal(blob.mediaType, "image/png");
+  await client.request("session.send", {
+    sessionId: created.sessionId,
+    content: [{ type: "blob", blob }],
+  });
+  const range = (await client.request("session.blob.read", {
+    sessionId: created.sessionId,
+    sha256: blob.sha256,
+    offset: 0,
+    length: bytes.length,
+  })) as { data: string; eof: boolean };
+  assert.deepEqual(Buffer.from(range.data, "base64"), bytes);
+  assert.equal(range.eof, true);
+  const log = await readFile(join(dataDirectory, "sessions", `${created.sessionId}.jsonl`), "utf8");
+  assert.equal(log.includes(bytes.toString("base64")), false);
+  assert.match(log, new RegExp(blob.sha256));
+
+  const other = (await client.request("session.create", { cwd })) as SessionSnapshot;
+  await assert.rejects(
+    client.request("session.blob.read", {
+      sessionId: other.sessionId,
+      sha256: blob.sha256,
+      offset: 0,
+      length: bytes.length,
+    }),
+    (error) => error instanceof WireClientError && error.code === "blob_not_owned",
+  );
+
+  const invalid = Buffer.from("not an image");
+  const rejected = (await client.request("session.blob.start", {
+    sessionId: created.sessionId,
+    mediaType: "image/png",
+    sizeBytes: invalid.length,
+  })) as { uploadId: string };
+  await assert.rejects(
+    client.request("session.blob.chunk", {
+      sessionId: created.sessionId,
+      uploadId: rejected.uploadId,
+      offset: 1,
+      data: invalid.toString("base64"),
+    }),
+    (error) => error instanceof WireClientError && error.code === "blob_offset_mismatch",
+  );
+  await client.request("session.blob.chunk", {
+    sessionId: created.sessionId,
+    uploadId: rejected.uploadId,
+    offset: 0,
+    data: invalid.toString("base64"),
+  });
+  await assert.rejects(
+    client.request("session.blob.commit", {
+      sessionId: created.sessionId,
+      uploadId: rejected.uploadId,
+    }),
+    (error) => error instanceof WireClientError && error.code === "invalid_image",
+  );
+
+  const concurrent = (await client.request("session.blob.start", {
+    sessionId: created.sessionId,
+    mediaType: "application/octet-stream",
+    sizeBytes: 6,
+  })) as { uploadId: string };
+  const writes = await Promise.allSettled([
+    client.request("session.blob.chunk", {
+      sessionId: created.sessionId,
+      uploadId: concurrent.uploadId,
+      offset: 0,
+      data: Buffer.from("abc").toString("base64"),
+    }),
+    client.request("session.blob.chunk", {
+      sessionId: created.sessionId,
+      uploadId: concurrent.uploadId,
+      offset: 0,
+      data: Buffer.from("def").toString("base64"),
+    }),
+  ]);
+  assert.equal(writes.filter((result) => result.status === "fulfilled").length, 1);
+  const rejectedWrite = writes.find((result) => result.status === "rejected");
+  assert.ok(rejectedWrite?.status === "rejected");
+  assert.equal(rejectedWrite.reason instanceof WireClientError, true);
+  assert.equal((rejectedWrite.reason as WireClientError).code, "blob_offset_mismatch");
+  await client.request("session.blob.chunk", {
+    sessionId: created.sessionId,
+    uploadId: concurrent.uploadId,
+    offset: 3,
+    data: Buffer.from("ghi").toString("base64"),
+  });
+  await client.request("session.blob.commit", {
+    sessionId: created.sessionId,
+    uploadId: concurrent.uploadId,
+  });
+
+  const starts = await Promise.allSettled(
+    Array.from({ length: 17 }, () =>
+      client.request("session.blob.start", {
+        sessionId: created.sessionId,
+        mediaType: "application/octet-stream",
+        sizeBytes: 1,
+      }),
+    ),
+  );
+  assert.equal(starts.filter((result) => result.status === "fulfilled").length, 16);
+  const rejectedStart = starts.find((result) => result.status === "rejected");
+  assert.ok(rejectedStart?.status === "rejected");
+  assert.equal(rejectedStart.reason instanceof WireClientError, true);
+  assert.equal((rejectedStart.reason as WireClientError).code, "too_many_uploads");
+});
+
 test("a session survives daemon termination and resumes with full history", async (context) => {
   const first = await startDaemon(context);
   const client = await DaemonClient.connect(first.socketPath);
@@ -152,12 +343,89 @@ test("a session survives daemon termination and resumes with full history", asyn
     sessionId: created.sessionId,
   })) as SessionSnapshot;
   assert.deepEqual(types(resumed.events), ["session.created", "user.message", "assistant.message"]);
+  const bounded = (await reconnected.request("session.resume", {
+    sessionId: created.sessionId,
+    includeEvents: false,
+  })) as SessionSnapshot;
+  assert.deepEqual(bounded, { sessionId: created.sessionId, events: [] });
 
   const sent = (await reconnected.request("session.send", {
     sessionId: created.sessionId,
     content: [{ type: "text", text: "after restart" }],
   })) as { stopReason: string };
   assert.equal(sent.stopReason, "stop");
+});
+
+test("serves bounded working and last-turn workspace diffs", async (context) => {
+  const fixture = await startDaemon(context);
+  const workspace = join(fixture.cwd, "workspace");
+  await mkdir(workspace);
+  await execute("git", ["init", "--quiet"], { cwd: workspace });
+  await execute("git", ["config", "user.name", "Axl Test"], { cwd: workspace });
+  await execute("git", ["config", "user.email", "axl@example.invalid"], { cwd: workspace });
+  const textconvMarker = join(fixture.cwd, "textconv-ran");
+  const textconvHelper = join(fixture.cwd, "textconv.cjs");
+  await writeFile(
+    textconvHelper,
+    `require("node:fs").writeFileSync(${JSON.stringify(textconvMarker)}, "ran");\n`,
+  );
+  const textconvCommand = `"${process.execPath.replaceAll("\\", "/")}" "${textconvHelper.replaceAll("\\", "/")}"`;
+  await execute("git", ["config", "diff.axl.textconv", textconvCommand], { cwd: workspace });
+  await writeFile(join(workspace, ".gitattributes"), "tracked.txt diff=axl\n");
+  await writeFile(join(workspace, "tracked.txt"), "before\n");
+  await execute("git", ["add", ".gitattributes", "tracked.txt"], { cwd: workspace });
+  await execute("git", ["commit", "--quiet", "-m", "fixture"], { cwd: workspace });
+
+  const client = await DaemonClient.connect(fixture.socketPath);
+  context.after(() => client.close());
+  const created = (await client.request("session.create", { cwd: workspace })) as SessionSnapshot;
+  await assert.rejects(
+    client.request("session.workspace.diff", {
+      sessionId: created.sessionId,
+      scope: "last-turn",
+    }),
+    (error) => error instanceof WireClientError && error.code === "checkpoint_unavailable",
+  );
+  await client.request("session.workspace.checkpoint", {
+    sessionId: created.sessionId,
+    enabled: true,
+  });
+  await client.request("session.send", {
+    sessionId: created.sessionId,
+    content: [{ type: "text", text: "checkpoint" }],
+  });
+  await writeFile(join(workspace, "tracked.txt"), "after\n");
+  await writeFile(join(workspace, "new.txt"), "new\n");
+
+  const lastTurn = (await client.request("session.workspace.diff", {
+    sessionId: created.sessionId,
+    scope: "last-turn",
+  })) as { files: Array<{ path: string; status: string; additions: number }> };
+  assert.deepEqual(
+    lastTurn.files.map((file) => [file.path, file.status, file.additions]),
+    [
+      ["new.txt", "added", 1],
+      ["tracked.txt", "modified", 1],
+    ],
+  );
+
+  const previousGitDirectory = process.env.GIT_DIR;
+  process.env.GIT_DIR = join(workspace, "attacker-controlled-git-directory");
+  let working: { files: Array<{ path: string }> };
+  try {
+    working = (await client.request("session.workspace.diff", {
+      sessionId: created.sessionId,
+      scope: "working",
+    })) as { files: Array<{ path: string }> };
+  } finally {
+    if (previousGitDirectory === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = previousGitDirectory;
+  }
+  assert.deepEqual(
+    working.files.map((file) => file.path),
+    ["new.txt", "tracked.txt"],
+  );
+  await assert.rejects(readFile(textconvMarker), { code: "ENOENT" });
 });
 
 test("lists, forks, clones, and resumes sessions", async (context) => {

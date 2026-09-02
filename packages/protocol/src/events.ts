@@ -55,6 +55,12 @@ export type EventPayloadMap = {
   "session.resumed": Record<string, never>;
   "session.closed": { readonly reason: SessionCloseReason };
   "user.message": { readonly content: readonly UserContent[] };
+  "user.shell": {
+    readonly command: string;
+    readonly content: readonly UserContent[];
+    readonly isError: boolean;
+    readonly excluded: boolean;
+  };
   "assistant.message": {
     readonly content: readonly AssistantContent[];
     readonly stopReason: AssistantStopReason;
@@ -226,6 +232,11 @@ function validateBlob(value: JsonValue, path: string): void {
   optionalString(blob.name, `${path}.name`);
 }
 
+export function parseBlobReference(value: unknown, path = "blob"): BlobReference {
+  validateBlob(value as JsonValue, path);
+  return value as BlobReference;
+}
+
 function validateContent(value: JsonValue | undefined, path: string, assistant: boolean): void {
   for (const [index, item] of array(value, path).entries()) {
     const itemPath = `${path}[${index}]`;
@@ -297,6 +308,14 @@ const payloadParsers: { readonly [Type in EventType]: PayloadParser } = {
   "user.message": (payload, path) => {
     exact(payload, path, ["content"]);
     validateContent(payload.content, `${path}.content`, false);
+    return payload;
+  },
+  "user.shell": (payload, path) => {
+    exact(payload, path, ["command", "content", "isError", "excluded"]);
+    string(payload.command, `${path}.command`);
+    validateContent(payload.content, `${path}.content`, false);
+    boolean(payload.isError, `${path}.isError`);
+    boolean(payload.excluded, `${path}.excluded`);
     return payload;
   },
   "assistant.message": (payload, path) => {

@@ -5,12 +5,14 @@ import type { Stats } from "node:fs";
 import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 import {
   type CanonicalEvent,
   encodeWireMessage,
   parseWireRequest,
   type ServerMessage,
+  type SessionActivityFrame,
   WIRE_PROTOCOL_VERSION,
   type WireRequest,
 } from "@axl/protocol";
@@ -146,8 +148,9 @@ export class AxlDaemon {
     send({ kind: "hello", wireVersion: WIRE_PROTOCOL_VERSION });
 
     let buffer = "";
+    const decoder = new StringDecoder("utf8");
     socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
+      buffer += decoder.write(chunk);
       if (Buffer.byteLength(buffer) > MAX_REQUEST_BYTES && !buffer.includes("\n")) {
         send({
           kind: "error",
@@ -231,8 +234,12 @@ export class AxlDaemon {
           ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
         });
       }
-      case "session.resume":
-        return this.sessions.resume(request.params.sessionId);
+      case "session.resume": {
+        const snapshot = await this.sessions.resume(request.params.sessionId);
+        return request.params.includeEvents === false
+          ? { sessionId: snapshot.sessionId, events: [] }
+          : snapshot;
+      }
       case "session.list":
         return this.sessions.list();
       case "session.fork":
@@ -241,6 +248,12 @@ export class AxlDaemon {
         return this.sessions.clone(request.params.sessionId);
       case "session.send":
         return this.sessions.send(request.params.sessionId, request.params.content);
+      case "session.shell":
+        return this.sessions.shell(
+          request.params.sessionId,
+          request.params.command,
+          request.params.excluded,
+        );
       case "session.interrupt":
         return this.sessions.interrupt(request.params.sessionId);
       case "session.reload":
@@ -263,10 +276,45 @@ export class AxlDaemon {
       case "session.subscribe": {
         const { sessionId, afterEventId } = request.params;
         const listener = (event: CanonicalEvent): void => send({ kind: "event", sessionId, event });
-        const subscription = this.sessions.subscribe(sessionId, listener, afterEventId);
+        const activityListener = (frame: SessionActivityFrame): void =>
+          send({ kind: "activity", sessionId, frame });
+        const subscription = this.sessions.subscribe(
+          sessionId,
+          listener,
+          afterEventId,
+          activityListener,
+        );
         subscriptions.add(subscription.unsubscribe);
-        return { snapshot: subscription.snapshot };
+        return {
+          snapshot: subscription.snapshot,
+          ...(subscription.activity === undefined ? {} : { activity: subscription.activity }),
+        };
       }
+      case "session.blob.start":
+        return this.sessions.startBlobUpload(request.params.sessionId, request.params);
+      case "session.blob.chunk":
+        return this.sessions.appendBlobChunk(
+          request.params.sessionId,
+          request.params.uploadId,
+          request.params.offset,
+          request.params.data,
+        );
+      case "session.blob.commit":
+        return this.sessions.commitBlobUpload(request.params.sessionId, request.params.uploadId);
+      case "session.blob.read":
+        return this.sessions.readBlob(
+          request.params.sessionId,
+          request.params.sha256,
+          request.params.offset,
+          request.params.length,
+        );
+      case "session.workspace.checkpoint":
+        return this.sessions.setWorkspaceCheckpoints(
+          request.params.sessionId,
+          request.params.enabled,
+        );
+      case "session.workspace.diff":
+        return this.sessions.workspaceDiff(request.params.sessionId, request.params.scope);
       case "session.dispose":
         await this.sessions.dispose(request.params.sessionId);
         return { disposed: true };

@@ -3,7 +3,7 @@
 
 // Axl-native OpenAI Responses codec and transport implementation.
 
-import type { JsonObject, JsonValue, Usage } from "@axl/protocol";
+import type { BlobReference, JsonObject, JsonValue, Usage } from "@axl/protocol";
 
 import { assertModelSupports } from "./capabilities.ts";
 import type { ResolvedAuth } from "./auth.ts";
@@ -26,11 +26,15 @@ export function encodeResponsesRequest(
   model: ModelInfo,
   request: ModelRequest,
   deployment: string,
+  resolvedBlobs: ReadonlyMap<string, string> = new Map(),
 ): JsonObject {
   const input: JsonValue[] = [];
   for (const message of request.messages) {
     if (message.role === "user") {
-      input.push({ role: "user", content: contentParts(message.content, "input_text") });
+      input.push({
+        role: "user",
+        content: contentParts(message.content, "input_text", resolvedBlobs),
+      });
     } else if (message.role === "assistant") {
       const text = message.content
         .filter((item) => item.type === "text")
@@ -48,13 +52,22 @@ export function encodeResponsesRequest(
         });
       }
     } else {
+      const output = contentParts(message.content, "input_text", resolvedBlobs);
+      const only = output[0];
+      const plain =
+        output.length === 1 &&
+        typeof only === "object" &&
+        only !== null &&
+        "type" in only &&
+        only.type === "input_text" &&
+        "text" in only &&
+        typeof only.text === "string"
+          ? only.text
+          : undefined;
       input.push({
         type: "function_call_output",
         call_id: message.callId,
-        output: message.content
-          .filter((item) => item.type === "text")
-          .map((item) => item.text)
-          .join(""),
+        output: plain ?? output,
       });
     }
   }
@@ -90,14 +103,58 @@ export function encodeResponsesRequest(
 }
 
 function contentParts(
-  content: readonly { type: string; text?: string }[],
+  content: readonly {
+    type: string;
+    text?: string;
+    blob?: BlobReference;
+  }[],
   textType: "input_text",
+  resolvedBlobs: ReadonlyMap<string, string>,
 ): JsonValue[] {
   return content.map((item) => {
     if (item.type === "text") return { type: textType, text: item.text ?? "" };
-    // Blob transport is the Phase 9 media channel; dropping content silently is worse than failing.
-    throw new ResponsesCodecError(`Cannot encode ${item.type} content without media transport`);
+    if (item.type === "blob" && item.blob !== undefined) {
+      if (!item.blob.mediaType.startsWith("image/")) {
+        throw new ResponsesCodecError(
+          `OpenAI Responses does not accept attachment type ${item.blob.mediaType}`,
+        );
+      }
+      const data = resolvedBlobs.get(item.blob.sha256);
+      if (data === undefined) {
+        throw new ResponsesCodecError(
+          `Cannot encode blob ${item.blob.sha256} without media transport`,
+        );
+      }
+      return {
+        type: "input_image",
+        detail: "auto",
+        image_url: `data:${item.blob.mediaType};base64,${data}`,
+      };
+    }
+    throw new ResponsesCodecError(`Cannot encode ${item.type} content`);
   });
+}
+
+async function resolveRequestBlobs(request: ModelRequest): Promise<ReadonlyMap<string, string>> {
+  const references = new Map<string, BlobReference>();
+  for (const message of request.messages) {
+    for (const item of message.content) {
+      if (item.type === "blob") references.set(item.blob.sha256, item.blob);
+    }
+  }
+  if (references.size === 0) return new Map();
+  if (request.readBlob === undefined) {
+    throw new ResponsesCodecError("Cannot encode blob content without media transport");
+  }
+  const resolved = new Map<string, string>();
+  for (const reference of references.values()) {
+    const bytes = await request.readBlob(reference);
+    if (bytes.byteLength !== reference.sizeBytes) {
+      throw new ResponsesCodecError(`Blob ${reference.sha256} size changed before dispatch`);
+    }
+    resolved.set(reference.sha256, Buffer.from(bytes).toString("base64"));
+  }
+  return resolved;
 }
 
 function mapUsage(raw: Record<string, unknown> | undefined): Usage {
@@ -281,6 +338,7 @@ export class OpenAiResponsesProvider implements ModelProvider {
         model,
         request,
         this.endpoint.deploymentFor(model.modelId, resolved),
+        await resolveRequestBlobs(request),
       );
       response = await this.fetchImpl(this.endpoint.url(resolved), {
         method: "POST",

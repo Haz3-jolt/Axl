@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelMessage, ModelStreamEvent, ThinkingLevel, ToolDeclaration } from "@axl/protocol";
+import type {
+  BlobReference,
+  ModelMessage,
+  ModelStreamEvent,
+  ThinkingLevel,
+  ToolDeclaration,
+} from "@axl/protocol";
 
 import type { ModelProvider } from "./provider.ts";
 import { normalizeModelStream } from "./stream.ts";
@@ -10,6 +16,7 @@ export interface SessionPortOptions {
   readonly modelId: string;
   readonly thinkingLevel?: ThinkingLevel;
   readonly maxOutputTokens?: number;
+  readonly readBlob?: (reference: BlobReference) => Promise<Uint8Array>;
 }
 
 interface PortTurnRequest {
@@ -43,6 +50,7 @@ export function modelPortForSession(
             ? {}
             : { maxOutputTokens: request.maxOutputTokens ?? options.maxOutputTokens }),
           ...(request.toolChoice === undefined ? {} : { toolChoice: request.toolChoice }),
+          ...(options.readBlob === undefined ? {} : { readBlob: options.readBlob }),
           ...(request.signal === undefined ? {} : { signal: request.signal }),
         }),
         request.signal,

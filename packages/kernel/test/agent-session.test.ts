@@ -7,13 +7,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import { type JsonObject, type ModelStreamEvent, parseSessionId, type Usage } from "@axl/protocol";
+import {
+  EVENT_FORMAT_VERSION,
+  type JsonObject,
+  type ModelStreamEvent,
+  parseEvent,
+  parseOperationId,
+  parseSessionId,
+  type SessionActivityFrame,
+  type Usage,
+} from "@axl/protocol";
 
 import {
   AgentSession,
   type KernelTool,
   type ModelPort,
   type ModelTurnRequest,
+  messagesFromLineage,
   OperationConflictError,
   SessionTree,
   ToolRegistry,
@@ -72,7 +82,11 @@ async function makeSession(
   context: TestContext,
   port: ModelPort,
   tools = new ToolRegistry(),
-  options: { system?: string; maxModelCallsPerTurn?: number } = {},
+  options: {
+    system?: string;
+    maxModelCallsPerTurn?: number;
+    onActivity?: (frame: SessionActivityFrame) => void;
+  } = {},
 ): Promise<{ session: AgentSession; path: string; tools: ToolRegistry }> {
   const directory = await mkdtemp(join(tmpdir(), "axl-agent-session-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
@@ -129,6 +143,27 @@ test("runs a plain turn and persists the canonical events", async (context) => {
   const tree = SessionTree.fromEvents(sessionId, reread.events);
   assert.equal(tree.size, 3); // session.created + 2
   assert.equal(reread.events[0]?.type, "session.created");
+  await session.dispose();
+});
+
+test("publishes ordered deltas and clears them after the canonical assistant event", async (context) => {
+  const frames: SessionActivityFrame[] = [];
+  const port = makePort([say("hello")]);
+  const { session } = await makeSession(context, port, new ToolRegistry(), {
+    onActivity: (frame) => frames.push(frame),
+  });
+
+  await session.runTurn([{ type: "text", text: "stream" }]);
+  assert.deepEqual(
+    frames.map((frame) => [frame.sequence, frame.type]),
+    [
+      [1, "thinking_delta"],
+      [2, "thinking_delta"],
+      [3, "text_delta"],
+      [4, "clear"],
+    ],
+  );
+  assert.equal(new Set(frames.map((frame) => frame.operationId)).size, 1);
   await session.dispose();
 });
 
@@ -309,6 +344,157 @@ test("only one operation may mutate the branch at a time", async (context) => {
   await assert.rejects(session.runTurn([{ type: "text", text: "two" }]), OperationConflictError);
   release?.();
   assert.equal((await first).stopReason, "stop");
+});
+
+test("reconstructs interleaved results from one multi-tool assistant turn", () => {
+  const operationId = parseOperationId("00000000-0000-4000-8000-000000000020");
+  const events = [
+    parseEvent({
+      version: EVENT_FORMAT_VERSION,
+      id: "00000000-0000-4000-8000-000000000021",
+      sessionId,
+      operationId,
+      parentId: null,
+      timestamp: 1,
+      type: "assistant.message",
+      payload: { content: [], stopReason: "tool_use" },
+    }),
+    parseEvent({
+      version: EVENT_FORMAT_VERSION,
+      id: "00000000-0000-4000-8000-000000000022",
+      sessionId,
+      operationId,
+      parentId: "00000000-0000-4000-8000-000000000021",
+      timestamp: 2,
+      type: "tool.call",
+      payload: { callId: "first", name: "echo", input: { text: "one" } },
+    }),
+    parseEvent({
+      version: EVENT_FORMAT_VERSION,
+      id: "00000000-0000-4000-8000-000000000023",
+      sessionId,
+      operationId,
+      parentId: "00000000-0000-4000-8000-000000000022",
+      timestamp: 3,
+      type: "tool.result",
+      payload: {
+        callId: "first",
+        name: "echo",
+        content: [{ type: "text", text: "one" }],
+        isError: false,
+      },
+    }),
+    parseEvent({
+      version: EVENT_FORMAT_VERSION,
+      id: "00000000-0000-4000-8000-000000000024",
+      sessionId,
+      operationId,
+      parentId: "00000000-0000-4000-8000-000000000023",
+      timestamp: 4,
+      type: "tool.call",
+      payload: { callId: "second", name: "echo", input: { text: "two" } },
+    }),
+    parseEvent({
+      version: EVENT_FORMAT_VERSION,
+      id: "00000000-0000-4000-8000-000000000025",
+      sessionId,
+      operationId,
+      parentId: "00000000-0000-4000-8000-000000000024",
+      timestamp: 5,
+      type: "tool.result",
+      payload: {
+        callId: "second",
+        name: "echo",
+        content: [{ type: "text", text: "two" }],
+        isError: false,
+      },
+    }),
+  ];
+  const messages = messagesFromLineage(events);
+  assert.deepEqual(
+    messages.map((message) => message.role),
+    ["assistant", "tool", "tool"],
+  );
+  const assistant = messages[0];
+  assert.equal(assistant?.role, "assistant");
+  if (assistant?.role === "assistant") assert.equal(assistant.toolCalls?.length, 2);
+});
+
+test("reopening after daemon loss closes an unanswered tool call", async (context) => {
+  const { session, path } = await makeSession(context, makePort([]));
+  const before = (await session.log.read()).events;
+  const parent = before.at(-1)?.id ?? null;
+  const operationId = parseOperationId("00000000-0000-4000-8000-000000000010");
+  const assistant = parseEvent({
+    version: EVENT_FORMAT_VERSION,
+    id: "00000000-0000-4000-8000-000000000011",
+    sessionId,
+    operationId,
+    parentId: parent,
+    timestamp: 10,
+    type: "assistant.message",
+    payload: { content: [], stopReason: "tool_use" },
+  });
+  const call = parseEvent({
+    version: EVENT_FORMAT_VERSION,
+    id: "00000000-0000-4000-8000-000000000012",
+    sessionId,
+    operationId,
+    parentId: assistant.id,
+    timestamp: 11,
+    type: "tool.call",
+    payload: { callId: "interrupted-call", name: "echo", input: { text: "hello" } },
+  });
+  const interaction = parseEvent({
+    version: EVENT_FORMAT_VERSION,
+    id: "00000000-0000-4000-8000-000000000013",
+    sessionId,
+    operationId,
+    parentId: call.id,
+    timestamp: 12,
+    type: "interaction.requested",
+    payload: {
+      interactionId: "interrupted-interaction",
+      kind: "mcp_tool",
+      source: "fixture",
+      message: "Approve?",
+    },
+  });
+  await session.log.append(assistant);
+  await session.log.append(call);
+  await session.log.append(interaction);
+  await session.dispose();
+
+  const port = makePort([say("continued")]);
+  const reopened = await AgentSession.open(path, sessionId, {
+    model: port,
+    tools: new ToolRegistry(),
+    cwd: "/workspace",
+  });
+  const recoveredEvents = (await reopened.log.read()).events;
+  const resolvedInteraction = recoveredEvents.find(
+    (event) =>
+      event.type === "interaction.resolved" &&
+      event.payload.interactionId === "interrupted-interaction",
+  );
+  assert.ok(resolvedInteraction);
+  if (resolvedInteraction.type === "interaction.resolved") {
+    assert.equal(resolvedInteraction.payload.action, "cancel");
+  }
+  const recovered = recoveredEvents.find(
+    (event) => event.type === "tool.result" && event.payload.callId === "interrupted-call",
+  );
+  assert.ok(recovered);
+  if (recovered.type === "tool.result") {
+    assert.equal(recovered.payload.isError, true);
+    assert.deepEqual(recovered.payload.details, {
+      endedBy: "abort",
+      reason: "daemon_restart",
+    });
+  }
+  await reopened.runTurn([{ type: "text", text: "continue" }]);
+  assert.equal(port.requests.length, 1);
+  await reopened.dispose();
 });
 
 test("reopening a session projects history and appends no duplicate root", async (context) => {

@@ -100,6 +100,40 @@ test("blob content fails loudly instead of being dropped", () => {
   );
 });
 
+test("encodes resolved image blobs as Responses API image parts", () => {
+  const digest = "a".repeat(64);
+  const body = encodeResponsesRequest(
+    model,
+    {
+      modelId: "gpt-5",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "inspect" },
+            { type: "blob", blob: { sha256: digest, mediaType: "image/png", sizeBytes: 3 } },
+          ],
+        },
+      ],
+    },
+    "gpt-5",
+    new Map([[digest, "YWJj"]]),
+  );
+  assert.deepEqual(body.input, [
+    {
+      role: "user",
+      content: [
+        { type: "input_text", text: "inspect" },
+        {
+          type: "input_image",
+          detail: "auto",
+          image_url: "data:image/png;base64,YWJj",
+        },
+      ],
+    },
+  ]);
+});
+
 async function* frames(events: readonly unknown[]): AsyncGenerator<SseFrame> {
   for (const event of events) yield { data: JSON.stringify(event) };
 }

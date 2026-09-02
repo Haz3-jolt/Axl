@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { connect, type Socket } from "node:net";
+import { StringDecoder } from "node:string_decoder";
 
 import {
   encodeWireMessage,
   parseServerMessage,
   parseWireRequest,
   WIRE_PROTOCOL_VERSION,
+  type WireActivity,
   type WireEvent,
   type WireMethod,
 } from "@axl/protocol";
@@ -32,6 +34,7 @@ export class DaemonClient {
   private settleReady: ((error?: Error) => void) | undefined;
   private nextId = 1;
   private buffer = "";
+  private readonly decoder = new StringDecoder("utf8");
   private helloReceived = false;
   private closed = false;
   private readonly pending = new Map<
@@ -39,6 +42,8 @@ export class DaemonClient {
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
   >();
   private readonly eventListeners = new Set<(event: WireEvent) => void>();
+  private readonly activityListeners = new Set<(event: WireActivity) => void>();
+  private readonly disconnectListeners = new Set<(error: Error) => void>();
 
   private constructor(socket: Socket) {
     this.socket = socket;
@@ -113,12 +118,22 @@ export class DaemonClient {
     return () => this.eventListeners.delete(listener);
   }
 
+  onActivity(listener: (event: WireActivity) => void): () => void {
+    this.activityListeners.add(listener);
+    return () => this.activityListeners.delete(listener);
+  }
+
+  onDisconnect(listener: (error: Error) => void): () => void {
+    this.disconnectListeners.add(listener);
+    return () => this.disconnectListeners.delete(listener);
+  }
+
   close(): void {
     if (!this.closed) this.socket.destroy();
   }
 
   private receive(chunk: Buffer): void {
-    this.buffer += chunk.toString("utf8");
+    this.buffer += this.decoder.write(chunk);
     if (Buffer.byteLength(this.buffer) > MAX_LINE_BYTES && !this.buffer.includes("\n")) {
       this.fail(new WireClientError("frame_too_large", "Daemon message exceeded the size limit"));
       return;
@@ -178,8 +193,10 @@ export class DaemonClient {
       pending.resolve(message.result);
     } else if (message.kind === "error") {
       this.rejectRequest(message.id, new WireClientError(message.code, message.message));
-    } else {
+    } else if (message.kind === "event") {
       for (const listener of this.eventListeners) listener(message);
+    } else {
+      for (const listener of this.activityListeners) listener(message);
     }
   }
 
@@ -194,6 +211,8 @@ export class DaemonClient {
     this.settleReady?.(error);
     for (const { reject } of this.pending.values()) reject(error);
     this.pending.clear();
+    for (const listener of this.disconnectListeners) listener(error);
+    this.disconnectListeners.clear();
     this.socket.destroy();
   }
 }
