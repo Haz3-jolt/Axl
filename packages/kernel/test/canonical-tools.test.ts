@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -253,7 +253,7 @@ test("edit rejects misses, ambiguity, and missing files before writing", async (
 
   await assert.rejects(
     edit.execute({ path: "code.ts", oldText: "y();", newText: "z();" }, noSignal),
-    /not found/,
+    /Target changed or no longer matches\. Read the file again and retry\./,
   );
   await assert.rejects(
     edit.execute({ path: "code.ts", oldText: "x();", newText: "z();" }, noSignal),
@@ -268,6 +268,97 @@ test("edit rejects misses, ambiguity, and missing files before writing", async (
     /identical/,
   );
   assert.equal(await readFile(path, "utf8"), original); // nothing was written
+});
+
+test("edit and write serialize same-file mutations in call order", async (context) => {
+  const cwd = await workspace(context);
+  const path = join(cwd, "code.ts");
+  const alias = join(cwd, "alias.ts");
+  await writeFile(path, "const a = 1;\nconst b = 1;\n");
+  await symlink(path, alias);
+  const firstEdit = makeEditTool({ cwd });
+  const secondEdit = makeEditTool({ cwd });
+  const write = makeWriteTool({ cwd });
+
+  await Promise.all([
+    firstEdit.execute(
+      { path: "code.ts", oldText: "const a = 1;", newText: "const a = 2;" },
+      noSignal,
+    ),
+    secondEdit.execute(
+      { path: "alias.ts", oldText: "const b = 1;", newText: "const b = 2;" },
+      noSignal,
+    ),
+  ]);
+  assert.equal(await readFile(path, "utf8"), "const a = 2;\nconst b = 2;\n");
+  assert.equal((await lstat(alias)).isSymbolicLink(), true);
+
+  const overlapping = await Promise.allSettled([
+    firstEdit.execute(
+      { path: "code.ts", oldText: "const a = 2;", newText: "const a = 3;" },
+      noSignal,
+    ),
+    secondEdit.execute(
+      { path: "alias.ts", oldText: "const a = 2;", newText: "const a = 4;" },
+      noSignal,
+    ),
+  ]);
+  assert.equal(overlapping[0]?.status, "fulfilled");
+  assert.equal(overlapping[1]?.status, "rejected");
+  assert.match(
+    String(overlapping[1]?.status === "rejected" ? overlapping[1].reason : ""),
+    /Target changed or no longer matches\. Read the file again and retry\./,
+  );
+  assert.equal(await readFile(path, "utf8"), "const a = 3;\nconst b = 2;\n");
+
+  await Promise.all([
+    firstEdit.execute(
+      { path: "code.ts", oldText: "const b = 2;", newText: "const b = 3;" },
+      noSignal,
+    ),
+    write.execute({ path: "alias.ts", content: "written last\n" }, noSignal),
+  ]);
+  assert.equal(await readFile(path, "utf8"), "written last\n");
+  assert.equal((await lstat(alias)).isSymbolicLink(), true);
+});
+
+test("file mutations on different paths remain independent", async (context) => {
+  const cwd = await workspace(context);
+  await Promise.all([
+    writeFile(join(cwd, "first.txt"), "first\n"),
+    writeFile(join(cwd, "second.txt"), "second\n"),
+  ]);
+  const first = makeEditTool({ cwd });
+  const second = makeEditTool({ cwd });
+
+  await Promise.all([
+    first.execute({ path: "first.txt", oldText: "first", newText: "one" }, noSignal),
+    second.execute({ path: "second.txt", oldText: "second", newText: "two" }, noSignal),
+  ]);
+  assert.equal(await readFile(join(cwd, "first.txt"), "utf8"), "one\n");
+  assert.equal(await readFile(join(cwd, "second.txt"), "utf8"), "two\n");
+});
+
+test("an aborted file mutation releases its queue", async (context) => {
+  const cwd = await workspace(context);
+  const path = join(cwd, "code.ts");
+  await writeFile(path, "const value = 1;\n");
+  const edit = makeEditTool({ cwd });
+  const aborted = new AbortController();
+  aborted.abort();
+
+  await assert.rejects(
+    edit.execute(
+      { path: "code.ts", oldText: "const value = 1;", newText: "const value = 2;" },
+      aborted.signal,
+    ),
+    (error) => error instanceof DOMException && error.name === "AbortError",
+  );
+  await edit.execute(
+    { path: "code.ts", oldText: "const value = 1;", newText: "const value = 3;" },
+    noSignal,
+  );
+  assert.equal(await readFile(path, "utf8"), "const value = 3;\n");
 });
 
 test("write creates directories, overwrites atomically, and enforces bounds", async (context) => {

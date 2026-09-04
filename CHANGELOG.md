@@ -48,6 +48,7 @@ This file records notable user-facing changes.
 
 ### Changed
 
+- File edits and writes targeting the same canonical path now serialize in call order, and stale exact-text edits fail before writing.
 - Local provider, tool, extension, and sandbox assembly now lives outside the terminal client, so clients remain replaceable projections over the daemon protocol.
 - File tools now require explicit readable roots, and the default runtime limits them to the workspace.
 - The canonical command tool is named `bash`; historical `shell` calls remain replayable.
