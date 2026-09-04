@@ -2448,6 +2448,6 @@ Complete these dogfood fixes before continuing Phase 5:
 2. Build the local BM25 capability index and log the three-or-fewer records disclosed for each user turn.
 3. Replace the generic MCP gateway with selected provider-native tool schemas and frozen per-turn dispatch bindings.
 4. Add the bearer-token and basic-auth credential broker before using credentialed third-party processes in dogfood sessions.
-5. Add hash-anchored reads and edits with stale-snapshot rejection.
+5. Serialize `edit` and `write` operations by canonical file path, re-read inside the queue, and reject stale exact-text edits before writing.
 6. Add bounded parallel tool execution with deterministic call/result ordering and explicit concurrency policy.
 7. Stop and verify these paths before returning to web access or compaction.
