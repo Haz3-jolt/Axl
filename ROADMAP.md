@@ -1329,7 +1329,7 @@ The mobile app is a remote-control client over the same daemon protocol, in the 
 
 Capabilities:
 
-- List, open, and start sessions on cloud workers or reachable daemons
+- List and open sessions, request new sessions on cloud workers, and attach to reachable daemons. The mobile app never starts a daemon process on the device; the remote control plane allocates the sandboxed worker and starts its daemon.
 - Live conversation view with tool, diff, and terminal cards
 - Reply to and steer a running session
 - Answer permission requests from the phone

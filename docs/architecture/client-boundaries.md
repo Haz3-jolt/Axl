@@ -22,6 +22,23 @@ This document defines which behavior is shared, which code remains platform-spec
 
 The daemon is the sole authority for session state and effects. The SDK contains reusable client behavior, but it is not an alternate authority. SDK projections and caches are disposable views of daemon-owned canonical events.
 
+## Daemon launch and session placement
+
+A protocol client and a daemon process host are distinct roles. `packages/sdk` connects to a daemon but never launches one. A trusted process host may connect to an existing daemon or launch the daemon before handing an SDK client to its presentation layer.
+
+| Consumer | Daemon launch owner |
+| --- | --- |
+| Terminal | `packages/cli` launches a local daemon; the TUI only uses the SDK client |
+| Local web | The planned `axl web` gateway host launches a local daemon; browser code never does |
+| Desktop | A trusted native, Tauri, or Electron main process may launch a local daemon; renderer code never does |
+| IDE | A trusted extension host may launch a local daemon; an embedded webview never does |
+| Headless | The command or automation runner may launch a local daemon |
+| Mobile or remote web | An authenticated remote control plane allocates a cloud worker or locates a reachable daemon; client code never launches a daemon process on the device |
+
+With future cloud sandbox support, mobile and remote web clients may request creation of a session on a cloud placement. This is a daemon or control-plane operation, not local process authority. The cloud worker starts the sandboxed daemon, and the client attaches through the authenticated protocol. Mobile devices and browsers never run the agent loop, tools, or workspace authority.
+
+A host that bundles a daemon and client still performs the normal wire-version handshake. An already-running daemon may survive a host upgrade, so an incompatible daemon fails loudly and requires an explicit lifecycle action. A host must not automatically replace a daemon while it owns active work.
+
 ## Consumer-only clients
 
 A presentation client may own:
