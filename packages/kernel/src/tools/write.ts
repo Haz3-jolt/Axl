@@ -4,12 +4,13 @@
 
 import { randomUUID } from "node:crypto";
 import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
 
 import type { JsonObject } from "@axl/protocol";
 
-import { assertWriteAllowed, type WorkspacePolicy } from "../path-policy.ts";
+import type { WorkspacePolicy } from "../path-policy.ts";
 import type { KernelTool, ToolExecutionResult } from "../tools.ts";
+import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { rejectUnknownFields, requiredString, ToolInputError } from "./validate.ts";
 
 export interface WriteToolOptions {
@@ -35,10 +36,9 @@ export function makeWriteTool(options: WriteToolOptions): KernelTool {
       required: ["path", "content"],
       additionalProperties: false,
     },
-    async execute(input: JsonObject): Promise<ToolExecutionResult> {
+    async execute(input: JsonObject, signal: AbortSignal): Promise<ToolExecutionResult> {
       rejectUnknownFields(input, "write", ["path", "content"]);
-      let path = resolve(options.cwd, requiredString(input, "write", "path"));
-      if (options.policy !== undefined) path = await assertWriteAllowed(options.policy, path);
+      const requestedPath = requiredString(input, "write", "path");
       const content = input.content;
       if (typeof content !== "string") throw new ToolInputError("write: content must be a string");
       const bytes = Buffer.byteLength(content, "utf8");
@@ -46,27 +46,38 @@ export function makeWriteTool(options: WriteToolOptions): KernelTool {
         throw new ToolInputError(`write: content is ${bytes} bytes; maximum is ${maxBytes}`);
       }
 
-      await mkdir(dirname(path), { recursive: true });
-      const temporary = `${path}.${randomUUID()}.axl-tmp`;
-      try {
-        const mode = await stat(path).then(
-          (value) => value.mode & 0o777,
-          (error: NodeJS.ErrnoException) => {
-            if (error.code === "ENOENT") return 0o644;
-            throw error;
-          },
-        );
-        await writeFile(temporary, content, { encoding: "utf8", mode, flag: "wx" });
-        await rename(temporary, path);
-      } finally {
-        await rm(temporary, { force: true });
-      }
+      return withFileMutationQueue(
+        options.cwd,
+        requestedPath,
+        options.policy,
+        async (path): Promise<ToolExecutionResult> => {
+          signal.throwIfAborted();
+          await mkdir(dirname(path), { recursive: true });
+          signal.throwIfAborted();
+          const temporary = `${path}.${randomUUID()}.axl-tmp`;
+          try {
+            const mode = await stat(path).then(
+              (value) => value.mode & 0o777,
+              (error: NodeJS.ErrnoException) => {
+                if (error.code === "ENOENT") return 0o644;
+                throw error;
+              },
+            );
+            signal.throwIfAborted();
+            await writeFile(temporary, content, { encoding: "utf8", mode, flag: "wx", signal });
+            signal.throwIfAborted();
+            await rename(temporary, path);
+          } finally {
+            await rm(temporary, { force: true });
+          }
 
-      return {
-        content: [{ type: "text", text: `Wrote ${bytes} bytes to ${path}` }],
-        isError: false,
-        details: { path, bytes },
-      };
+          return {
+            content: [{ type: "text", text: `Wrote ${bytes} bytes to ${path}` }],
+            isError: false,
+            details: { path, bytes },
+          };
+        },
+      );
     },
   };
 }

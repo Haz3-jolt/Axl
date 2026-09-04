@@ -3,12 +3,11 @@
 
 import { randomUUID } from "node:crypto";
 import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
-
 import type { JsonObject } from "@axl/protocol";
 
-import { assertWriteAllowed, type WorkspacePolicy } from "../path-policy.ts";
+import type { WorkspacePolicy } from "../path-policy.ts";
 import type { KernelTool, ToolExecutionResult } from "../tools.ts";
+import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import {
   optionalBoolean,
   rejectUnknownFields,
@@ -55,10 +54,9 @@ export function makeEditTool(options: EditToolOptions): KernelTool {
       required: ["path", "oldText", "newText"],
       additionalProperties: false,
     },
-    async execute(input: JsonObject): Promise<ToolExecutionResult> {
+    async execute(input: JsonObject, signal: AbortSignal): Promise<ToolExecutionResult> {
       rejectUnknownFields(input, "edit", ["path", "oldText", "newText", "replaceAll"]);
-      let path = resolve(options.cwd, requiredString(input, "edit", "path"));
-      if (options.policy !== undefined) path = await assertWriteAllowed(options.policy, path);
+      const requestedPath = requiredString(input, "edit", "path");
       const oldText = requiredString(input, "edit", "oldText");
       const newText = input.newText;
       if (typeof newText !== "string") {
@@ -69,48 +67,61 @@ export function makeEditTool(options: EditToolOptions): KernelTool {
       }
       const replaceAll = optionalBoolean(input, "edit", "replaceAll") ?? false;
 
-      let content: string;
-      try {
-        content = await readFile(path, "utf8");
-      } catch (error) {
-        throw new ToolInputError(
-          `edit: cannot read ${path}: ${(error as NodeJS.ErrnoException).code ?? "unknown error"}`,
-        );
-      }
+      return withFileMutationQueue(
+        options.cwd,
+        requestedPath,
+        options.policy,
+        async (path): Promise<ToolExecutionResult> => {
+          signal.throwIfAborted();
+          let content: string;
+          try {
+            content = await readFile(path, { encoding: "utf8", signal });
+          } catch (error) {
+            if (signal.aborted) throw signal.reason;
+            throw new ToolInputError(
+              `edit: cannot read ${path}: ${(error as NodeJS.ErrnoException).code ?? "unknown error"}`,
+            );
+          }
 
-      const occurrences = countOccurrences(content, oldText);
-      if (occurrences === 0) {
-        throw new ToolInputError(`edit: oldText not found in ${path}`);
-      }
-      if (occurrences > 1 && !replaceAll) {
-        throw new ToolInputError(
-          `edit: oldText occurs ${occurrences} times in ${path}; make it unique or set replaceAll`,
-        );
-      }
+          const occurrences = countOccurrences(content, oldText);
+          if (occurrences === 0) {
+            throw new ToolInputError(
+              `edit: Target changed or no longer matches. Read the file again and retry. Path: ${path}`,
+            );
+          }
+          if (occurrences > 1 && !replaceAll) {
+            throw new ToolInputError(
+              `edit: oldText occurs ${occurrences} times in ${path}; make it unique or set replaceAll`,
+            );
+          }
 
-      const updated = replaceAll
-        ? content.split(oldText).join(newText)
-        : content.replace(oldText, newText);
-      const temporary = `${path}.${randomUUID()}.axl-tmp`;
-      try {
-        const mode = (await stat(path)).mode & 0o777;
-        await writeFile(temporary, updated, { encoding: "utf8", mode });
-        await rename(temporary, path);
-      } finally {
-        await rm(temporary, { force: true });
-      }
+          const updated = replaceAll
+            ? content.split(oldText).join(newText)
+            : content.replace(oldText, newText);
+          const temporary = `${path}.${randomUUID()}.axl-tmp`;
+          try {
+            const mode = (await stat(path)).mode & 0o777;
+            signal.throwIfAborted();
+            await writeFile(temporary, updated, { encoding: "utf8", mode, signal });
+            signal.throwIfAborted();
+            await rename(temporary, path);
+          } finally {
+            await rm(temporary, { force: true });
+          }
 
-      const replacements = replaceAll ? occurrences : 1;
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Replaced ${replacements} occurrence${replacements === 1 ? "" : "s"} in ${path}`,
-          },
-        ],
-        isError: false,
-        details: { path, replacements },
-      };
+          const replacements = replaceAll ? occurrences : 1;
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Replaced ${replacements} occurrence${replacements === 1 ? "" : "s"} in ${path}`,
+              },
+            ],
+            isError: false,
+            details: { path, replacements },
+          };
+        },
+      );
     },
   };
 }
