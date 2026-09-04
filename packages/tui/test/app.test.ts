@@ -838,9 +838,11 @@ test("Ctrl+V paste, Shift+Enter, and searchable hotkeys behave", async (context)
   input.write("\x16");
   await until(() => text().includes("pasted second"), "clipboard insertion");
   input.write("\r");
-  await until(() => text().includes("│ pasted first"), "clipboard prompt submission");
+  await until(() => text().includes("↑1 ↓1"), "clipboard prompt reply");
+  assert.match(text(), /│ pasted first/);
   input.write("line one\x1b[13;2uline two\r");
-  await until(() => text().includes("line two"), "shift enter prompt submission");
+  await until(() => text().includes("↑2 ↓2"), "shift enter prompt reply");
+  assert.match(text(), /line two/);
   input.write("/hotkeys\r");
   await until(() => text().includes("Keyboard shortcuts"), "hotkeys dialog");
   assert.match(text(), /Ctrl\+A/);
