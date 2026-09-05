@@ -67,3 +67,26 @@ test("enforces protocol, kernel, runtime, TUI, and extension dependency boundari
     "apps/example/index.ts imports @axl/kernel; apps may import only @axl/sdk",
   ]);
 });
+
+test("checks real imports without interpreting embedded clipboard scripts as dependencies", () => {
+  const root = mkdtempSync(join(tmpdir(), "axl-boundary-syntax-"));
+  writePackage(
+    root,
+    "tui",
+    { name: "@axl/tui" },
+    `
+    const script = 'ObjC.import("AppKit");';
+    ObjC.import("AppKit");
+    // import "@axl/ai";
+    import type { Event } from "@axl/protocol";
+    export { value } from "@axl/kernel";
+    void import("@axl/ai");
+    type Forbidden = import("@axl/runtime").Runtime;
+  `,
+  );
+  assert.deepEqual(checkWorkspace(root), [
+    "packages/tui/src/index.ts imports @axl/kernel; TUI source may import only client-facing packages",
+    "packages/tui/src/index.ts imports @axl/ai; TUI source may import only client-facing packages",
+    "packages/tui/src/index.ts imports @axl/runtime; TUI source may import only client-facing packages",
+  ]);
+});

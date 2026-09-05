@@ -6,7 +6,7 @@ import type { OwnedTerminalToolRenderer } from "@axl/extension-api";
 import type { BlobReference, CanonicalEvent, EventPayloadMap } from "@axl/protocol";
 
 import type { Component } from "./render.ts";
-import { sanitizeTerminalText } from "./render.ts";
+import { sanitizeTerminalText, truncateToWidth } from "./render.ts";
 import { renderToolTransaction, type ToolTransactionStatus } from "./tool-display.ts";
 import type { BlobRenderer, Palette, ToolOutputDisplay } from "./transcript.ts";
 import type { TranscriptRow } from "./transcript-document.ts";
@@ -47,6 +47,7 @@ export class ToolTransactionComponent implements Component {
   private cachedMode: ToolOutputDisplay | undefined;
   private cachedPalette: Palette | undefined;
   private cachedLines: string[] | undefined;
+  private cachedSummary = false;
 
   constructor(
     event: CanonicalEvent<"tool.call">,
@@ -93,20 +94,26 @@ export class ToolTransactionComponent implements Component {
     this.invalidate();
   }
 
-  render(width: number): string[] {
+  get state(): ToolTransactionStatus {
+    return this.status;
+  }
+
+  render(width: number, summaryOnly = false): string[] {
     const palette = this.palette();
     const mode = this.detailMode();
     if (
       this.cachedLines !== undefined &&
       this.cachedWidth === width &&
       this.cachedMode === mode &&
-      this.cachedPalette === palette
+      this.cachedPalette === palette &&
+      this.cachedSummary === summaryOnly
     ) {
       return this.cachedLines;
     }
     const renderer = this.renderer();
     const toolLines = renderToolTransaction({
       callId: this.callId,
+      summaryOnly,
       name: this.name,
       args: this.args,
       ...(this.result === undefined ? {} : { result: this.result }),
@@ -120,8 +127,11 @@ export class ToolTransactionComponent implements Component {
     });
     this.cachedLines = [
       ...toolLines,
-      ...this.blobs.flatMap((blob) => this.renderBlob?.(blob, width, palette) ?? []),
+      ...(summaryOnly
+        ? []
+        : this.blobs.flatMap((blob) => this.renderBlob?.(blob, width, palette) ?? [])),
     ];
+    this.cachedSummary = summaryOnly;
     this.cachedWidth = width;
     this.cachedMode = mode;
     this.cachedPalette = palette;
@@ -136,25 +146,37 @@ export class ToolTransactionComponent implements Component {
   }
 }
 
-/** Owns ordered live tool transactions while the transcript remains append-only. */
-export class ToolTransactionStore {
+// Independently implements Pi-style collapsed details; consecutive-call grouping is Axl-specific.
+// Reference: https://www.npmjs.com/package/@earendil-works/pi-coding-agent/v/0.85.0
+/** Retains a consecutive tool group until it can be committed before the next message. */
+export class ToolTransactionStore implements Component {
   private readonly palette: () => Palette;
   private readonly detailMode: () => ToolOutputDisplay;
   private readonly renderer: (name: string) => OwnedTerminalToolRenderer | undefined;
   private readonly renderBlob: BlobRenderer | undefined;
   private readonly transactions = new Map<string, ToolTransactionComponent>();
-  private readonly order: string[] = [];
+  private readonly pending = new Set<string>();
+  private readonly detailOverrides: ReadonlyMap<string, ToolOutputDisplay>;
 
   constructor(
     palette: () => Palette,
     detailMode: () => ToolOutputDisplay,
     renderer: (name: string) => OwnedTerminalToolRenderer | undefined = () => undefined,
     renderBlob?: BlobRenderer,
+    detailOverrides: ReadonlyMap<string, ToolOutputDisplay> = new Map(),
   ) {
     this.palette = palette;
     this.detailMode = detailMode;
     this.renderer = renderer;
     this.renderBlob = renderBlob;
+    this.detailOverrides = detailOverrides;
+  }
+
+  private mode(): ToolOutputDisplay {
+    const sourceId = this.transactions.values().next().value?.sourceId;
+    return (
+      (sourceId === undefined ? undefined : this.detailOverrides.get(sourceId)) ?? this.detailMode()
+    );
   }
 
   start(
@@ -167,20 +189,23 @@ export class ToolTransactionStore {
     const component = new ToolTransactionComponent(
       event,
       this.palette,
-      this.detailMode,
+      () => this.mode(),
       status,
       () => this.renderer(event.payload.name),
       this.renderBlob,
     );
     this.transactions.set(event.payload.callId, component);
-    this.order.push(event.payload.callId);
+    this.pending.add(event.payload.callId);
     return component;
   }
 
   deny(event: CanonicalEvent<"sandbox.violation">): boolean {
     const component = [...this.transactions.values()]
       .reverse()
-      .find((candidate) => candidate.operationId === event.operationId);
+      .find(
+        (candidate) =>
+          this.pending.has(candidate.callId) && candidate.operationId === event.operationId,
+      );
     if (component === undefined) return false;
     component.markDenied(event.payload.reason);
     return true;
@@ -188,43 +213,79 @@ export class ToolTransactionStore {
 
   settle(event: CanonicalEvent<"tool.result">): ToolTransactionComponent | undefined {
     const component = this.transactions.get(event.payload.callId);
-    if (component === undefined) return undefined;
+    if (component === undefined || !this.pending.has(event.payload.callId)) return undefined;
     component.settle(event);
-    this.transactions.delete(event.payload.callId);
-    const index = this.order.indexOf(event.payload.callId);
-    if (index >= 0) this.order.splice(index, 1);
+    this.pending.delete(event.payload.callId);
     return component;
   }
 
-  components(): readonly Component[] {
-    return this.order.flatMap((callId) => {
-      const component = this.transactions.get(callId);
-      return component === undefined ? [] : [component];
-    });
+  components(): readonly ToolTransactionComponent[] {
+    return [...this.transactions.values()];
+  }
+
+  render(width: number): string[] {
+    const components = this.components();
+    if (components.length === 0) return [];
+    const palette = this.palette();
+    if (this.mode() !== "compact") {
+      const lines = components.flatMap((component) => component.render(width));
+      return lines.length === 0
+        ? []
+        : [
+            ...lines,
+            palette.dim(
+              truncateToWidth(
+                "  Ctrl+O for tool details · click in fullscreen to toggle",
+                width,
+                "",
+              ),
+            ),
+          ];
+    }
+    const hint = palette.dim(
+      truncateToWidth(
+        "  Ctrl+O to expand tool inputs and results · click in fullscreen to toggle",
+        width,
+        "",
+      ),
+    );
+    if (components.length === 1) return [...(components[0]?.render(width) ?? []), hint];
+    const counts = new Map<ToolTransactionStatus, number>();
+    for (const component of components)
+      counts.set(component.state, (counts.get(component.state) ?? 0) + 1);
+    const status = [...counts]
+      .map(([state, count]) => `${count} ${state === "succeeded" ? "done" : state}`)
+      .join(" · ");
+    return [
+      "",
+      palette.dim(truncateToWidth(`  Tools · ${components.length} calls · ${status}`, width, "…")),
+      ...(components.length > 3 ? [palette.dim(`  … ${components.length - 3} earlier calls`)] : []),
+      ...components.slice(-3).flatMap((component) => component.render(width, true)),
+      hint,
+    ].map((line) => truncateToWidth(line, width, ""));
   }
 
   rows(width: number): readonly TranscriptRow[] {
-    return this.order.flatMap((callId) => {
-      const component = this.transactions.get(callId);
-      if (component === undefined) return [];
-      return component.render(width).map((text, rowInSource) => ({
-        text,
-        sourceId: component.sourceId,
-        prompt: false,
-        rowInSource,
-      }));
-    });
+    const sourceId = this.components()[0]?.sourceId;
+    return this.render(width).map((text, rowInSource) => ({
+      text,
+      ...(sourceId === undefined ? {} : { sourceId, toolGroupId: sourceId }),
+      prompt: false,
+      rowInSource,
+    }));
+  }
+
+  drain(width: number): readonly TranscriptRow[] {
+    if (this.pending.size > 0) return [];
+    const rows = this.rows(width);
+    this.transactions.clear();
+    return rows;
   }
 
   replace(other: ToolTransactionStore): void {
     this.transactions.clear();
-    this.order.length = 0;
-    for (const callId of other.order) {
-      const component = other.transactions.get(callId);
-      if (component !== undefined) {
-        this.transactions.set(callId, component);
-        this.order.push(callId);
-      }
-    }
+    this.pending.clear();
+    for (const callId of other.pending) this.pending.add(callId);
+    for (const [callId, component] of other.transactions) this.transactions.set(callId, component);
   }
 }

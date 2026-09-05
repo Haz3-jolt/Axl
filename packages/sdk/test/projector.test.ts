@@ -255,3 +255,22 @@ test("projects the language-neutral canonical event corpus deterministically", (
   assert.deepEqual(first.state, second.state);
   assert.equal(first.state.records.length, conformanceEvents.length);
 });
+
+test("overview exposes current status without materializing history collections", () => {
+  const projector = new ConversationProjector(sessionId);
+  const initial = projector.overview;
+  for (const item of conformanceEvents) projector.applyEvent(item);
+  const overview = projector.overview;
+  const state = projector.state;
+  assert.ok(Object.isFrozen(overview));
+  assert.deepEqual(
+    overview,
+    Object.fromEntries(Object.entries(state).filter(([, value]) => !Array.isArray(value))),
+  );
+  assert.ok(!("records" in overview));
+  assert.equal(initial.model, undefined);
+  assert.equal(initial.usage.inputTokens, 0);
+  projector.reset();
+  assert.deepEqual(projector.overview, initial);
+  assert.deepEqual(overview.usage, state.usage);
+});

@@ -30,7 +30,7 @@ import type {
 import { subscribeSession } from "@axl/sdk";
 import { connectUnixClient } from "@axl/sdk/unix";
 
-import { AxlApp, stripAnsi } from "../src/index.ts";
+import { AxlApp, saveClipboardImage, stripAnsi } from "../src/index.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
 
 class PassThrough extends NodePassThrough {
@@ -831,6 +831,15 @@ test("uploads image files and sends blob references with the next prompt", async
 
   input.write(`/attach ${imagePath}\r`);
   await until(() => text().includes("attached pixel.png"), "image file upload");
+  assert.match(text(), /\/attach clear to remove attachments/);
+  input.write("/attach clear\r");
+  await until(() => text().includes("attachments cleared"), "attachment removal");
+  const cleared = new VirtualTerminal(100, 24);
+  cleared.write(text());
+  assert.ok(!cleared.rows().some((row) => row.includes("attached pixel.png")));
+  const beforeReattach = text().length;
+  input.write(`/attach ${imagePath}\r`);
+  await until(() => text().slice(beforeReattach).includes("attached pixel.png"), "reattach image");
   input.write("inspect this\r");
   await until(() => requests.length === 1, "image prompt delivery");
   const user = requests[0]?.at(-1) as
@@ -1741,4 +1750,322 @@ test("/reload requests a runtime rebuild and renders the boundary", async (conte
 
   input.write("/reload\r");
   await until(() => text().includes("· tools reloaded · generic"), "reload boundary rendered");
+});
+
+test("consecutive tools group, expand, and resume with complete canonical inputs", async (context) => {
+  let turn = 0;
+  const model: ModelPort = {
+    stream() {
+      turn += 1;
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        if (turn <= 4) {
+          yield {
+            type: "tool_call",
+            callId: `read-${turn}`,
+            name: "read",
+            input: { path: `file-${turn}.txt` },
+          };
+          yield { type: "completed", stopReason: "tool_use", usage };
+          return;
+        }
+        yield { type: "text_delta", text: "GROUP_COMPLETE" };
+        yield { type: "completed", stopReason: "stop", usage };
+      })();
+    },
+  };
+  const { socketPath, directory } = await startStack(context, model, () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "read",
+      description: "Read a fixture",
+      inputSchema: { type: "object" },
+      execute: async () => ({
+        content: [{ type: "text", text: "COMPLETE_TOOL_RESULT" }],
+        isError: false,
+      }),
+    });
+    return tools;
+  });
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+  });
+  context.after(() => app.stop());
+  input.write("inspect fixtures\r");
+  await until(() => text().includes("GROUP_COMPLETE"), "group completion");
+  const terminal = new VirtualTerminal(100, 24);
+  terminal.write(text());
+  assert.equal(terminal.rows().filter((row) => row.includes("Tools · 4 calls · 4 done")).length, 1);
+  assert.match(terminal.rows().join("\n"), /Ctrl\+O to expand/);
+  assert.ok(!terminal.rows().some((row) => row.includes("COMPLETE_TOOL_RESULT")));
+
+  const beforeExpand = text().length;
+  input.write("\x0f");
+  await until(
+    () => text().slice(beforeExpand).includes("COMPLETE_TOOL_RESULT"),
+    "expanded results",
+  );
+  const expanded = new VirtualTerminal(100, 24);
+  expanded.write(text().slice(beforeExpand));
+  assert.equal(expanded.rows().filter((row) => row.includes("COMPLETE_TOOL_RESULT")).length, 4);
+  assert.match(expanded.rows().join("\n"), /"path": "file-1.txt"/);
+
+  const sessionId = app.sessionId;
+  app.stop();
+  const resumed = captureOutput();
+  const resumedApp = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    input: new PassThrough(),
+    output: resumed.output,
+    cwd: directory,
+    sessionId,
+    color: false,
+  });
+  context.after(() => resumedApp.stop());
+  assert.match(resumed.text(), /Tools · 4 calls · 4 done/);
+});
+
+test("fullscreen scroll input keeps the unbounded streaming layout anchored", async (context) => {
+  let advance!: () => void;
+  let finish!: () => void;
+  const next = new Promise<void>((resolve) => {
+    advance = resolve;
+  });
+  const done = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  context.after(() => {
+    advance();
+    finish();
+  });
+  const model: ModelPort = {
+    stream() {
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        yield {
+          type: "text_delta",
+          text: Array.from({ length: 100 }, (_, i) => `stream row ${i}\n\n`).join(""),
+        };
+        await next;
+        yield {
+          type: "text_delta",
+          text:
+            Array.from({ length: 100 }, (_, i) => `new stream row ${i}\n\n`).join("") +
+            "NEW_TAIL\n\n",
+        };
+        await done;
+        yield { type: "completed", stopReason: "stop", usage };
+      })();
+    },
+  };
+  const { socketPath, directory } = await startStack(context, model);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const terminal = new VirtualTerminal(100, 24);
+  output.on("data", (chunk: Buffer) => terminal.write(chunk.toString("utf8")));
+  const app = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    tuiMode: "fullscreen",
+    fullscreenScrollbar: "hidden",
+  });
+  context.after(() => app.stop());
+  input.write("stream please\r");
+  await until(
+    () => terminal.rows().some((row) => row.includes("stream row 99")),
+    "initial streaming tail",
+  );
+  input.write("\x1b[5~");
+  const before = terminal.rows().slice(1, 12);
+  assert.match(terminal.rows()[0] ?? "", /paused/);
+  assert.ok(before.some((row) => /stream row/.test(row)));
+  assert.ok(!before.some((row) => /stream row 99/.test(row)));
+  advance();
+  await new Promise((resolve) => setTimeout(resolve, 160));
+  assert.deepEqual(terminal.rows().slice(1, 12), before);
+  input.write("\x1b[1;3A");
+  assert.notDeepEqual(terminal.rows().slice(1, 12), before);
+  input.write("\x1b[6~\x1b[6~");
+  assert.match(terminal.rows()[0] ?? "", /paused/);
+  assert.ok(
+    terminal.rows().some((row) => row.includes("new stream row")),
+    "Page Down reaches output received while paused",
+  );
+  assert.ok(
+    !terminal.rows().some((row) => row.includes("NEW_TAIL")),
+    "Page Down does not jump to the latest output",
+  );
+  input.write("\x1b[F");
+  await until(
+    () => terminal.rows().some((row) => row.includes("NEW_TAIL")),
+    "follow latest output",
+  );
+  finish();
+  await until(() => text().includes("↑1 ↓1"), "completed streaming turn");
+});
+
+test("clipboard paths stay editable and upload images only when submitted", async (context) => {
+  const requests: ModelTurnRequest[] = [];
+  const model: ModelPort = {
+    stream(request) {
+      requests.push(request);
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        yield { type: "text_delta", text: `clipboard-reply-${requests.length}` };
+        yield { type: "completed", stopReason: "stop", usage };
+      })();
+    },
+  };
+  const image = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const imagePath = await saveClipboardImage(image);
+  context.after(() => rm(imagePath, { force: true }));
+  const { socketPath, directory } = await startStack(context, model);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    readClipboard: async () => ({ imagePath }),
+  });
+  context.after(() => app.stop());
+  input.write("\x16");
+  await until(() => text().includes("pasted image path"), "clipboard path insertion");
+  assert.match(text(), /axl-clipboard-/);
+  assert.deepEqual(await readFile(imagePath), image);
+  assert.equal(requests.length, 0);
+  input.write("\x15without screenshot\r");
+  await until(() => text().includes("clipboard-reply-1"), "text-only prompt");
+  assert.deepEqual(requests[0]?.messages.at(-1)?.content, [
+    { type: "text", text: "without screenshot" },
+  ]);
+
+  // A path-only draft is an image prompt, not an unknown slash command.
+  input.write(`${imagePath}\r`);
+  await until(() => text().includes("clipboard-reply-2"), "clipboard image prompt");
+  const content = requests[1]?.messages.at(-1)?.content;
+  assert.equal(content?.[0]?.type, "text");
+  assert.equal(content?.[0]?.type === "text" ? content[0].text : undefined, imagePath);
+  const blob = content?.find((part) => part.type === "blob");
+  assert.ok(blob?.type === "blob");
+  assert.deepEqual(await readFile(join(directory, "data", "blobs", blob.blob.sha256)), image);
+  assert.deepEqual(await readFile(imagePath), image, "temp image remains reusable");
+
+  await rm(imagePath);
+  input.write(`inspect ${imagePath}\r`);
+  await until(() => text().includes("prompt restored"), "failed image import restores draft");
+  assert.equal(requests.length, 2);
+});
+
+test("submitting during clipboard acquisition preserves the draft instead of sending early", async (context) => {
+  let finish!: (value: string) => void;
+  const clipboard = new Promise<string>((resolve) => {
+    finish = resolve;
+  });
+  context.after(() => finish(""));
+  let requests = 0;
+  const model: ModelPort = {
+    stream(request) {
+      requests += 1;
+      return port.stream(request);
+    },
+  };
+  const { socketPath, directory } = await startStack(context, model);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const app = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    readClipboard: () => clipboard,
+  });
+  context.after(() => app.stop());
+  input.write("keep this\x16\r");
+  await until(() => text().includes("wait for the current clipboard"), "pending clipboard guard");
+  assert.equal(requests, 0);
+  finish(" pasted text");
+  await until(() => text().includes("pasted text"), "clipboard acquisition");
+  input.write("\r");
+  await until(() => text().includes("the answer"), "preserved prompt submission");
+  assert.equal(requests, 1);
+  assert.match(text(), /keep this pasted text/);
+});
+
+test("fullscreen clicks toggle one tool group without expanding the others", async (context) => {
+  let step = 0;
+  const model: ModelPort = {
+    stream() {
+      const current = step++;
+      const name = current < 2 ? "first" : "second";
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        if (current % 2 === 0) {
+          yield { type: "tool_call", callId: name, name: "read", input: { path: `${name}.txt` } };
+          yield { type: "completed", stopReason: "tool_use", usage };
+        } else {
+          yield { type: "text_delta", text: `${name} complete` };
+          yield { type: "completed", stopReason: "stop", usage };
+        }
+      })();
+    },
+  };
+  const { socketPath, directory } = await startStack(context, model, () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "read",
+      description: "Read fixture",
+      inputSchema: { type: "object" },
+      execute: async (input) => ({
+        content: [{ type: "text", text: `RESULT:${(input as { path: string }).path}` }],
+        isError: false,
+      }),
+    });
+    return tools;
+  });
+  const input = new PassThrough();
+  const { output } = captureOutput();
+  output.rows = 50;
+  const terminal = new VirtualTerminal(100, 50);
+  output.on("data", (chunk: Buffer) => terminal.write(chunk.toString("utf8")));
+  const app = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    tuiMode: "fullscreen",
+    fullscreenScrollbar: "hidden",
+  });
+  context.after(() => app.stop());
+  input.write("first prompt\r");
+  await until(() => terminal.rows().some((row) => row.includes("first complete")), "first group");
+  input.write("second prompt\r");
+  await until(() => terminal.rows().some((row) => row.includes("second complete")), "second group");
+  const clickFirst = () => {
+    const row = terminal
+      .rows()
+      .findIndex((line) => line.includes("READ") && line.includes("first.txt"));
+    assert.ok(row >= 0);
+    input.write(`\x1b[<0;4;${row + 1}M\x1b[<0;4;${row + 1}m`);
+  };
+  clickFirst();
+  assert.ok(terminal.rows().some((row) => row.includes("RESULT:first.txt")));
+  assert.ok(!terminal.rows().some((row) => row.includes("RESULT:second.txt")));
+  clickFirst();
+  assert.ok(!terminal.rows().some((row) => row.includes("RESULT:")));
+  input.write("\x0f");
+  assert.ok(terminal.rows().some((row) => row.includes("RESULT:first.txt")));
+  assert.ok(terminal.rows().some((row) => row.includes("RESULT:second.txt")));
 });

@@ -343,3 +343,56 @@ test("tool output cannot inject terminal control sequences", () => {
   assert.match(stripAnsi(output.join("\n")), /safe text!/);
   assert.equal(output.join("\n").includes("\x1b]0;owned"), false);
 });
+
+test("oversized inputs have character and wrapped-row bounds without changing arguments", () => {
+  for (const name of ["bash", "read", "grep", "edit", "write", "custom"]) {
+    const value = `BEGIN\x1b]0;owned\x07${"long input ".repeat(10_000)}END`;
+    const args = { command: value, path: value, pattern: value, oldText: value, newText: value };
+    const before = JSON.stringify(args);
+    for (const width of [20, 80, 120]) {
+      const compact = renderToolTransaction({
+        name,
+        args,
+        status: "running",
+        width,
+        mode: "compact",
+        palette: PLAIN_PALETTE,
+      });
+      const full = renderToolTransaction({
+        name,
+        args,
+        status: "running",
+        width,
+        mode: "full",
+        palette: PLAIN_PALETTE,
+      });
+      assert.ok(compact.length < 25, `${name} compact at ${width}`);
+      assert.ok(full.length < 60, `${name} full at ${width}`);
+      assert.ok(compact.join("").length < 2_000);
+      assert.ok(full.join("").length < 8_192);
+      const bodyText = (rows: readonly string[]) =>
+        rows.map((row) => stripAnsi(row).replace(/^ {2}│ /u, "")).join("");
+      assert.match(bodyText(compact), /BEGIN/);
+      assert.match(bodyText(compact), /END/);
+      assert.match(bodyText(compact), /chars/);
+      assert.match(bodyText(compact), /Ctrl\+O/);
+      assert.match(bodyText(full), /\/export/);
+      for (const row of [...compact, ...full]) {
+        assert.ok(visibleWidth(row) <= width);
+        assert.ok(!row.includes("\x1b]0;owned"));
+      }
+      const failed = renderToolTransaction({
+        name,
+        args,
+        result: value,
+        isError: true,
+        status: "failed",
+        width,
+        mode: "compact",
+        palette: PLAIN_PALETTE,
+      });
+      assert.ok(failed.length < 40, "an error echoing the input must also stay bounded");
+      assert.equal(JSON.stringify(args), before);
+    }
+  }
+});

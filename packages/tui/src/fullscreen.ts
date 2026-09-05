@@ -48,6 +48,7 @@ export interface FullscreenScreenOptions {
   readonly requestRender?: () => void;
   readonly copySelection?: (text: string) => Promise<void>;
   readonly openUrl?: (url: string) => void;
+  readonly toggleToolGroup?: (sourceId: string) => void;
 }
 
 interface SearchMatch {
@@ -105,12 +106,18 @@ function wordRangeAt(value: string, column: number): { start: number; end: numbe
   return undefined;
 }
 
+// Pi's follow-end interaction is a behavioral reference; this viewport is independently implemented.
+// Reference: https://github.com/earendil-works/pi/blob/6c87d9a026677b601e8278030dcf1ad97fe0bd86/packages/tui/src/components/scroll-view.ts
 /** Alternate-screen transcript viewport with a fixed, visually separated dock. */
 export class FullscreenScreen {
   private readonly output: TerminalOutput;
   private readonly requestRender: () => void;
   private readonly copySelection: ((text: string) => Promise<void>) | undefined;
   private readonly openUrl: ((url: string) => void) | undefined;
+  private readonly toggleToolGroup: ((sourceId: string) => void) | undefined;
+  private pressedToolGroup:
+    | { readonly sourceId: string; readonly row: number; readonly column: number }
+    | undefined;
   private width: number;
   private height: number;
   private scrollbar: FullscreenScrollbar;
@@ -175,6 +182,7 @@ export class FullscreenScreen {
     this.requestRender = options.requestRender ?? (() => undefined);
     this.copySelection = options.copySelection;
     this.openUrl = options.openUrl;
+    this.toggleToolGroup = options.toggleToolGroup;
   }
 
   enter(): void {
@@ -501,6 +509,7 @@ export class FullscreenScreen {
     document: readonly TranscriptRow[],
     viewport: number,
   ): void {
+    if (event.motion || event.wheel !== 0) this.pressedToolGroup = undefined;
     if (event.wheel !== 0) {
       this.scrollBy(event.wheel * 3, document.length, viewport);
       this.requestRender();
@@ -525,6 +534,8 @@ export class FullscreenScreen {
     if (event.release) {
       if (!this.selectionPressActive) return;
       const pressedLink = this.pressedLink;
+      const pressedToolGroup = this.pressedToolGroup;
+      this.pressedToolGroup = undefined;
       this.pressedLink = undefined;
       this.selectionPressActive = false;
       this.stopSelectionAutoScroll();
@@ -540,6 +551,26 @@ export class FullscreenScreen {
         } catch (error) {
           this.showFlash(
             error instanceof Error ? `Cannot open link: ${error.message}` : "Cannot open link",
+          );
+        }
+        this.requestRender();
+        return;
+      }
+      if (
+        pressedToolGroup !== undefined &&
+        this.toggleToolGroup !== undefined &&
+        pressedToolGroup.row === point.row &&
+        pressedToolGroup.column === point.column &&
+        document[point.row]?.toolGroupId === pressedToolGroup.sourceId
+      ) {
+        this.clearSelection();
+        try {
+          this.toggleToolGroup(pressedToolGroup.sourceId);
+        } catch (error) {
+          this.showFlash(
+            error instanceof Error
+              ? `Cannot expand tools: ${error.message}`
+              : "Cannot expand tools",
           );
         }
         this.requestRender();
@@ -562,6 +593,9 @@ export class FullscreenScreen {
     this.stopSelectionAutoScroll();
     this.selectionPressActive = true;
     const source = document[point.row]?.text ?? "";
+    const toolGroupId = document[point.row]?.toolGroupId;
+    this.pressedToolGroup =
+      toolGroupId === undefined || !source.trim() ? undefined : { ...point, sourceId: toolGroupId };
     const target = linkAtCell(source, point.column);
     this.pressedLink = target === undefined ? undefined : { ...point, url: target };
     const word = wordRangeAt(source, point.column);
@@ -687,6 +721,7 @@ export class FullscreenScreen {
     this.selectionAnchor = undefined;
     this.selectionFocus = undefined;
     this.selectionInitialRange = undefined;
+    this.pressedToolGroup = undefined;
     this.selectionPressActive = false;
     this.pressedLink = undefined;
     this.stopSelectionAutoScroll();
@@ -807,6 +842,7 @@ export class FullscreenScreen {
   private stopTransientInput(): void {
     this.stopSelectionAutoScroll();
     this.scrollbarDrag = undefined;
+    this.pressedToolGroup = undefined;
     this.selectionPressActive = false;
     this.pressedLink = undefined;
     if (this.flashTimer !== undefined) clearTimeout(this.flashTimer);
@@ -831,6 +867,8 @@ export class FullscreenScreen {
   private restoreViewportAnchor(document: readonly TranscriptRow[]): void {
     const anchor = this.viewportAnchor;
     if (anchor === undefined) return;
+    const current = document[this.scrollTop];
+    if (current?.sourceId === anchor.sourceId && current.rowInSource === anchor.rowInSource) return;
     const row = document.findIndex(
       (candidate) =>
         candidate.sourceId === anchor.sourceId && candidate.rowInSource === anchor.rowInSource,

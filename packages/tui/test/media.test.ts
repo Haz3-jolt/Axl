@@ -241,3 +241,30 @@ test("one hundred thousand deltas remain bounded and render the latest tail", ()
   assert.equal(rows.join("\n").includes("t100000 "), true);
   assert.equal(rows.length < 10_000, true);
 });
+
+test("new streaming rows remain available for viewport navigation", () => {
+  const component = new LiveAssistantComponent(
+    () => PLAIN_PALETTE,
+    () => "show",
+  );
+  const operationId = parseOperationId("123e4567-e89b-42d3-a456-426614174001");
+  component.replace({
+    operationId,
+    sequence: 1,
+    text: "Earlier text",
+    thinking: "",
+    toolCalls: [],
+  });
+  const before = component.render(40);
+  component.replace({
+    operationId,
+    sequence: 2,
+    text: "Earlier text\n\nLater text",
+    thinking: "",
+    toolCalls: [],
+  });
+  assert.notDeepEqual(component.render(40), before);
+  assert.match(component.render(40).join("\n"), /Later text/);
+  component.clear();
+  assert.deepEqual(component.render(40), []);
+});

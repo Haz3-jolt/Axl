@@ -12,6 +12,8 @@ This file records notable user-facing changes.
 
 ### Added
 
+- Clipboard image paste through Ctrl+V, with private temporary files, editable draft paths, and daemon-owned blob delivery on submission
+- A root-level `tips.json` catalog, starting with the clipboard screenshot tip
 - A session-scoped `exec` profile that exposes only sandboxed Bash and activates no Skills or MCP servers
 - Repository, licensing, contribution, and CI foundations
 - Release-branch tooling for channel releases, tracked backports, signed tags, npm publication, and GitHub Releases
@@ -48,6 +50,7 @@ This file records notable user-facing changes.
 
 ### Changed
 
+- Consecutive tool calls now form compact groups with visible expansion hints, per-group fullscreen click controls, and global Ctrl+O details
 - File edits and writes targeting the same canonical path now serialize in call order, and stale exact-text edits fail before writing.
 - Local provider, tool, extension, and sandbox assembly now lives outside the terminal client, so clients remain replaceable projections over the daemon protocol.
 - File tools now require explicit readable roots, and the default runtime limits them to the workspace.
@@ -58,6 +61,9 @@ This file records notable user-facing changes.
 
 ### Fixed
 
+- Fullscreen navigation stays anchored while streaming rows accumulate, and status updates avoid copying the full session history
+- Pending attachments show their removal command, and failed clipboard imports preserve the draft
+- Oversized tool inputs use sanitized, character- and row-bounded previews without changing canonical events
 - `/detach` leaves daemon-owned work running, resumed turns accept new input, and resume lists place the most recently updated session first
 - Client reconnect handling no longer races the SDK's mutation retry and leaves a resumed TUI without a live attachment
 - Rebuilding a resumed transcript retains tool-call parents, and consumed steering or follow-up notices clear from the composer

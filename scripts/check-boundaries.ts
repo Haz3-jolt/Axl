@@ -7,6 +7,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import ts from "typescript";
+
 const runtimeDependencyFields = [
   "dependencies",
   "optionalDependencies",
@@ -40,14 +42,21 @@ function packageDirectories(root: string): string[] {
   return directories;
 }
 
-function importsIn(source: string): string[] {
+function importsIn(source: string, fileName: string): string[] {
   const imports: string[] = [];
-  const pattern =
-    /\bfrom\s*["']([#@A-Za-z0-9][#@A-Za-z0-9._:/-]*)["']|\bimport\s*(?:\(\s*)?["']([#@A-Za-z0-9][#@A-Za-z0-9._:/-]*)["']/g;
-  for (const match of source.matchAll(pattern)) {
-    const specifier = match[1] ?? match[2];
-    if (specifier) imports.push(specifier);
-  }
+  const visit = (node: ts.Node): void => {
+    const specifier =
+      ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
+        ? node.moduleSpecifier
+        : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+          ? node.arguments[0]
+          : ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
+            ? node.argument.literal
+            : undefined;
+    if (specifier !== undefined && ts.isStringLiteralLike(specifier)) imports.push(specifier.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest));
   return imports;
 }
 
@@ -144,7 +153,7 @@ export function checkWorkspace(root: string): string[] {
     walk(resolve(directory, "src"), (path) => {
       const extension = path.slice(path.lastIndexOf("."));
       if (!sourceExtensions.has(extension)) return;
-      for (const specifier of importsIn(readFileSync(path, "utf8"))) {
+      for (const specifier of importsIn(readFileSync(path, "utf8"), path)) {
         if (directory === protocol?.directory && !specifier.startsWith(".")) {
           errors.push(
             `${relative(root, path)} imports ${specifier}; protocol may use only relative imports`,
@@ -190,7 +199,7 @@ export function checkWorkspace(root: string): string[] {
   walk(resolve(root, "apps"), (path) => {
     const extension = path.slice(path.lastIndexOf("."));
     if (!sourceExtensions.has(extension)) return;
-    for (const specifier of importsIn(readFileSync(path, "utf8"))) {
+    for (const specifier of importsIn(readFileSync(path, "utf8"), path)) {
       if (specifier.startsWith("@axl/") && specifier !== "@axl/sdk") {
         errors.push(`${relative(root, path)} imports ${specifier}; apps may import only @axl/sdk`);
       }
