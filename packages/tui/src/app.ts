@@ -755,7 +755,7 @@ export class AxlApp {
         if (!this.stopped) this.commitEvent(event, !this.hydrating);
       },
       onChange: (projection: ConversationProjector) => {
-        if (this.liveAssistant.replace(projection.overview.activity)) this.scheduleActivityRender();
+        if (this.liveAssistant.replace(projection.state.activity)) this.scheduleActivityRender();
       },
       onResyncRequired: (error: Error) => {
         if (this.stopped) return;
@@ -963,7 +963,7 @@ export class AxlApp {
       if (app.developerPanelEnabled) void app.refreshWorkspaceDiff();
     }
     app.hydrating = false;
-    app.setWorking(app.sessionSubscription?.projector.overview.activeOperationId !== undefined);
+    app.setWorking(app.sessionSubscription?.projector.state.activeOperationId !== undefined);
     app.openNextInteraction();
 
     try {
@@ -1711,12 +1711,11 @@ export class AxlApp {
       return;
     }
     if (this.tuiMode === "fullscreen" && this.overlays.active === undefined) {
-      const frame = this.liveFrame(false);
+      const frame = this.liveFrame();
       const dockHeight = frame.components.flatMap((component) =>
         component.render(this.width),
       ).length;
       if (this.fullscreen.handleInput(data, this.fullscreenDocumentRows(), dockHeight)) {
-        this.invalidateFullscreenRows();
         this.redraw();
         return;
       }
@@ -3546,7 +3545,7 @@ export class AxlApp {
         if (!this.stopped) this.commitEvent(event, !this.hydrating);
       },
       onChange: (projector) => {
-        if (activated && this.liveAssistant.replace(projector.overview.activity)) {
+        if (activated && this.liveAssistant.replace(projector.state.activity)) {
           this.scheduleActivityRender();
         }
       },
@@ -3614,9 +3613,9 @@ export class AxlApp {
     }
     this.sessionSubscription = nextSubscription;
     activated = true;
-    this.liveAssistant.replace(projection.overview.activity);
+    this.liveAssistant.replace(projection.state.activity);
     this.hydrating = false;
-    this.setWorking(projection.overview.activeOperationId !== undefined);
+    this.setWorking(projection.state.activeOperationId !== undefined);
     this.editor.setText(draft);
     this.notice = this.view.palette.dim(notice);
     this.openNextInteraction();

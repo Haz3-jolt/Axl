@@ -179,8 +179,6 @@ If storage fails, live delivery continues and the subscription reports cursor pe
 - compaction and session errors
 - current transient activity
 
-Use `projector.overview` for status bars and transient activity. It exposes session metadata without copying history collections on every event or token. Use `projector.state` when rendering records, tools, interactions, operations, or queues.
-
 Clients may format that state for their platform. They must not maintain a second canonical reducer or manufacture canonical events.
 
 ## Authentication
