@@ -14,7 +14,7 @@ import {
 } from "@axl/protocol";
 
 import type { Component } from "./render.ts";
-import { sanitizeTerminalText, truncateToWidth } from "./render.ts";
+import { sanitizeTerminalText, truncateToWidth, wrapLine } from "./render.ts";
 import type { Palette } from "./transcript.ts";
 
 export type ImageProtocol = "kitty" | "iterm2" | null;
@@ -275,15 +275,18 @@ export class AttachmentBarComponent implements Component {
   render(width: number): string[] {
     if (this.attachments.length === 0) return [];
     const palette = this.palette();
-    return this.attachments.map((reference, index) =>
-      palette.dim(
-        truncateToWidth(
-          `  ${index === 0 ? "◇" : "·"} attached ${sanitizeTerminalText(reference.name ?? reference.mediaType)} · ${(reference.sizeBytes / 1024).toFixed(reference.sizeBytes < 10240 ? 1 : 0)} KiB`,
-          width,
-          "…",
+    return [
+      ...this.attachments.map((reference, index) =>
+        palette.dim(
+          truncateToWidth(
+            `  ${index === 0 ? "◇" : "·"} attached ${sanitizeTerminalText(reference.name ?? reference.mediaType)} · ${(reference.sizeBytes / 1024).toFixed(reference.sizeBytes < 10240 ? 1 : 0)} KiB`,
+            width,
+            "…",
+          ),
         ),
       ),
-    );
+      ...wrapLine(palette.dim("  /attach clear to remove attachments"), Math.max(1, width)),
+    ];
   }
 }
 

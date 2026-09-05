@@ -29,6 +29,7 @@ path = [
   "packages/protocol/tsconfig.json",
   "packages/sandbox/tsconfig.build.json",
   "packages/sandbox/tsconfig.json",
+  "tips.json",
   "tsconfig.json",
 ]
 SPDX-FileCopyrightText = "2026 Hari Srinivasan"

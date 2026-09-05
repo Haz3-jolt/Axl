@@ -6,7 +6,7 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
 export interface LocalAttachment {
   readonly bytes: Uint8Array;
@@ -33,7 +33,7 @@ export function detectImageMediaType(bytes: Uint8Array): string | undefined {
   return undefined;
 }
 
-async function attachment(bytes: Uint8Array, name: string): Promise<LocalAttachment> {
+export function imageAttachment(bytes: Uint8Array, name: string): LocalAttachment {
   if (bytes.byteLength === 0) throw new Error("Attachment is empty");
   if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
     throw new Error(`Attachment exceeds the ${MAX_ATTACHMENT_BYTES}-byte limit`);
@@ -51,7 +51,7 @@ export async function readImageFile(path: string): Promise<LocalAttachment> {
   if (info.size > MAX_ATTACHMENT_BYTES) {
     throw new Error(`Attachment exceeds the ${MAX_ATTACHMENT_BYTES}-byte limit`);
   }
-  return attachment(await readFile(path), basename(path));
+  return imageAttachment(await readFile(path), basename(path));
 }
 
 function unquote(value: string): string {

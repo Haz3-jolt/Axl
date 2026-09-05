@@ -115,6 +115,12 @@ export interface ConversationState {
   readonly lastCompaction?: CanonicalEvent<"context.compacted">;
 }
 
+/** Constant-size session state for status and streaming consumers that do not need history. */
+export type ConversationOverview = Omit<
+  ConversationState,
+  "records" | "tools" | "interactions" | "operations" | "uncertainShellOperations" | "queue"
+>;
+
 const MAX_PROJECTED_ACTIVITY_CHARACTERS = 131_072;
 const ACTIVITY_TRIM_BATCH_CHARACTERS = 16_384;
 
@@ -206,17 +212,23 @@ export class ConversationProjector {
 
   get state(): ConversationState {
     return Object.freeze({
-      ...(this.expectedSessionId === undefined ? {} : { sessionId: this.expectedSessionId }),
-      ...(this.selectedNodeId === undefined ? {} : { selectedNodeId: this.selectedNodeId }),
+      ...this.overview,
       records: Object.freeze([...this.records]),
       tools: Object.freeze([...this.tools.values()]),
       interactions: Object.freeze([...this.interactions.values()]),
       operations: Object.freeze([...this.operations.values()]),
+      uncertainShellOperations: Object.freeze([...this.uncertainShellOperations.values()]),
+      queue: Object.freeze([...this.queue.values()]),
+    });
+  }
+
+  get overview(): ConversationOverview {
+    return Object.freeze({
+      ...(this.expectedSessionId === undefined ? {} : { sessionId: this.expectedSessionId }),
+      ...(this.selectedNodeId === undefined ? {} : { selectedNodeId: this.selectedNodeId }),
       ...(this.activeOperationId === undefined
         ? {}
         : { activeOperationId: this.activeOperationId }),
-      uncertainShellOperations: Object.freeze([...this.uncertainShellOperations.values()]),
-      queue: Object.freeze([...this.queue.values()]),
       ...(this.model === undefined ? {} : { model: this.model }),
       ...(this.provider === undefined ? {} : { provider: this.provider }),
       ...(this.entitlement === undefined ? {} : { entitlement: this.entitlement }),

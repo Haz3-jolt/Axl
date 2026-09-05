@@ -39,9 +39,13 @@ Run the performance evidence with:
 pnpm --filter @axl/tui benchmark
 ```
 
-## Deferred clipboard image paste
+## Clipboard image paste
 
-Clipboard image paste is disabled. WSL dogfood did not verify a reliable terminal-independent path. Explicit `/attach <path>` and dropped image paths remain available. Revisit clipboard images only with real Windows Terminal, WSL, Wayland, X11, and macOS fixtures and visible failure reporting.
+Ctrl plus V reads an image from the system clipboard when available, writes an exclusive owner-only temp file, and inserts its path into the draft. Submitting the path uploads the image through the daemon blob channel; no host `/tmp` access is granted to sandboxed tools. Removing the path from the draft omits the image. Temp files remain available for reuse and follow operating-system temp retention.
+
+Wayland uses `wl-paste`; X11 uses `xclip`. macOS uses AppKit through `osascript`, and Windows or WSL uses PowerShell. Clipboard operations are time-bounded and images retain the 20 MiB attachment limit. Unsupported formats or unavailable helpers fail visibly instead of being treated as clipboard text. Text paste remains available when no image format is present.
+
+Automated tests cover private temp files, validation, Linux command selection, text paste, editable draft paths, failed imports, and daemon blob delivery. Platform-specific live verification is still required for macOS, Windows, WSL, and X11. Explicit `/attach <path>` and dropped image paths remain available.
 
 ## Manual parity matrix
 

@@ -185,3 +185,30 @@ test("pause and exit disable every mouse mode before restoring the screen", () =
   assert.deepEqual([...terminal.mouseModes], []);
   assert.equal(terminal.cursorVisible, true);
 });
+
+test("clicking a tool toggles detail while dragging still selects text", async () => {
+  const capture = output();
+  const toggled: string[] = [];
+  const copied: string[] = [];
+  const screen = new FullscreenScreen(capture.terminal, 40, 8, "hidden", {
+    toggleToolGroup: (id) => {
+      toggled.push(id);
+    },
+    copySelection: async (text) => {
+      copied.push(text);
+    },
+  });
+  const document = rows(["tool result"]).map((row) => ({ ...row, toolGroupId: "tool-group" }));
+  screen.enter();
+  screen.render(frame(document));
+  screen.handleInput("\x1b[<0;2;2M", document, 2);
+  screen.handleInput("\x1b[<0;2;2m", document, 2);
+  assert.deepEqual(toggled, ["tool-group"]);
+  screen.handleInput("\x1b[<0;1;2M", document, 2);
+  screen.handleInput("\x1b[<32;8;2M", document, 2);
+  screen.handleInput("\x1b[<0;8;2m", document, 2);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(copied.length, 1);
+  assert.deepEqual(toggled, ["tool-group"]);
+  screen.exit(document, "resume-hint", "123e4567-e89b-42d3-a456-426614174000");
+});

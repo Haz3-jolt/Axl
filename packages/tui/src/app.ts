@@ -41,7 +41,7 @@ import {
 
 import { ActivityComponent } from "./activity.ts";
 import { droppedImages, type LocalAttachment, readImageFile } from "./attachments.ts";
-import { readClipboardText, writeClipboardText } from "./clipboard.ts";
+import { type ClipboardContent, readClipboard, writeClipboardText } from "./clipboard.ts";
 import { loadThemeCatalog, type ThemeCatalog, watchThemeDirectories } from "./custom-themes.ts";
 import { DeveloperPanelComponent } from "./developer-panel.ts";
 import { renderDialog } from "./dialog.ts";
@@ -360,7 +360,7 @@ const HOTKEYS: readonly { readonly key: string; readonly action: string }[] = [
   { key: "Ctrl+A", action: "Select the entire prompt" },
   { key: "Ctrl+C", action: "Copy selection, interrupt, or clear" },
   { key: "Ctrl+X", action: "Cut the selection" },
-  { key: "Ctrl+V", action: "Paste text from the clipboard" },
+  { key: "Ctrl+V", action: "Paste an image or text from the clipboard" },
   { key: "Shift+Left/Right", action: "Extend the selection" },
   { key: "Ctrl+Shift+Left/Right", action: "Extend selection by word" },
   { key: "Ctrl+Backspace / Ctrl+W", action: "Delete the previous word" },
@@ -494,7 +494,7 @@ export interface AxlAppOptions {
   readonly loadLogin?: () => Promise<LoginDialogDefinition>;
   readonly onExit?: () => void;
   readonly clearStartupLine?: boolean;
-  readonly readClipboard?: () => Promise<string>;
+  readonly readClipboard?: () => Promise<ClipboardContent>;
   readonly writeClipboard?: (text: string) => Promise<void>;
   readonly editPrompt?: (content: string) => Promise<string>;
 }
@@ -539,6 +539,8 @@ export class AxlApp {
   private imageDisplay: ImageDisplay;
   private readonly pendingAttachments: BlobReference[] = [];
   private attachmentBusy = false;
+  private clipboardBusy = false;
+  private readonly clipboardFiles = new Set<string>();
   private stashedPrompt: string | undefined;
   private workspaceDiff: WorkspaceReview | undefined;
   private workspaceDiffError: string | undefined;
@@ -588,6 +590,7 @@ export class AxlApp {
   private interactionResponding = false;
   private interactionError: string | undefined;
   private readonly toolTransactions: ToolTransactionStore;
+  private readonly toolGroupModes = new Map<string, ToolOutputDisplay>();
   private readonly terminal: TerminalSession;
   private connectionState: "connected" | "reconnecting" | "detached" = "connected";
   private reconnectGeneration = 0;
@@ -658,6 +661,11 @@ export class AxlApp {
         mouse: this.fullscreenMouse,
         requestRender: () => this.redraw(),
         copySelection: (text) => (this.options.writeClipboard ?? writeClipboardText)(text),
+        toggleToolGroup: (sourceId) => {
+          const mode = this.toolGroupModes.get(sourceId) ?? this.view.toolOutputDisplay;
+          this.toolGroupModes.set(sourceId, mode === "full" ? "compact" : "full");
+          this.rebuildTranscript();
+        },
         openUrl: (url) =>
           openExternalUrl(url, (error) => {
             this.notice = this.view.palette.error(`✖ Cannot open link: ${error.message}`);
@@ -696,6 +704,7 @@ export class AxlApp {
       (name) => this.extensionHost.toolRenderer(name),
       (reference, mediaWidth, mediaPalette) =>
         this.mediaCache.rows(reference, mediaWidth, this.tuiMode === "fullscreen", mediaPalette),
+      this.toolGroupModes,
     );
     this.view.thinkingDisplay = options.thinkingDisplay ?? "compact";
     this.editorFrame = new EditorFrameComponent(this.editor, () => this.view);
@@ -746,7 +755,7 @@ export class AxlApp {
         if (!this.stopped) this.commitEvent(event, !this.hydrating);
       },
       onChange: (projection: ConversationProjector) => {
-        if (this.liveAssistant.replace(projection.state.activity)) this.scheduleActivityRender();
+        if (this.liveAssistant.replace(projection.overview.activity)) this.scheduleActivityRender();
       },
       onResyncRequired: (error: Error) => {
         if (this.stopped) return;
@@ -954,7 +963,7 @@ export class AxlApp {
       if (app.developerPanelEnabled) void app.refreshWorkspaceDiff();
     }
     app.hydrating = false;
-    app.setWorking(app.sessionSubscription?.projector.state.activeOperationId !== undefined);
+    app.setWorking(app.sessionSubscription?.projector.overview.activeOperationId !== undefined);
     app.openNextInteraction();
 
     try {
@@ -1072,7 +1081,7 @@ export class AxlApp {
     this.height = height;
     this.fullscreen.resize(width, height);
     if (widthChanged) {
-      this.rebuildTranscript(true);
+      this.rebuildTranscript();
     } else {
       this.screen.setWidth(width);
       this.view.setWidth(width);
@@ -1219,7 +1228,7 @@ export class AxlApp {
       ...(this.workspaceDiff === undefined ? {} : { diff: this.workspaceDiff }),
       ...(this.workspaceDiffError === undefined ? {} : { error: this.workspaceDiffError }),
     });
-    const tools = this.toolTransactions.components();
+    const tools = [this.toolTransactions];
     const fixed: Component[] = [
       ...unsafeComponents,
       ...(includePendingTools ? [this.activity, ...tools] : []),
@@ -1238,7 +1247,7 @@ export class AxlApp {
     );
     this.liveRoot.replace([
       ...unsafeComponents,
-      ...(includePendingTools ? [this.activity, this.liveAssistant, ...tools] : []),
+      ...(includePendingTools ? [this.activity, ...tools, this.liveAssistant] : []),
       this.extensionWidgetsAbove,
       this.attachmentBar,
       ...(this.developerPanelEnabled ? [this.developerPanel] : []),
@@ -1408,7 +1417,7 @@ export class AxlApp {
         prompt: false,
         rowInSource,
       }));
-      this.fullscreenRowsCache = [...this.document.rows, ...streaming, ...pending, ...activity];
+      this.fullscreenRowsCache = [...this.document.rows, ...pending, ...streaming, ...activity];
     }
     return this.fullscreenRowsCache;
   }
@@ -1547,11 +1556,7 @@ export class AxlApp {
       void this.refreshBranch();
       const component = this.toolTransactions.settle(event);
       this.invalidateFullscreenRows();
-      if (component !== undefined) {
-        this.commitLines(component.render(this.width), false, false, {
-          sourceId: component.sourceId,
-        });
-      } else {
+      if (component === undefined) {
         this.commitLines(
           [this.view.palette.error(`✖ orphaned tool result ${event.payload.callId}`)],
           false,
@@ -1578,7 +1583,10 @@ export class AxlApp {
         prompt: event.type === "user.message",
       });
     }
-    if (completesOperation) this.setWorking(false);
+    if (completesOperation) {
+      this.commitToolGroup();
+      this.setWorking(false);
+    }
     if (this.developerPanelEnabled && (event.type === "tool.result" || completesOperation)) {
       void this.refreshWorkspaceDiff();
     }
@@ -1703,11 +1711,12 @@ export class AxlApp {
       return;
     }
     if (this.tuiMode === "fullscreen" && this.overlays.active === undefined) {
-      const frame = this.liveFrame();
+      const frame = this.liveFrame(false);
       const dockHeight = frame.components.flatMap((component) =>
         component.render(this.width),
       ).length;
       if (this.fullscreen.handleInput(data, this.fullscreenDocumentRows(), dockHeight)) {
+        this.invalidateFullscreenRows();
         this.redraw();
         return;
       }
@@ -1756,6 +1765,7 @@ export class AxlApp {
       } else if (key.kind === "ctrl" && key.char === "z") {
         this.suspend();
       } else if (key.kind === "ctrl" && key.char === "o") {
+        this.toolGroupModes.clear();
         const mode = this.view.toggleToolOutput();
         void this.persistPreferences({ toolOutputDisplay: mode });
         this.notice = this.view.palette.dim(`· tool details ${mode}`);
@@ -1786,7 +1796,13 @@ export class AxlApp {
         const line = this.editor.apply({ kind: "enter" });
         if (line !== undefined) {
           this.vim.reset();
-          this.submit(line.trim(), key.kind === "follow-up");
+          void this.submit(line.trim(), key.kind === "follow-up").catch((error: unknown) => {
+            this.editor.setText([line, this.editor.text].filter(Boolean).join("\n\n"));
+            this.notice = this.view.palette.error(
+              `✖ ${error instanceof Error ? error.message : "submission failed"} · prompt restored`,
+            );
+            this.redraw();
+          });
         }
       } else {
         this.editor.apply(key);
@@ -1827,28 +1843,42 @@ export class AxlApp {
   }
 
   private async pasteClipboard(): Promise<void> {
-    if (this.attachmentBusy) {
-      this.notice = this.view.palette.dim("· wait for the current attachment upload");
+    if (this.attachmentBusy || this.clipboardBusy) {
+      this.notice = this.view.palette.dim(
+        "· wait for the current clipboard or attachment operation",
+      );
       this.redraw();
       return;
     }
+    this.clipboardBusy = true;
     this.notice = this.view.palette.dim("· reading clipboard…");
     this.redraw();
     try {
-      const text = await (this.options.readClipboard ?? readClipboardText)();
+      const content = await (this.options.readClipboard ?? readClipboard)();
       if (this.stopped) return;
-      if (!text) {
-        this.notice = this.view.palette.dim("· clipboard has no text");
-      } else {
-        this.editor.insertText(text);
+      if (typeof content !== "string") {
+        this.clipboardFiles.add(content.imagePath);
+        const path = /\s/u.test(content.imagePath)
+          ? JSON.stringify(content.imagePath)
+          : content.imagePath;
+        this.editor.insertText(` ${path} `);
         this.notice = this.view.palette.dim(
-          `· pasted ${text.split("\n").length} line${text.includes("\n") ? "s" : ""}`,
+          "· pasted image path · delete the path to omit the image",
+        );
+      } else if (!content) {
+        this.notice = this.view.palette.dim("· clipboard has no image or text");
+      } else {
+        this.editor.insertText(content);
+        this.notice = this.view.palette.dim(
+          `· pasted ${content.split("\n").length} line${content.includes("\n") ? "s" : ""}`,
         );
       }
     } catch (error) {
       this.notice = this.view.palette.error(
         `✖ ${error instanceof Error ? error.message : "clipboard read failed"}`,
       );
+    } finally {
+      this.clipboardBusy = false;
     }
     this.redraw();
   }
@@ -2041,8 +2071,15 @@ export class AxlApp {
     }
   }
 
-  private submit(inputLine: string, prioritize = false): void {
+  private async submit(inputLine: string, prioritize = false): Promise<void> {
     this.notice = undefined;
+    if (this.clipboardBusy || this.attachmentBusy) {
+      this.editor.setText([inputLine, this.editor.text].filter(Boolean).join("\n\n"));
+      this.notice = this.view.palette.dim(
+        "· wait for the current clipboard or attachment operation",
+      );
+      return;
+    }
     if (!inputLine && this.pendingAttachments.length === 0) return;
     const prefixMatches = /^\/[a-z]+$/.test(inputLine)
       ? this.availableCommands().filter((command) => command.name.startsWith(inputLine))
@@ -2156,6 +2193,7 @@ export class AxlApp {
     if (command === "/attach") {
       if (argument === "clear") {
         this.pendingAttachments.length = 0;
+        this.clipboardFiles.clear();
         this.notice = this.view.palette.dim("· attachments cleared");
       } else if (!argument) {
         this.notice = this.view.palette.dim("· use /attach <image path> or /attach clear");
@@ -2270,12 +2308,54 @@ export class AxlApp {
       );
       return;
     }
-    if (line.startsWith("/")) {
+    const tokens = new Set(line.match(/"(?:\\.|[^"\\])*"|'[^']*'|\S+/gu) ?? []);
+    const images = [...this.clipboardFiles].filter(
+      (path) => tokens.has(path) || tokens.has(JSON.stringify(path)) || tokens.has(`'${path}'`),
+    );
+    if (line.startsWith("/") && !images.includes(command ?? "")) {
       this.notice = this.view.palette.error(`✖ unknown command ${command}`);
       return;
     }
 
-    const queued = { text: line, attachments: [...this.pendingAttachments] };
+    const pasted: BlobReference[] = [];
+    if (images.length > 0) {
+      this.clipboardBusy = true;
+      this.notice = this.view.palette.dim("· uploading pasted images…");
+      this.redraw();
+      try {
+        for (const path of images) {
+          const attachment = await readImageFile(path);
+          const reference = await uploadBlob(
+            this.client,
+            this.sessionId,
+            attachment.bytes,
+            attachment.mediaType,
+            attachment.name,
+          );
+          if (this.stopped) return;
+          this.mediaCache.put(reference, attachment.bytes);
+          pasted.push(reference);
+        }
+      } catch (error) {
+        this.editor.setText([line, this.editor.text].filter(Boolean).join("\n\n"));
+        this.notice = this.view.palette.error(
+          `✖ prompt restored · ${error instanceof Error ? error.message : "image upload failed"}`,
+        );
+        return;
+      } finally {
+        this.clipboardBusy = false;
+        this.redraw();
+      }
+    }
+    const queued = {
+      text: line,
+      attachments: [
+        ...this.pendingAttachments,
+        ...pasted.filter(
+          (blob) => !this.pendingAttachments.some((pending) => pending.sha256 === blob.sha256),
+        ),
+      ],
+    };
     this.pendingAttachments.length = 0;
     if (
       this.view.working &&
@@ -2297,6 +2377,20 @@ export class AxlApp {
     void this.drainQueue();
   }
 
+  private commitToolGroup(): void {
+    const rows = this.toolTransactions.drain(this.width);
+    if (rows.length === 0) return;
+    this.commitLines(
+      rows.map((row) => row.text),
+      false,
+      false,
+      {
+        ...(rows[0]?.sourceId === undefined ? {} : { sourceId: rows[0].sourceId }),
+        ...(rows[0]?.toolGroupId === undefined ? {} : { toolGroupId: rows[0].toolGroupId }),
+      },
+    );
+  }
+
   private commitLines(
     lines: readonly string[],
     redraw = true,
@@ -2304,6 +2398,7 @@ export class AxlApp {
     metadata: TranscriptAppendOptions = {},
   ): void {
     if (lines.length > 0) {
+      this.commitToolGroup();
       if (remember) this.transcript.push({ kind: "lines", lines: [...lines] });
       this.document.append(lines, metadata);
       this.invalidateFullscreenRows();
@@ -2315,7 +2410,7 @@ export class AxlApp {
     if (redraw) this.redraw();
   }
 
-  private rebuildTranscript(repaintAfterResize = false): void {
+  private rebuildTranscript(): void {
     const previous = this.view;
     const next = new SessionView(
       this.width,
@@ -2333,16 +2428,34 @@ export class AxlApp {
       (name) => this.extensionHost.toolRenderer(name),
       (reference, mediaWidth, mediaPalette) =>
         this.mediaCache.rows(reference, mediaWidth, this.tuiMode === "fullscreen", mediaPalette),
+      this.toolGroupModes,
     );
+    const runningCalls = new Set(
+      this.toolTransactions
+        .components()
+        .filter((component) => component.state === "running")
+        .map((component) => component.callId),
+    );
+    const flushTools = (): void => {
+      const rows = pending.drain(this.width);
+      document.append(
+        rows.map((row) => row.text),
+        {
+          ...(rows[0]?.sourceId === undefined ? {} : { sourceId: rows[0].sourceId }),
+          ...(rows[0]?.toolGroupId === undefined ? {} : { toolGroupId: rows[0].toolGroupId }),
+        },
+      );
+    };
     for (const entry of this.transcript) {
       if (entry.kind === "lines") {
+        flushTools();
         document.append(entry.lines.flatMap((line) => wrapLine(line, this.width)));
         continue;
       }
       const event = entry.event;
       if (event.type === "tool.call") {
         next.apply(event);
-        pending.start(event, "pending");
+        pending.start(event, runningCalls.has(event.payload.callId) ? "running" : "pending");
         continue;
       }
       if (event.type === "sandbox.violation" && pending.deny(event)) {
@@ -2352,15 +2465,17 @@ export class AxlApp {
       const lines = next.apply(event);
       if (event.type === "tool.result") {
         const component = pending.settle(event);
-        if (component !== undefined) {
-          document.append(component.render(this.width), { sourceId: component.sourceId });
-          continue;
-        }
+        if (component !== undefined) continue;
         document.append([next.palette.error(`✖ orphaned tool result ${event.payload.callId}`)], {
           sourceId: event.id,
         });
         continue;
       }
+      if (
+        lines.length > 0 ||
+        (event.type === "assistant.message" && event.payload.stopReason !== "tool_use")
+      )
+        flushTools();
       document.append(lines, {
         sourceId: event.id,
         prompt: event.type === "user.message",
@@ -2374,12 +2489,8 @@ export class AxlApp {
     this.document.replace(document.rows);
     this.invalidateFullscreenRows();
     if (this.tuiMode === "regular") {
-      if (repaintAfterResize) {
-        this.repaintRegularAfterResize();
-        return;
-      }
-      this.options.output.write(this.screen.clear());
-      this.screen.reset(this.width);
+      this.repaintRegularAfterResize();
+      return;
     }
     this.redraw();
   }
@@ -2765,6 +2876,7 @@ export class AxlApp {
       this.notice = this.view.palette.error("✖ use /details compact, full, or focus");
       return;
     }
+    this.toolGroupModes.clear();
     this.view.toolOutputDisplay = mode;
     void this.persistPreferences({ toolOutputDisplay: mode });
     this.notice = this.view.palette.dim(`· tool details ${mode}`);
@@ -2879,6 +2991,7 @@ export class AxlApp {
       ],
       current: this.view.toolOutputDisplay,
       onPick: (value) => {
+        this.toolGroupModes.clear();
         this.view.toolOutputDisplay = value as ToolOutputDisplay;
         void this.persistPreferences({ toolOutputDisplay: this.view.toolOutputDisplay });
         this.rebuildTranscript();
@@ -3433,7 +3546,7 @@ export class AxlApp {
         if (!this.stopped) this.commitEvent(event, !this.hydrating);
       },
       onChange: (projector) => {
-        if (activated && this.liveAssistant.replace(projector.state.activity)) {
+        if (activated && this.liveAssistant.replace(projector.overview.activity)) {
           this.scheduleActivityRender();
         }
       },
@@ -3464,6 +3577,7 @@ export class AxlApp {
     this.seenEventIds.clear();
     this.transcript.length = 0;
     this.document.clear();
+    this.toolGroupModes.clear();
     this.toolTransactions.replace(
       new ToolTransactionStore(
         () => this.view.palette,
@@ -3471,6 +3585,7 @@ export class AxlApp {
         (name) => this.extensionHost.toolRenderer(name),
         (reference, mediaWidth, mediaPalette) =>
           this.mediaCache.rows(reference, mediaWidth, this.tuiMode === "fullscreen", mediaPalette),
+        this.toolGroupModes,
       ),
     );
     this.interactionQueue.length = 0;
@@ -3499,9 +3614,9 @@ export class AxlApp {
     }
     this.sessionSubscription = nextSubscription;
     activated = true;
-    this.liveAssistant.replace(projection.state.activity);
+    this.liveAssistant.replace(projection.overview.activity);
     this.hydrating = false;
-    this.setWorking(projection.state.activeOperationId !== undefined);
+    this.setWorking(projection.overview.activeOperationId !== undefined);
     this.editor.setText(draft);
     this.notice = this.view.palette.dim(notice);
     this.openNextInteraction();

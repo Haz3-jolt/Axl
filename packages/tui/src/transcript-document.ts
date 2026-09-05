@@ -5,12 +5,14 @@
 export interface TranscriptRow {
   readonly text: string;
   readonly sourceId?: string;
+  readonly toolGroupId?: string;
   readonly prompt: boolean;
   readonly rowInSource: number;
 }
 
 export interface TranscriptAppendOptions {
   readonly sourceId?: string;
+  readonly toolGroupId?: string;
   readonly prompt?: boolean;
 }
 
@@ -34,6 +36,7 @@ export class TranscriptDocument {
       this.content.push({
         text,
         ...(options.sourceId === undefined ? {} : { sourceId: options.sourceId }),
+        ...(options.toolGroupId === undefined ? {} : { toolGroupId: options.toolGroupId }),
         prompt: options.prompt === true && rowInSource === 0,
         rowInSource,
       });

@@ -7,7 +7,12 @@ import test from "node:test";
 
 import { type CanonicalEvent, EVENT_FORMAT_VERSION, parseEvent } from "@axl/protocol";
 
-import { PLAIN_PALETTE, ToolTransactionComponent } from "../src/index.ts";
+import {
+  PLAIN_PALETTE,
+  ToolTransactionComponent,
+  ToolTransactionStore,
+  type ToolOutputDisplay,
+} from "../src/index.ts";
 
 const sessionId = "123e4567-e89b-42d3-a456-426614174000";
 
@@ -83,4 +88,40 @@ test("preserves denied and aborted lifecycle states", () => {
   );
   aborted.settle(result({ endedBy: "abort" }));
   assert.match(aborted.render(80).join("\n"), /■ aborted/);
+});
+
+test("tool groups retain call order, lifecycle counts, and full detail until drained", () => {
+  let mode: ToolOutputDisplay = "compact";
+  const store = new ToolTransactionStore(
+    () => PLAIN_PALETTE,
+    () => mode,
+  );
+  for (let i = 1; i <= 5; i++) {
+    const event = call();
+    store.start({
+      ...event,
+      payload: { ...event.payload, callId: `call-${i}`, input: { command: `command-${i}` } },
+    });
+  }
+  for (let i = 4; i >= 1; i--) {
+    const event = result();
+    store.settle({
+      ...event,
+      payload: { ...event.payload, callId: `call-${i}`, isError: i === 2 },
+    });
+  }
+  const compact = store.render(80).join("\n");
+  assert.match(compact, /5 calls · 3 done · 1 failed · 1 running/);
+  assert.match(compact, /2 earlier calls/);
+  assert.ok(store.render(80).length <= 7);
+  assert.deepEqual(store.drain(80), []);
+  const event = result({ endedBy: "abort" });
+  store.settle({ ...event, payload: { ...event.payload, callId: "call-5" } });
+  assert.match(store.render(80).join("\n"), /1 aborted/);
+  mode = "full";
+  const full = store.render(80).join("\n");
+  assert.match(full, /tests passed/);
+  assert.ok(full.indexOf("command-1") < full.indexOf("command-4"));
+  assert.ok(store.drain(80).length > 0);
+  assert.deepEqual(store.render(80), []);
 });
