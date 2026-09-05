@@ -123,7 +123,9 @@ See [Client authority and adapter boundaries](docs/architecture/client-boundarie
 A session belongs to the daemon, not to the terminal that created it. Closing a client attachment does not cancel accepted work.
 
 - `/detach` closes the TUI attachment and leaves the session running.
-- `/quit` is an alias for `/detach`.
+- `/quit` interrupts work, flushes history, shuts down the daemon, and exits. It asks for confirmation when other sessions or clients are affected.
+- Escape interrupts without exiting. Ctrl+C clears the draft; a second press within 500 ms quits. Ctrl+D quits when the draft is empty.
+- `axl daemon status`, `stop`, and `restart` provide explicit upgrade recovery. See [daemon lifecycle](SETUP.md#daemon-lifecycle-and-upgrade-recovery).
 - `axl -r` opens the all-placement resume picker.
 - `axl <session-id>` resumes a known session directly.
 - `session.interrupt` is the explicit cancellation operation.

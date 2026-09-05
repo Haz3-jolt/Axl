@@ -111,6 +111,17 @@ Detaching a client releases only that attachment and its subscriptions. It does 
 
 Client-local state such as drafts, dialogs, and themes is not synchronized unless a future canonical protocol feature explicitly makes it session state.
 
+### Explicit host shutdown
+
+The CLI injects a typed SDK host-control surface into the TUI. The TUI renders the daemon's shutdown preview and submits confirmation; it never launches, signals, or selects daemon processes. Resume across placements switches this host surface together with the session connection. A host without this authority reports quit as unavailable rather than silently detaching.
+
+Host-control version 1 uses a separate connection and distinct validated messages on the existing owner-only Unix socket. Its version is independent of session-wire versioning. It offers status, generation-bound shutdown, and explicit self-termination after failed or stalled shutdown. It does not initialize a session connection or accept session RPCs. Remote presentation gateways must not forward these host messages or grant raw local socket access to renderers.
+
+Shutdown closes admission synchronously, interrupts active operations, prevents queued continuation, waits for accepted request outcomes and runtime cleanup, drains canonical history, then releases ownership. Durable pending queue entries remain in history and become paused on resume. Cleanup failure retains the control listener and reports failure rather than pretending shutdown completed. A `daemon_stopping` notification prevents attached SDK consumers and TUIs from automatically reconnecting or launching a replacement. Explicit reconnection remains possible.
+
+A single-session `/quit` authorizes interruption. Other attached clients or work require confirmation against the daemon's current preview. CLI stop and restart require `--interrupt` for busy daemons and `--yes` for affected clients. Version mismatch alone never authorizes termination. Forced termination requires a prior shutdown and the exact instance identity, and invokes the process host's termination callback rather than signaling a stored PID.
+
+
 ## Package boundaries
 
 A presentation package should depend at runtime on:

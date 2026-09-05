@@ -98,3 +98,7 @@ Fullscreen navigation uses Page Up and Page Down, Shift plus Page Up and Page Do
 Shift plus Enter depends on the terminal reporting a modified Enter sequence. Some Ubuntu terminal configurations send the same carriage-return byte for Shift plus Enter and Enter, which no terminal application can distinguish. `Ctrl+J` and backslash followed by Enter remain portable newline alternatives until terminal-specific setup guidance is completed.
 
 Ctrl plus Backspace also depends on a distinct terminal sequence. When a terminal sends the ordinary Backspace byte for both keys, use Alt plus Backspace or Ctrl plus W for word deletion. Ordinary Backspace always remains single-grapheme deletion.
+
+## Quit and detach
+
+`/detach` releases this attachment without cancelling work. `/quit` uses the host-injected SDK lifecycle surface to interrupt work and shut down the daemon after durable cleanup. Shared sessions or clients require confirmation. Escape interrupts while staying attached. Ctrl+C clears the editor; a second press within 500 ms quits. Ctrl+D quits with an empty editor. A missing host-control surface produces an explicit error, not a detach fallback. Failed or stalled graceful cleanup offers a separate force confirmation when the host supports it.

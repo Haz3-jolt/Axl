@@ -129,7 +129,11 @@ class ResumableSessionSubscription implements SessionSubscription {
     try {
       await this.client.request("session.unsubscribe", { subscriptionId });
     } catch (error) {
-      if (!(error instanceof AxlClientError) || error.code !== "disconnected") throw error;
+      if (
+        !(error instanceof AxlClientError) ||
+        !["disconnected", "daemon_stopping"].includes(error.code)
+      )
+        throw error;
     }
   }
 

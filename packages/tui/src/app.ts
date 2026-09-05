@@ -32,6 +32,9 @@ import type {
 import { parseEventId, parseOperationId, parseSessionId } from "@axl/protocol";
 import {
   type AxlClient,
+  AxlClientError,
+  type DaemonHostControl,
+  type DaemonHostStatus,
   type ClientModelInfo,
   ConversationProjector,
   orderPendingTurnInputs,
@@ -332,7 +335,7 @@ const COMMANDS: readonly { readonly name: string; readonly summary: string }[] =
   { name: "/hotkeys", summary: "browse and search keyboard shortcuts" },
   { name: "/help", summary: "show commands and keys" },
   { name: "/detach", summary: "leave the session running in the daemon" },
-  { name: "/quit", summary: "alias for /detach" },
+  { name: "/quit", summary: "interrupt work and shut down the daemon" },
 ];
 
 const RESERVED_EXTENSION_INPUTS = new Set(["\r", "\n", "\x1b", "\x03", "\x04", "\x0f", "\x1a"]);
@@ -360,7 +363,7 @@ const HOTKEYS: readonly { readonly key: string; readonly action: string }[] = [
   { key: "\\ then Enter", action: "Insert a newline in every terminal" },
   { key: "Alt+Enter", action: "Queue a follow-up after the active turn" },
   { key: "Ctrl+A", action: "Select the entire prompt" },
-  { key: "Ctrl+C", action: "Copy selection, interrupt, or clear" },
+  { key: "Ctrl+C", action: "Copy selection or clear; press twice within 500 ms to quit" },
   { key: "Ctrl+X", action: "Cut the selection" },
   { key: "Ctrl+V", action: "Paste an image or text from the clipboard" },
   { key: "Shift+Left/Right", action: "Extend the selection" },
@@ -381,7 +384,7 @@ const HOTKEYS: readonly { readonly key: string; readonly action: string }[] = [
   { key: "Ctrl+T", action: "Change thought visibility" },
   { key: "Shift+Tab", action: "Change reasoning effort" },
   { key: "Tab", action: "Complete a slash command" },
-  { key: "Ctrl+D", action: "Detach when the prompt is empty" },
+  { key: "Ctrl+D", action: "Quit when the prompt is empty" },
   { key: "Ctrl+L", action: "Repaint the terminal" },
   { key: "Ctrl+F", action: "Search the fullscreen transcript" },
   { key: "PageUp/PageDown", action: "Navigate the fullscreen transcript" },
@@ -395,7 +398,7 @@ const HOTKEYS: readonly { readonly key: string; readonly action: string }[] = [
 
 const KEY_HELP: readonly string[] = [
   "Enter send/steer · Alt+Enter follow-up · Shift+Enter/Ctrl+J newline",
-  "Esc/Ctrl+C interrupt · Ctrl+O tool details · /hotkeys for every shortcut",
+  "Esc interrupts · Ctrl+C clears · Ctrl+O tool details · /hotkeys for every shortcut",
 ];
 
 function themePreview(width: number, palette: Palette): readonly string[] {
@@ -431,10 +434,12 @@ export interface ResumeSessionEntry extends SessionSummary {
 export interface ResumeSessionConnection {
   readonly client: AxlClient;
   readonly reconnectClient: () => Promise<AxlClient>;
+  readonly daemonHost?: DaemonHostControl;
 }
 
 export interface AxlAppOptions {
   readonly client: AxlClient;
+  readonly daemonHost?: DaemonHostControl;
   readonly reconnectClient?: () => Promise<AxlClient>;
   readonly listResumeSessions?: () => Promise<readonly ResumeSessionEntry[]>;
   readonly openResumeSession?: (session: ResumeSessionEntry) => Promise<ResumeSessionConnection>;
@@ -511,6 +516,9 @@ export class AxlApp {
   private cwd: string;
   private readonly options: AxlAppOptions;
   private client: AxlClient;
+  private daemonHost: DaemonHostControl | undefined;
+  private quitPending = false;
+  private quitting = false;
   private reconnectClient: (() => Promise<AxlClient>) | undefined;
   private readonly screen: DifferentialScreen;
   private view: SessionView;
@@ -620,6 +628,7 @@ export class AxlApp {
     this.options = options;
     this.client = options.client;
     this.reconnectClient = options.reconnectClient;
+    this.daemonHost = options.daemonHost;
     this.sessionId = sessionId;
     this.cwd = cwd;
     this.width = width;
@@ -742,7 +751,15 @@ export class AxlApp {
     this.unsubscribeDisconnect();
     this.client = client;
     this.unsubscribeDisconnect = client.onDisconnect((error) => {
-      if (!this.stopped) void this.reconnect(error);
+      if (error instanceof AxlClientError && error.code === "daemon_stopping") {
+        this.reconnectGeneration += 1;
+        this.connectionState = "detached";
+        this.setWorking(false);
+        this.notice = this.view.palette.dim(
+          "· daemon shut down; /detach to exit, then restart Axl to resume",
+        );
+        if (!this.stopped) this.redraw();
+      } else if (!this.stopped && !this.quitting) void this.reconnect(error);
     });
     if (previous !== client) previous.close();
   }
@@ -1765,7 +1782,7 @@ export class AxlApp {
       } else if (key.kind === "ctrl" && key.char === "v") {
         void this.pasteClipboard();
       } else if (key.kind === "ctrl" && key.char === "d") {
-        if (this.editor.text.length === 0) this.stop();
+        if (this.editor.text.length === 0) void this.quit();
         else this.editor.apply({ kind: "delete" });
       } else if (key.kind === "ctrl" && key.char === "g") {
         void this.openExternalEditor();
@@ -2073,20 +2090,130 @@ export class AxlApp {
   }
 
   private handleInterruptKey(): void {
-    if (this.view.working) {
-      void this.interrupt();
-      return;
-    }
-    if (this.editor.text.length > 0) {
-      this.editor.clear();
-      this.notice = undefined;
-      return;
-    }
     const now = Date.now();
-    if (now - this.lastInterrupt < 1_000) this.stop();
+    if (now - this.lastInterrupt < 500) void this.quit();
     else {
+      this.editor.clear();
       this.lastInterrupt = now;
-      this.notice = this.view.palette.dim("· Ctrl+C again to detach");
+      this.notice = this.view.palette.dim("· Ctrl+C again to quit");
+    }
+  }
+
+  private confirmShutdown(title: string, rows: readonly string[]): Promise<boolean> {
+    return new Promise((resolvePromise) => {
+      let offset = 0;
+      const displayRows = () =>
+        rows.flatMap((row) => wrapLine(sanitizeTerminalText(row), Math.max(1, this.width - 4)));
+      this.overlays.replace({
+        render: () =>
+          renderDialog({
+            title,
+            rows: displayRows().slice(offset, offset + Math.max(1, this.height - 10)),
+            footer: "↑↓ review · Y confirm · N / Esc cancel",
+            width: this.width,
+            palette: this.view.palette,
+          }),
+        handleKey: (data) => {
+          for (let at = 0; at < data.length; ) {
+            const { key, next } = decodeOneKey(data, at);
+            at = next;
+            if (key.kind === "char" && key.char.toLowerCase() === "y") {
+              resolvePromise(true);
+              this.overlays.close();
+              return;
+            }
+            if (
+              key.kind === "escape" ||
+              (key.kind === "ctrl" && key.char === "c") ||
+              (key.kind === "char" && key.char.toLowerCase() === "n")
+            ) {
+              this.overlays.close();
+              return;
+            }
+            if (key.kind === "down")
+              offset = Math.min(Math.max(0, displayRows().length - 1), offset + 1);
+            else if (key.kind === "up") offset = Math.max(0, offset - 1);
+          }
+        },
+        dispose: () => resolvePromise(false),
+      });
+      this.redraw();
+    });
+  }
+
+  private async quit(): Promise<void> {
+    if (this.quitPending || this.stopped) return;
+    const host = this.daemonHost;
+    if (host === undefined) {
+      this.notice = this.view.palette.error(
+        "✖ This host cannot shut down the daemon. Use /detach to leave it running.",
+      );
+      this.redraw();
+      return;
+    }
+    this.quitPending = true;
+    const context: { sessionId: string; attachmentId?: string } = { sessionId: this.sessionId };
+    let status: DaemonHostStatus | undefined;
+    try {
+      if (this.client.state === "connected" || this.client.state === "loading_snapshot") {
+        context.attachmentId = this.client.connection.attachmentId;
+      }
+      status = await host.status(context);
+      const confirmed =
+        status.confirmationRequired &&
+        (await this.confirmShutdown("Shut down shared daemon?", [
+          "Active work will be interrupted and all clients disconnected.",
+          ...status.sessions.map(
+            (session) =>
+              `${session.sessionId} · ${session.busy ? "active" : "idle"} · ${session.cwd}`,
+          ),
+          ...status.attachments.map(
+            (attachment) =>
+              `${attachment.kind} client ${attachment.attachmentId} · sessions ${attachment.sessionIds.join(", ") || "none"}`,
+          ),
+          `Pending requests: ${status.pendingRequests}`,
+        ]));
+      if (this.stopped || (status.confirmationRequired && !confirmed)) return;
+      this.quitting = true;
+      this.reconnectGeneration += 1;
+      this.notice = this.view.palette.dim("· interrupting work and shutting down daemon…");
+      this.redraw();
+      await host.shutdown(status, { ...context, interrupt: true, confirmed });
+      this.stop();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Daemon shutdown failed";
+      this.notice = this.view.palette.error(`✖ ${sanitizeTerminalText(message)}`);
+      this.redraw();
+      if (
+        status !== undefined &&
+        error instanceof AxlClientError &&
+        ["host_timeout", "shutdown_failed"].includes(error.code)
+      ) {
+        try {
+          const current = await host.status(context);
+          if (
+            current.instanceId === status.instanceId &&
+            current.canForceTerminate &&
+            ["stopping", "failed"].includes(current.state) &&
+            (await this.confirmShutdown("Force daemon termination?", [
+              message,
+              "Graceful cleanup has not completed. Forcing may lose unflushed data or leave tool processes running.",
+              "This terminates only the identified daemon instance.",
+            ]))
+          ) {
+            await host.force(current.instanceId);
+            this.stop();
+          }
+        } catch (forceError) {
+          this.notice = this.view.palette.error(
+            `✖ ${sanitizeTerminalText(forceError instanceof Error ? forceError.message : "Force termination failed")}`,
+          );
+        }
+      }
+    } finally {
+      this.quitPending = false;
+      this.quitting = false;
+      if (!this.stopped) this.redraw();
     }
   }
 
@@ -2117,7 +2244,11 @@ export class AxlApp {
     const [command, ...arguments_] = line.split(/\s+/);
     const argument = arguments_.join(" ");
 
-    if (command === "/quit" || command === "/detach") {
+    if (command === "/quit") {
+      await this.quit();
+      return;
+    }
+    if (command === "/detach") {
       this.stop();
       return;
     }
@@ -3460,12 +3591,16 @@ export class AxlApp {
           }
         : session;
     const previousReconnect = this.reconnectClient;
+    const previousHost = this.daemonHost;
     let candidate: ResumeSessionConnection | undefined;
     try {
       candidate =
         typeof session === "string" ? undefined : await this.options.openResumeSession?.(session);
       const client = candidate?.client ?? this.client;
-      if (candidate !== undefined) this.reconnectClient = candidate.reconnectClient;
+      if (candidate !== undefined) {
+        this.reconnectClient = candidate.reconnectClient;
+        this.daemonHost = candidate.daemonHost;
+      }
       await this.switchSession(
         await resumeSessionMetadata(client, entry.sessionId),
         "",
@@ -3478,6 +3613,7 @@ export class AxlApp {
       if (!adoptedCandidate) {
         candidate?.client.close();
         this.reconnectClient = previousReconnect;
+        this.daemonHost = previousHost;
       } else {
         this.initialResumePending = false;
       }

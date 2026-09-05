@@ -29,7 +29,7 @@ import type {
   Usage,
 } from "@axl/protocol";
 import { subscribeSession } from "@axl/sdk";
-import { connectUnixClient } from "@axl/sdk/unix";
+import { connectUnixClient, createUnixDaemonHost } from "@axl/sdk/unix";
 
 import { AxlApp, saveClipboardImage, stripAnsi } from "../src/index.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
@@ -158,7 +158,7 @@ test("a full round trip: type, send, render the reply, detach, resume", async (c
   assert.match(text(), /tok\/s/);
 
   // Detach; the session persists in the daemon and resumes with history.
-  input.write("\x04");
+  input.write("/detach\r");
   await until(() => exited, "detach");
 
   const resumeInput = new PassThrough();
@@ -1550,6 +1550,7 @@ test("editing, /quit, and busy notices behave", async (context) => {
 
   await AxlApp.start({
     client: await connectUnixClient(socketPath),
+    daemonHost: createUnixDaemonHost(socketPath),
     input,
     output,
     cwd: directory,
@@ -2293,4 +2294,139 @@ test("Escape cancels compaction without replacing context", async (context) => {
   await until(() => text().includes("Compaction cancelled"), "compaction cancellation");
   assert.equal(subscription.projector.overview.lastCompaction, undefined);
   assert.doesNotMatch(text(), /Request failed/);
+});
+
+test("quit interrupts without a preliminary Escape and shared clients must confirm", async (context) => {
+  let began = false;
+  let aborted = false;
+  const model: ModelPort = {
+    stream: async function* (request) {
+      began = true;
+      yield { type: "text_delta", text: "still working" };
+      if (!request.signal?.aborted)
+        await new Promise<void>((resolve) =>
+          request.signal?.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      aborted = true;
+      yield { type: "aborted" };
+    },
+  };
+  const { socketPath, directory } = await startStack(context, model);
+  const input = new PassThrough();
+  const output = captureOutput();
+  let exited = false;
+  const host = createUnixDaemonHost(socketPath);
+  const app = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    daemonHost: host,
+    input,
+    output: output.output,
+    cwd: directory,
+    color: false,
+    onExit: () => {
+      exited = true;
+    },
+  });
+  context.after(() => app.stop());
+  const observer = await connectUnixClient(socketPath);
+  context.after(() => observer.close());
+  input.write("do work\r");
+  await until(() => began, "active request");
+  input.write("/quit\r");
+  await until(() => output.text().includes("Shut down shared daemon?"), "shutdown confirmation");
+  assert.match(output.text(), new RegExp(app.sessionId));
+  assert.equal(aborted, false);
+  input.write("\x1b[27u");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(exited, false);
+  observer.close();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  input.write("/quit\r");
+  await until(() => exited, "unshared quit");
+  assert.equal(aborted, true);
+  assert.equal(input.isRaw, false);
+});
+
+test("Ctrl+C clears while busy, double Ctrl+C quits, and empty Ctrl+D quits", async (context) => {
+  for (const key of ["\x03\x03", "\x04"]) {
+    let aborted = false;
+    let began = false;
+    const { socketPath, directory } = await startStack(context, {
+      stream: async function* (request) {
+        began = true;
+        if (!request.signal?.aborted)
+          await new Promise<void>((resolve) =>
+            request.signal?.addEventListener("abort", () => resolve(), { once: true }),
+          );
+        aborted = true;
+        yield { type: "aborted" };
+      },
+    });
+    const input = new PassThrough();
+    const { output } = captureOutput();
+    let exited = false;
+    const app = await AxlApp.start({
+      client: await connectUnixClient(socketPath),
+      daemonHost: createUnixDaemonHost(socketPath),
+      input,
+      output,
+      cwd: directory,
+      color: false,
+      onExit: () => {
+        exited = true;
+      },
+    });
+    context.after(() => app.stop());
+    input.write("work\r");
+    await until(() => began, "busy before shutdown key");
+    if (key === "\x03\x03") {
+      input.write("draft\x03");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(aborted, false);
+      input.write("\x03");
+    } else input.write(key);
+    await until(() => exited, "shutdown key");
+    assert.equal(aborted, true);
+  }
+});
+
+test("confirmed shared quit does not make the other TUI relaunch the daemon", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const first = captureOutput();
+  let exited = false;
+  const app = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    daemonHost: createUnixDaemonHost(socketPath),
+    input,
+    output: first.output,
+    cwd: directory,
+    color: false,
+    onExit: () => {
+      exited = true;
+    },
+  });
+  context.after(() => app.stop());
+  let reconnects = 0;
+  const second = captureOutput();
+  const observer = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    sessionId: app.sessionId,
+    input: new PassThrough(),
+    output: second.output,
+    cwd: directory,
+    color: false,
+    reconnectClient: () => {
+      reconnects++;
+      return connectUnixClient(socketPath);
+    },
+  });
+  context.after(() => observer.stop());
+  input.write("/quit\r");
+  await until(() => first.text().includes("Shut down shared daemon?"), "shared shutdown preview");
+  input.write("y");
+  await until(() => exited, "confirmed shutdown");
+  await until(() => second.text().includes("daemon shut down"), "observer shutdown notice");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(reconnects, 0);
 });

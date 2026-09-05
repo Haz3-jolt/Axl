@@ -17,6 +17,8 @@ import {
   type IdempotencyKeyFactory,
 } from "./client.ts";
 
+import { DaemonHostClient } from "./host.ts";
+
 class UnixSocketTransport implements AxlTransport {
   private readonly messageListeners = new Set<(message: unknown) => void>();
   private readonly closeListeners = new Set<(cause?: Error) => void>();
@@ -130,4 +132,8 @@ export async function connectUnixClient(
     transport: new UnixSocketTransportFactory(socketPath),
     idempotencyKeys: nodeIdempotencyKeys,
   });
+}
+
+export function createUnixDaemonHost(socketPath: string): DaemonHostClient {
+  return new DaemonHostClient(new UnixSocketTransportFactory(socketPath));
 }

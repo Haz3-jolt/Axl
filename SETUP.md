@@ -53,6 +53,32 @@ axl -r
 
 The client uses `~/.axl/axl.sock`. It starts a detached local daemon when one is not already running. Use `axl daemon` to keep the daemon in the foreground for troubleshooting. Restart an existing daemon after changing exported environment variables because a running process cannot inherit later shell changes.
 
+### Daemon lifecycle and upgrade recovery
+
+`/detach` leaves work and the daemon running. `/quit` interrupts work, drains accepted requests and history, shuts down the daemon, and exits. The single-session case does not require a separate interruption or confirmation. If other sessions or clients are affected, the TUI lists them and asks before proceeding. Escape interrupts without quitting. Ctrl+C clears the draft; a second press within 500 ms quits. Ctrl+D quits on an empty draft.
+
+```bash
+axl daemon status
+axl daemon stop
+axl daemon restart
+axl daemon stop --interrupt --yes
+```
+
+Use the same `--unsafe`, `--sandbox`, `--image`, or `--socket` selection as the running daemon. Status and stop do not require provider credentials. Restart refuses to switch data directories. Stop and restart refuse active work unless `--interrupt` explicitly authorizes cancellation. `--yes` confirms disconnecting clients. A changed confirmation snapshot requires a fresh command. Exit codes are 0 for success, 1 for errors, 2 for refused or stale confirmation, and 3 for a missing daemon on status or stop. Restart starts a missing daemon.
+
+An incompatible session wire fails loudly and points to these commands. No daemon is automatically replaced on a version mismatch. Host-control version 1 operates independently of session wire version 10 on a separate connection to the same owner-only Unix socket. It does not bypass the session handshake.
+
+If graceful cleanup fails or exceeds the host's ten-second wait, inspect `axl daemon status`. Shutdown can still be running. The TUI offers a separate force confirmation when available. From the CLI, explicitly request:
+
+```bash
+axl daemon stop --force --yes
+```
+
+Force is accepted only after graceful shutdown has begun, and only by the same daemon instance. It asks the trusted process host to terminate itself. It never signals a PID taken from a lock file. Forced termination may lose unflushed data or leave tool processes running. If the process cannot service control requests at all, force through this channel is unavailable.
+
+Daemons from builds before host control cannot be recovered through these new commands. For that one-time transition, inspect the old process with operating-system tools, verify its command, owner, and socket, then send SIGTERM to that verified process. A PID in `.axl-data.lock` alone is not proof. Do not delete an active lock or kill every Node process. Once the old process has exited, normal startup reclaims its stale socket and lock. Preserved sessions remain resumable.
+
+
 Inspect local sandbox support without configuring provider credentials:
 
 ```bash

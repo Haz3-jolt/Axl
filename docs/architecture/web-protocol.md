@@ -1,5 +1,6 @@
 <!-- SPDX-FileCopyrightText: 2026 Hari Srinivasan -->
 <!-- SPDX-FileCopyrightText: 2026 VishnuM449 -->
+<!-- SPDX-FileCopyrightText: 2026 Shaan Narendran -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Web client protocol and SDK specification
@@ -12,13 +13,13 @@ This document specifies typed RPC, negotiation, errors, package ownership, and t
 
 ## Current baseline
 
-Wire version 9 uses newline-delimited JSON over a Unix socket. It includes typed request and result envelopes, initialization, capability negotiation, structured errors, idempotency keys, subscription identities, paged snapshots, acknowledged opaque cursors, presence, daemon security reporting, direct shell events, transient activity, session-bound blobs, workspace review, session profiles, web-tool selection, manual compaction, steering, follow-ups, and canonical model-retry attempts.
+Wire version 10 uses newline-delimited JSON over a Unix socket. It includes typed request and result envelopes, initialization, capability negotiation, structured errors, idempotency keys, subscription identities, paged snapshots, acknowledged opaque cursors, presence, daemon security reporting, direct shell events, transient activity, session-bound blobs, workspace review, session profiles, web-tool selection, manual compaction, steering, follow-ups, and canonical model-retry attempts.
 
-The TUI consumes these contracts through `packages/sdk`. Version 9 preserves version 8 behavior and adds `model.retry_scheduled`. The version advances because an older exact-version client cannot validate that canonical event safely.
+The TUI consumes these contracts through `packages/sdk`. Version 10 adds the terminal connection error `daemon_stopping`, so explicit shutdown does not trigger automatic replacement. Host-control version 1 is separate from session wire negotiation and is available only to trusted process hosts.
 
 ## Versioning
 
-The current wire version is 9. Version 8 introduced typed envelopes, initialization, errors, retry metadata, subscriptions, cursors, acknowledgements, and presence. Version 9 adds the canonical `model.retry_scheduled` event. Compatible capability additions that do not alter accepted wire data do not require a bump. Pre-1.0 clients require an exact wire-version match.
+The current wire version is 10. Version 8 introduced typed envelopes, initialization, errors, retry metadata, subscriptions, cursors, acknowledgements, and presence. Version 9 adds the canonical `model.retry_scheduled` event. Version 10 adds `daemon_stopping` as a pre-RPC and universal RPC error. Compatible capability additions that do not alter accepted wire data do not require a bump. Pre-1.0 clients require an exact wire-version match.
 
 The daemon sends `hello` first:
 

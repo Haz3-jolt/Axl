@@ -942,6 +942,7 @@ export type RpcSuccess = {
 }[RpcMethod];
 
 export const RPC_ERROR_CODES = [
+  "daemon_stopping",
   "bad_request",
   "unsupported_version",
   "unsupported_capability",
@@ -2517,11 +2518,13 @@ export const RPC_METHODS = [
 export type KnownRpcErrorCode = (typeof RPC_ERROR_CODES)[number];
 
 export const PRE_RPC_ERROR_CODES = [
+  "daemon_stopping",
   "bad_request",
   "frame_too_large",
 ] as const satisfies readonly KnownRpcErrorCode[];
 
 export const UNIVERSAL_RPC_ERROR_CODES = [
+  "daemon_stopping",
   "bad_request",
   "not_initialized",
   "unsupported_capability",

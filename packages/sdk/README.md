@@ -207,3 +207,11 @@ pnpm --filter @axl/sdk build
 pnpm --filter @axl/sdk test
 pnpm check:boundaries
 ```
+
+## Trusted process-host lifecycle
+
+`createUnixDaemonHost(socketPath)` from `@axl/sdk/unix` returns typed `status`, `shutdown`, and `force` operations. The transport-independent `DaemonHostClient` accepts an `AxlTransportFactory`. Neither launches processes nor signals PIDs. The CLI supplies the resulting `DaemonHostControl` to its TUI and switches it when a session moves to another local placement.
+
+Pass the current session and attachment IDs to `status` for a quit preview. Pass that status and the same context to `shutdown`, with explicit interruption and confirmation intent. The daemon checks instance identity and revision atomically. Requests are not retried automatically. A timeout leaves the shutdown outcome uncertain; inspect status before deciding to force. Force is a separate operation, requires prior shutdown, and is unavailable unless the process host supplies self-termination.
+
+Host messages use their own version and connection on the protected Unix socket. An incompatible session wire remains incompatible. Legacy daemons without host control report an explicit recovery error. Normal clients receiving `daemon_stopping` stop automatic retries and reconnect only on explicit intent. Closing a subscription after daemon shutdown remains safe.

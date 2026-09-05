@@ -177,6 +177,7 @@ interface ManagedSession {
   readonly interactions: Map<string, PendingInteraction>;
   readonly queue: QueuedTurn[];
   queueDraining: boolean;
+  queueDrain?: Promise<void>;
   disposing: boolean;
   checkpointError?: WorkspaceCheckpointError;
   workspaceCheckpointsEnabled: boolean;
@@ -279,6 +280,7 @@ export async function listStoredSessions(
 export class SessionManager {
   private readonly options: SessionManagerOptions;
   private readonly sessions = new Map<SessionId, ManagedSession>();
+  private stopping = false;
   private readonly opening = new Map<SessionId, Promise<ManagedSession>>();
   private readonly quarantined = new Map<SessionId, EventLogMigrationRequiredError>();
   private readonly incompleteMigrations = new Set<SessionId>();
@@ -503,6 +505,7 @@ export class SessionManager {
     selection: SessionConfiguration = {},
     reservation?: { readonly sessionId: SessionId; readonly operationId: OperationId },
   ): Promise<{ sessionId: SessionId; events: readonly CanonicalEvent[] }> {
+    this.assertRunning();
     const canonicalCwd = await realpath(cwd).catch((cause: unknown) => {
       throw new DaemonError("invalid_cwd", `Cannot open working directory ${cwd}`, { cause });
     });
@@ -1204,7 +1207,7 @@ export class SessionManager {
     const entry = { queueItemId: queued.id, operationId, content, priority };
     if (priority === "front") managed.queue.unshift(entry);
     else managed.queue.push(entry);
-    void this.drainQueue(managed);
+    this.startQueueDrain(managed);
     return { queueItemId: queued.id, state: "queued" };
   }
 
@@ -1249,7 +1252,7 @@ export class SessionManager {
     };
     if (priority === "front") managed.queue.unshift(entry);
     else managed.queue.push(entry);
-    void this.drainQueue(managed);
+    this.startQueueDrain(managed);
     return { queueItemId, state: "queued" };
   }
 
@@ -1280,6 +1283,7 @@ export class SessionManager {
         }
         throw error;
       }
+      this.assertRunning();
       if (managed.activeTurn?.kind !== "turn" || managed.rebuilding) {
         throw new DaemonError("operation_inactive", `No active model turn can receive ${mode}`);
       }
@@ -1298,6 +1302,7 @@ export class SessionManager {
     content: readonly UserContent[],
     operationId?: OperationId,
   ): Promise<{ operationId: OperationId; stopReason: string }> {
+    this.assertRunning();
     const managed = this.managed(sessionId);
     if (operationId !== undefined) {
       const prior = managed.events.filter((event) => event.operationId === operationId);
@@ -1326,6 +1331,8 @@ export class SessionManager {
       }
       throw error;
     }
+    this.assertRunning();
+    if (managed.disposing) throw new DaemonError("cancelled", "Session is being disposed");
     if (managed.activeTurn || managed.rebuilding) {
       throw new DaemonError("operation_active", "An operation already owns this branch");
     }
@@ -1338,7 +1345,7 @@ export class SessionManager {
         active.controller.signal,
         active.operationId,
       );
-      while (managed.session.hasQueuedMessages()) {
+      while (!this.stopping && !managed.disposing && managed.session.hasQueuedMessages()) {
         active.controller = new AbortController();
         result = (await managed.session.continueQueued(active.controller.signal)) ?? result;
       }
@@ -1346,16 +1353,35 @@ export class SessionManager {
     } finally {
       if (managed.activeTurn === active) delete managed.activeTurn;
       active.finish();
-      void this.drainQueue(managed);
+      this.startQueueDrain(managed);
     }
   }
 
+  private startQueueDrain(managed: ManagedSession): void {
+    if (this.stopping || managed.disposing || managed.queueDraining) return;
+    const draining = this.drainQueue(managed);
+    managed.queueDrain = draining;
+    // Keep the rejected promise observable by disposal, and report it immediately.
+    void draining.catch(() => {
+      managed.disposing = true;
+      console.error(
+        "Axl queue drain failed; the session is stopped and shutdown will report the failure",
+      );
+    });
+  }
+
   private async drainQueue(managed: ManagedSession): Promise<void> {
-    if (managed.queueDraining || managed.activeTurn || managed.rebuilding || managed.disposing)
+    if (
+      this.stopping ||
+      managed.queueDraining ||
+      managed.activeTurn ||
+      managed.rebuilding ||
+      managed.disposing
+    )
       return;
     managed.queueDraining = true;
     try {
-      while (!managed.activeTurn && !managed.rebuilding) {
+      while (!this.stopping && !managed.disposing && !managed.activeTurn && !managed.rebuilding) {
         const queued = managed.queue.shift();
         if (queued === undefined) break;
         await managed.session.recordQueueEvent(queued.operationId, "queue.started", {
@@ -1418,7 +1444,7 @@ export class SessionManager {
     } finally {
       if (managed.activeTurn === active) delete managed.activeTurn;
       active.finish();
-      void this.drainQueue(managed);
+      this.startQueueDrain(managed);
     }
   }
 
@@ -1482,7 +1508,7 @@ export class SessionManager {
     } finally {
       if (managed.activeTurn === active) delete managed.activeTurn;
       active.finish();
-      void this.drainQueue(managed);
+      this.startQueueDrain(managed);
     }
   }
 
@@ -1840,6 +1866,7 @@ export class SessionManager {
       interaction.reject(new DaemonError("session_disposed", "Session was disposed"));
     }
     await managed.activeTurn?.done;
+    await managed.queueDrain;
     if (
       operationId !== undefined &&
       !managed.events.some(
@@ -1848,9 +1875,9 @@ export class SessionManager {
     ) {
       await managed.session.close(operationId);
     }
-    this.sessions.delete(parsed);
     await managed.session.dispose();
     await this.blobs.disposeSession(parsed);
+    this.sessions.delete(parsed);
   }
 
   private applyActivity(
@@ -1907,8 +1934,38 @@ export class SessionManager {
     this.blobs.authorize(sessionId, references);
   }
 
+  hostSessions() {
+    return [...this.sessions].map(([sessionId, managed]) => ({
+      sessionId,
+      cwd: managed.cwd,
+      busy:
+        managed.activeTurn !== undefined ||
+        managed.rebuilding !== undefined ||
+        managed.disposing ||
+        managed.queueDraining ||
+        managed.queue.length > 0,
+      queued: managed.queue.length,
+    }));
+  }
+
+  beginShutdown(): void {
+    this.stopping = true;
+    for (const managed of this.sessions.values()) managed.activeTurn?.controller.abort();
+  }
+
+  private assertRunning(): void {
+    if (this.stopping) throw new DaemonError("cancelled", "Daemon is shutting down");
+  }
+
   async disposeAll(): Promise<void> {
-    await Promise.all([...this.sessions.keys()].map((sessionId) => this.dispose(sessionId)));
+    this.beginShutdown();
+    const results = await Promise.allSettled(
+      [...this.sessions.keys()].map((sessionId) => this.dispose(sessionId)),
+    );
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length) throw new AggregateError(failures, "Session cleanup failed");
   }
 
   private managed(sessionId: unknown): ManagedSession {

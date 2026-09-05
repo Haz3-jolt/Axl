@@ -152,6 +152,9 @@ async function exists(path: string): Promise<boolean> {
 }
 
 export interface LocalDaemonOptions {
+  readonly buildVersion?: string;
+  readonly onStopped?: () => void;
+  readonly forceTerminate?: () => void;
   readonly axlHome: string;
   readonly stateDirectory: string;
   readonly socketPath: string;
@@ -208,6 +211,9 @@ export async function startLocalDaemon(options: LocalDaemonOptions): Promise<Axl
   const initialAssembly = unsafe ? undefined : await loadAssembly();
   const { AxlDaemon } = await import("@axl/daemon");
   const daemon = new AxlDaemon({
+    ...(options.buildVersion === undefined ? {} : { buildVersion: options.buildVersion }),
+    ...(options.onStopped === undefined ? {} : { onStopped: options.onStopped }),
+    ...(options.forceTerminate === undefined ? {} : { forceTerminate: options.forceTerminate }),
     socketPath,
     dataDirectory: stateDirectory,
     securityMode: unsafe ? "unsafe" : "sandboxed",

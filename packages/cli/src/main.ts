@@ -6,7 +6,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -31,7 +31,7 @@ import {
   startLocalDaemon,
 } from "@axl/runtime";
 import { type AxlClient, AxlClientError, subscribeSession } from "@axl/sdk";
-import { connectUnixClient } from "@axl/sdk/unix";
+import { connectUnixClient, createUnixDaemonHost } from "@axl/sdk/unix";
 
 import { azureLoginDialog, runAzureSetup } from "./azure-auth-ui.ts";
 import { loadTuiSettings, saveTuiSettings, type TuiSettings } from "./settings.ts";
@@ -41,7 +41,7 @@ const AXL_VERSION = process.env.AXL_BUILD_VERSION ?? "0.0.0-dev";
 const HELP = `Usage: axl [session-id] [options]
        axl login
        axl doctor
-       axl daemon [options]
+       axl daemon [status|stop|restart] [options]
        axl print [prompt] [options]
        axl json [prompt] [options]
        axl rpc [options]
@@ -70,6 +70,9 @@ Options:
   --no-web-search     Disable web_search
   --output <path>    Set the raw session export directory
   --confirm-prefix   Recover only events before an unsupported oversized event
+  --interrupt        Authorize cancellation for daemon stop/restart
+  --yes              Confirm disconnecting other daemon clients
+  --force            Force a previously requested shutdown (daemon stop --yes)
   --help             Show this help
   --version          Show the installed version
 `;
@@ -86,6 +89,10 @@ interface CliArguments {
     | "rpc"
     | "session-export"
     | "session-migrate-events";
+  daemonAction?: "status" | "stop" | "restart";
+  interrupt: boolean;
+  yes: boolean;
+  force: boolean;
   sessionId?: string;
   prompt: string[];
   output?: string;
@@ -110,6 +117,9 @@ interface CliArguments {
 
 function parseArguments(argv: readonly string[]): CliArguments {
   const parsed: CliArguments = {
+    interrupt: false,
+    yes: false,
+    force: false,
     cwd: process.cwd(),
     prompt: [],
     sandbox: "native",
@@ -134,6 +144,14 @@ function parseArguments(argv: readonly string[]): CliArguments {
     parsed.sessionId = sessionId;
     startIndex = 3;
   }
+  if (argv[0] === "daemon" && argv[1] !== undefined && !argv[1].startsWith("-")) {
+    const action = argv[1];
+    if (action !== "status" && action !== "stop" && action !== "restart")
+      throw new Error("daemon requires status, stop, or restart");
+    parsed.command = "daemon";
+    parsed.daemonAction = action;
+    startIndex = 2;
+  }
   for (let index = startIndex; index < argv.length; index += 1) {
     const argument = argv[index] as string;
     const next = (): string => {
@@ -146,7 +164,10 @@ function parseArguments(argv: readonly string[]): CliArguments {
       parsed.prompt.push(...argv.slice(index + 1));
       break;
     }
-    if (argument === "--socket") parsed.socket = next();
+    if (argument === "--interrupt") parsed.interrupt = true;
+    else if (argument === "--yes") parsed.yes = true;
+    else if (argument === "--force") parsed.force = true;
+    else if (argument === "--socket") parsed.socket = next();
     else if (argument === "--output") parsed.output = next();
     else if (argument === "--raw") parsed.raw = true;
     else if (argument === "--confirm-prefix") parsed.confirmPrefix = true;
@@ -207,6 +228,16 @@ function parseArguments(argv: readonly string[]): CliArguments {
       parsed.sessionId = argument;
     } else throw new Error(`Unknown argument ${argument}`);
   }
+  if (
+    (parsed.interrupt || parsed.yes || parsed.force) &&
+    parsed.daemonAction !== "stop" &&
+    parsed.daemonAction !== "restart"
+  )
+    throw new Error("--interrupt, --yes, and --force require daemon stop or restart");
+  if (parsed.force && (parsed.daemonAction !== "stop" || !parsed.yes))
+    throw new Error("--force requires daemon stop --yes after graceful shutdown was requested");
+  if (parsed.command === "daemon" && parsed.sessionId !== undefined)
+    throw new Error("Unexpected daemon argument");
   if (parsed.resume && parsed.sessionId !== undefined) {
     throw new Error("--resume cannot be combined with a session ID");
   }
@@ -327,6 +358,16 @@ interface ActiveConfig {
   readonly webSearch: boolean;
 }
 
+function missingDaemon(error: unknown): boolean {
+  return (
+    error instanceof AxlClientError &&
+    error.code === "connection_error" &&
+    error.cause instanceof Error &&
+    "code" in error.cause &&
+    ["ENOENT", "ECONNREFUSED"].includes(String(error.cause.code))
+  );
+}
+
 class SecurityModeMismatchError extends Error {
   constructor(requested: string, actual: string) {
     super(`Daemon security mode is ${actual}; ${requested} was requested`);
@@ -343,6 +384,16 @@ async function connectExpectedDaemon(
 ): Promise<AxlClient> {
   const client = await connectUnixClient(socketPath, {
     identity: { kind: clientKind, version: AXL_VERSION, instanceId: crypto.randomUUID() },
+  }).catch((error: unknown) => {
+    if (error instanceof AxlClientError && error.code === "version_mismatch") {
+      const target = `--socket '${socketPath.replaceAll("'", "'\\''")}'`;
+      throw new AxlClientError(
+        error.code,
+        `${error.message}. No daemon was replaced. Inspect with axl daemon status ${target}, then explicitly stop or restart it. Older daemons without host control require verified manual recovery; see SETUP.md.`,
+        { cause: error },
+      );
+    }
+    throw error;
   });
   try {
     const info = await client.request("daemon.info", {});
@@ -394,8 +445,7 @@ async function connectOrStartDaemon(input: {
       input.clientKind,
     );
   } catch (error) {
-    if (error instanceof SecurityModeMismatchError) throw error;
-    if (error instanceof AxlClientError && error.code !== "connection_error") throw error;
+    if (!missingDaemon(error)) throw error;
     const entry = process.argv[1];
     if (entry === undefined) throw new Error("Cannot locate the Axl executable");
     const child = spawn(
@@ -443,7 +493,7 @@ async function connectOrStartDaemon(input: {
           input.clientKind,
         );
       } catch (retryError) {
-        if (retryError instanceof SecurityModeMismatchError) throw retryError;
+        if (!missingDaemon(retryError)) throw retryError;
         lastError = retryError;
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
       }
@@ -706,6 +756,48 @@ async function main(): Promise<void> {
       : join(axlHome, sandboxStateKey);
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
   const socketPath = cli.socket ?? join(stateDirectory, "axl.sock");
+  if (cli.daemonAction !== undefined) {
+    const host = createUnixDaemonHost(socketPath);
+    try {
+      const status = await host.status();
+      if (cli.daemonAction === "status") {
+        process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
+        return;
+      }
+      if (
+        cli.daemonAction === "restart" &&
+        status.dataDirectory !== (await realpath(stateDirectory))
+      ) {
+        throw new Error(
+          "Restart would change the daemon data directory. Select its original --unsafe or --sandbox placement; no daemon was stopped.",
+        );
+      }
+      if (cli.force) {
+        await host.force(status.instanceId);
+        process.stdout.write(
+          `Force termination requested for daemon ${status.instanceId}. Unflushed data may be lost.\n`,
+        );
+        return;
+      }
+      if ((status.busy && !cli.interrupt) || (status.confirmationRequired && !cli.yes)) {
+        process.stderr.write(`${JSON.stringify(status, null, 2)}\n`);
+        throw new AxlClientError(
+          "confirmation_required",
+          "Daemon was not stopped. Use --interrupt to cancel accepted work and --yes to confirm disconnecting clients.",
+        );
+      }
+      await host.shutdown(status, { interrupt: cli.interrupt, confirmed: cli.yes });
+      process.stdout.write(`Stopped daemon ${status.instanceId}. Session histories preserved.\n`);
+    } catch (error) {
+      if (!missingDaemon(error)) throw error;
+      if (cli.daemonAction !== "restart") {
+        process.stdout.write("Daemon is not running at the selected socket.\n");
+        process.exitCode = 3;
+        return;
+      }
+    }
+    if (cli.daemonAction === "stop") return;
+  }
   if (cli.command === "session-export") {
     const { exportSessionRaw } = await import("@axl/daemon");
     const sessionId = cli.sessionId as string;
@@ -763,10 +855,13 @@ async function main(): Promise<void> {
       "WARNING: --unsafe disables operating-system isolation and gives tools full host access.\n",
     );
   }
-  if (cli.command === "daemon") {
+  if (cli.command === "daemon" && cli.daemonAction === undefined) {
     const { store } = await credentials();
     await ensureCredentials(store);
     const daemon = await startLocalDaemon({
+      buildVersion: AXL_VERSION,
+      onStopped: () => process.exit(0),
+      forceTerminate: () => process.exit(1),
       axlHome,
       stateDirectory,
       socketPath,
@@ -776,7 +871,11 @@ async function main(): Promise<void> {
       sandbox,
     });
     const stop = (): void => {
-      void daemon.stop().finally(() => process.exit(0));
+      void daemon.stop().catch((error: unknown) => {
+        process.stderr.write(
+          `Daemon shutdown failed: ${error instanceof Error ? error.message : String(error)}. Inspect axl daemon status; use daemon stop --force --yes only if cleanup cannot complete.\n`,
+        );
+      });
     };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
@@ -801,7 +900,7 @@ async function main(): Promise<void> {
         clientKind,
       );
     } catch (error) {
-      if (error instanceof SecurityModeMismatchError) throw error;
+      if (!missingDaemon(error)) throw error;
       const { store } = await credentials();
       await ensureCredentials(store, cli.command === undefined);
       return connectOrStartDaemon({
@@ -831,6 +930,11 @@ async function main(): Promise<void> {
   };
   const client = await connectTarget(currentTarget);
   timing.mark("daemon connect");
+  if (cli.daemonAction === "restart") {
+    client.close();
+    process.stdout.write(`Started daemon at ${socketPath}.\n`);
+    return;
+  }
   if (cli.command === "rpc") {
     client.close();
     await bridgeRpc(socketPath);
@@ -876,6 +980,7 @@ async function main(): Promise<void> {
     return {
       client: await connectTarget(target),
       reconnectClient: () => connectTarget(target),
+      daemonHost: createUnixDaemonHost(target.socketPath),
     };
   };
 
@@ -903,6 +1008,7 @@ async function main(): Promise<void> {
   timing.mark("TUI modules");
   const app = await AxlApp.start({
     client,
+    daemonHost: createUnixDaemonHost(socketPath),
     input: process.stdin,
     output: process.stdout,
     cwd: cli.cwd,
@@ -961,5 +1067,10 @@ async function main(): Promise<void> {
 main().catch((error: unknown) => {
   if (process.stdout.isTTY) process.stdout.write("\r\x1b[2K");
   process.stderr.write(`axl: ${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
+  process.exit(
+    error instanceof AxlClientError &&
+      ["busy", "confirmation_required", "state_changed"].includes(error.code)
+      ? 2
+      : 1,
+  );
 });

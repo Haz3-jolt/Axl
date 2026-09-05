@@ -125,6 +125,7 @@ export class AxlClient {
     | { readonly resolve: () => void; readonly reject: (error: Error) => void }
     | undefined;
   private deliberatelyClosed = false;
+  private shutdownError: AxlClientError | undefined;
   private reconnectPromise: Promise<void> | undefined;
 
   private constructor(options: AxlClientOptions<unknown>) {
@@ -153,6 +154,7 @@ export class AxlClient {
       throw new AxlClientError("disconnected", "Client was closed");
     }
     if (this.reconnectPromise !== undefined) return this.reconnectPromise;
+    this.shutdownError = undefined;
     const reconnect = (async () => {
       const previousCapabilities = this.initialized?.grantedCapabilities ?? [];
       this.detachTransport();
@@ -201,6 +203,7 @@ export class AxlClient {
     params: RpcParams<Method>,
     options: RequestOptions = {},
   ): Promise<RpcResult<Method>> {
+    if (this.shutdownError !== undefined) return Promise.reject(this.shutdownError);
     if (this.initialized === undefined && method !== "connection.initialize") {
       return Promise.reject(new AxlClientError("not_initialized", "Connection is not initialized"));
     }
@@ -540,6 +543,8 @@ export class AxlClient {
   }
 
   private fail(error: Error, notify = true): void {
+    if (error instanceof AxlClientError && error.code === "daemon_stopping")
+      this.shutdownError = error;
     this.handshake?.reject(error);
     this.handshake = undefined;
     for (const pending of this.pending.values()) pending.reject(error);

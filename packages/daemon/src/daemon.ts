@@ -4,7 +4,7 @@
 // SPDX-FileCopyrightText: 2026 VishnuM449
 // SPDX-License-Identifier: Apache-2.0
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Stats } from "node:fs";
 import { chmod, lstat, mkdir, realpath, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
@@ -13,6 +13,11 @@ import { StringDecoder } from "node:string_decoder";
 
 import {
   type AttachmentPresence,
+  type DaemonHostStatus,
+  type HostContext,
+  type HostResponse,
+  HOST_CONTROL_VERSION,
+  parseHostRequest,
   type CanonicalEvent,
   CanonicalEventSizeError,
   type ClientIdentity,
@@ -53,6 +58,9 @@ export type DaemonSecurityMode = "sandboxed" | "unsafe";
 
 export interface DaemonOptions extends SessionManagerOptions {
   readonly socketPath: string;
+  readonly buildVersion?: string;
+  readonly onStopped?: () => void;
+  readonly forceTerminate?: () => void;
   readonly securityMode?: DaemonSecurityMode;
   readonly sandboxProvider?: string;
   readonly sandboxImage?: string;
@@ -120,6 +128,7 @@ interface SessionListPage {
 
 interface ConnectionState {
   initialized: boolean;
+  control: boolean;
   attachmentId?: string;
   client?: ClientIdentity;
   connectedAt?: number;
@@ -188,12 +197,22 @@ export class AxlDaemon {
   private readonly securityMode: DaemonSecurityMode;
   private readonly sandboxProvider: string;
   private readonly sandboxImage: string | undefined;
-  private readonly dataDirectory: string;
+  private dataDirectory: string;
   private readonly snapshotIdleLifetimeMs: number;
   private readonly snapshotAbsoluteLifetimeMs: number;
   private readonly cursorLifetimeMs: number;
   private readonly heartbeatIntervalMs: number;
   private readonly presenceTimeoutMs: number;
+  private readonly hostOptions: Pick<
+    DaemonOptions,
+    "buildVersion" | "onStopped" | "forceTerminate"
+  >;
+  private lifecycle: DaemonHostStatus["state"] = "running";
+  private shutdownError: string | undefined;
+  private stopping: Promise<void> | undefined;
+  private readonly pending = new Set<Promise<void>>();
+  private readonly admitted = new Map<string, WireRequest>();
+  private readonly controls = new Set<Socket>();
   private readonly daemonInstanceId = randomUUID();
   private commandJournal: CommandJournal | undefined;
   private dataLock: DataDirectoryLock | undefined;
@@ -204,6 +223,7 @@ export class AxlDaemon {
   private readonly cursors = new Map<EventCursor, CursorRecord>();
 
   constructor(options: DaemonOptions) {
+    this.hostOptions = options;
     this.sessions = new SessionManager(options);
     this.socketPath = options.socketPath;
     this.securityMode = options.securityMode ?? "sandboxed";
@@ -244,6 +264,7 @@ export class AxlDaemon {
     await removeStaleSocket(this.socketPath);
     this.dataLock = await DataDirectoryLock.acquire(this.dataDirectory, "daemon");
     try {
+      this.dataDirectory = await realpath(this.dataDirectory);
       await this.sessions.scanLegacyEvents();
       this.commandJournal = await CommandJournal.open(this.dataDirectory);
       await this.commandJournal.reconcile(async (acceptance) => {
@@ -293,24 +314,177 @@ export class AxlDaemon {
     }
   }
 
-  async stop(): Promise<void> {
-    for (const socket of this.connections) socket.destroy();
-    this.connections.clear();
+  stop(): Promise<void> {
+    if (this.stopping !== undefined) return this.stopping;
+    this.lifecycle = "stopping";
+    this.sessions.beginShutdown();
+    for (const state of this.connectionStates) {
+      for (const controller of state.cancellableRequests.values()) controller.abort();
+    }
+    this.stopping = this.finishShutdown().catch((error: unknown) => {
+      this.lifecycle = "failed";
+      this.shutdownError = error instanceof Error ? error.message : String(error);
+      throw error;
+    });
+    return this.stopping;
+  }
+
+  private async finishShutdown(): Promise<void> {
+    // Every request admitted before the gate must finish its journal outcome first.
+    await Promise.all([...this.pending]);
+    await this.sessions.disposeAll();
+    await this.dataLock?.release({ allowMissing: true });
+    this.dataLock = undefined;
+    await this.removeOwnedSocket();
+    this.lifecycle = "stopped";
     this.cursors.clear();
+    for (const state of this.connectionStates) {
+      if (!state.control)
+        state.send({
+          kind: "error",
+          id: -1,
+          error: {
+            code: "daemon_stopping",
+            message: "Daemon shut down by its process host; reconnect explicitly when ready",
+            retryable: false,
+          },
+        });
+    }
     const server = this.server;
     this.server = undefined;
-    if (server?.listening) {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (server?.listening) server.close(() => this.hostOptions.onStopped?.());
+    for (const socket of this.connections) {
+      if (!this.controls.has(socket)) socket.destroySoon();
     }
+  }
+
+  private hostStatus(context: HostContext = {}): DaemonHostStatus {
+    const sessions = this.sessions.hostSessions();
+    const attachments = [...this.connectionStates].flatMap((state) =>
+      state.initialized
+        ? [
+            {
+              attachmentId: state.attachmentId as string,
+              kind: state.client?.kind ?? "unknown",
+              sessionIds: [
+                ...new Set(
+                  [...state.subscriptions.values()].map((subscription) => subscription.sessionId),
+                ),
+              ],
+            },
+          ]
+        : [],
+    );
+    const pending = [...this.admitted].filter(
+      ([, request]) =>
+        request.method !== "connection.ping" &&
+        request.method !== "daemon.info" &&
+        request.method !== "session.ack",
+    );
+    const revision = createHash("sha256")
+      .update(
+        JSON.stringify({
+          context,
+          operations: sessions.map((session) => this.sessions.activeOperationId(session.sessionId)),
+          sessions,
+          attachments,
+          pending,
+          state: this.lifecycle,
+        }),
+      )
+      .digest("hex");
+    return {
+      instanceId: this.daemonInstanceId,
+      dataDirectory: this.dataDirectory,
+      pid: process.pid,
+      buildVersion: this.hostOptions.buildVersion ?? "0.0.0-dev",
+      wireVersion: WIRE_PROTOCOL_VERSION,
+      state: this.lifecycle,
+      revision,
+      busy: sessions.some((session) => session.busy) || pending.length > 0,
+      confirmationRequired:
+        attachments.some((attachment) => attachment.attachmentId !== context.attachmentId) ||
+        sessions.some((session) => session.busy && session.sessionId !== context.sessionId) ||
+        pending.some(
+          ([, request]) =>
+            !("sessionId" in request.params) || request.params.sessionId !== context.sessionId,
+        ),
+      canForceTerminate: this.hostOptions.forceTerminate !== undefined,
+      sessions,
+      attachments,
+      pendingRequests: pending.length,
+      ...(this.shutdownError === undefined ? {} : { error: this.shutdownError }),
+    };
+  }
+
+  private async handleHost(value: unknown, socket: Socket, state: ConnectionState): Promise<void> {
+    const respond = (response: HostResponse): void => {
+      if (socket.destroyed) return;
+      const encoded = `${JSON.stringify(response)}\n`;
+      socket.end(
+        Buffer.byteLength(encoded) <= MAX_WIRE_MESSAGE_BYTES
+          ? encoded
+          : `${JSON.stringify({ kind: "host.response", version: HOST_CONTROL_VERSION, error: { code: "frame_too_large", message: "Host status exceeds the message limit" } })}\n`,
+      );
+    };
     try {
-      await this.sessions.disposeAll();
-    } finally {
-      try {
-        await this.removeOwnedSocket();
-      } finally {
-        await this.dataLock?.release({ allowMissing: true });
-        this.dataLock = undefined;
+      if (state.initialized || state.control)
+        throw new DaemonError("bad_request", "Host control requires its own connection");
+      state.control = true;
+      this.controls.add(socket);
+      const request = parseHostRequest(value);
+      if (request.method !== "status" && request.instanceId !== this.daemonInstanceId) {
+        throw new DaemonError("state_changed", "Daemon instance changed; inspect status again");
       }
+      if (request.method === "shutdown") {
+        const status = this.hostStatus(request.context);
+        if (status.revision !== request.revision || status.state !== "running") {
+          throw new DaemonError("state_changed", "Daemon state changed; inspect and confirm again");
+        }
+        if (status.busy && !request.interrupt)
+          throw new DaemonError(
+            "busy",
+            "Daemon owns accepted work. Use --interrupt to authorize cancellation.",
+          );
+        if (status.confirmationRequired && !request.confirmed)
+          throw new DaemonError(
+            "confirmation_required",
+            "Shutdown affects other sessions or clients; confirmation is required",
+          );
+        await this.stop();
+      } else if (request.method === "force") {
+        if (this.lifecycle !== "stopping" && this.lifecycle !== "failed")
+          throw new DaemonError(
+            "shutdown_required",
+            "Request graceful shutdown before forcing termination",
+          );
+        if (this.hostOptions.forceTerminate === undefined)
+          throw new DaemonError(
+            "force_unavailable",
+            "This process host does not provide forced termination",
+          );
+        // Reply before the process host terminates itself. Never signal a PID from storage.
+        socket.once("finish", this.hostOptions.forceTerminate);
+      }
+      respond({
+        kind: "host.response",
+        version: HOST_CONTROL_VERSION,
+        status: this.hostStatus(request.method === "force" ? {} : request.context),
+      });
+    } catch (error) {
+      respond({
+        kind: "host.response",
+        version: HOST_CONTROL_VERSION,
+        error: {
+          code:
+            error instanceof DaemonError
+              ? error.code
+              : error instanceof ProtocolValidationError
+                ? "bad_request"
+                : "shutdown_failed",
+          message: error instanceof Error ? error.message : "Host control failed",
+        },
+      });
     }
   }
 
@@ -327,6 +501,7 @@ export class AxlDaemon {
     };
     const state: ConnectionState = {
       initialized: false,
+      control: false,
       grantedCapabilities: new Set(),
       pendingRequests: 0,
       cancellableRequests: new Map(),
@@ -385,9 +560,11 @@ export class AxlDaemon {
             continue;
           }
           state.pendingRequests += 1;
-          void this.handleLine(line, send, state).finally(() => {
+          const pending = this.handleLine(line, send, state, socket).finally(() => {
             state.pendingRequests -= 1;
+            this.pending.delete(pending);
           });
+          if (!state.control) this.pending.add(pending);
         }
       }
     });
@@ -424,6 +601,7 @@ export class AxlDaemon {
       }
       state.subscriptions.clear();
       this.connections.delete(socket);
+      this.controls.delete(socket);
       this.connectionStates.delete(state);
       this.publishPresence();
     };
@@ -506,6 +684,7 @@ export class AxlDaemon {
     line: string,
     send: (message: ServerMessage) => void,
     state: ConnectionState,
+    socket: Socket,
   ): Promise<void> {
     let decoded: unknown;
     try {
@@ -520,6 +699,18 @@ export class AxlDaemon {
           retryable: false,
         },
       });
+      return;
+    }
+    if (
+      typeof decoded === "object" &&
+      decoded !== null &&
+      "kind" in decoded &&
+      decoded.kind === "host.request"
+    ) {
+      return this.handleHost(decoded, socket, state);
+    }
+    if (state.control) {
+      socket.destroy();
       return;
     }
     let request: WireRequest;
@@ -537,7 +728,11 @@ export class AxlDaemon {
       this.rejectMalformedRequest(candidate, id, error, send);
       return;
     }
+    const admissionId = randomUUID();
     try {
+      if (this.lifecycle !== "running")
+        throw new DaemonError("daemon_stopping", "Daemon is shutting down");
+      this.admitted.set(admissionId, request);
       if (
         !state.initialized &&
         request.method !== "daemon.info" &&
@@ -650,6 +845,8 @@ export class AxlDaemon {
               : {}),
         },
       });
+    } finally {
+      this.admitted.delete(admissionId);
     }
   }
 
@@ -739,6 +936,8 @@ export class AxlDaemon {
     acceptance?: CommandAcceptance,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    if (this.lifecycle !== "running")
+      throw new DaemonError("daemon_stopping", "Daemon is shutting down");
     switch (request.method) {
       case "daemon.info":
         return {
