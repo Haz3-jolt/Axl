@@ -61,7 +61,6 @@ This file records notable user-facing changes.
 
 ### Fixed
 
-- Fullscreen navigation stays anchored while streaming rows accumulate, and status updates avoid copying the full session history
 - Pending attachments show their removal command, and failed clipboard imports preserve the draft
 - Oversized tool inputs use sanitized, character- and row-bounded previews without changing canonical events
 - `/detach` leaves daemon-owned work running, resumed turns accept new input, and resume lists place the most recently updated session first

@@ -106,8 +106,6 @@ function wordRangeAt(value: string, column: number): { start: number; end: numbe
   return undefined;
 }
 
-// Pi's follow-end interaction is a behavioral reference; this viewport is independently implemented.
-// Reference: https://github.com/earendil-works/pi/blob/6c87d9a026677b601e8278030dcf1ad97fe0bd86/packages/tui/src/components/scroll-view.ts
 /** Alternate-screen transcript viewport with a fixed, visually separated dock. */
 export class FullscreenScreen {
   private readonly output: TerminalOutput;
@@ -867,8 +865,6 @@ export class FullscreenScreen {
   private restoreViewportAnchor(document: readonly TranscriptRow[]): void {
     const anchor = this.viewportAnchor;
     if (anchor === undefined) return;
-    const current = document[this.scrollTop];
-    if (current?.sourceId === anchor.sourceId && current.rowInSource === anchor.rowInSource) return;
     const row = document.findIndex(
       (candidate) =>
         candidate.sourceId === anchor.sourceId && candidate.rowInSource === anchor.rowInSource,
