@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-FileCopyrightText: 2026 Kaushik Kumar
+// SPDX-FileCopyrightText: 2026 Shaan Narendran
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
@@ -87,7 +88,6 @@ async function makeSession(
   tools = new ToolRegistry(),
   options: {
     system?: string;
-    maxModelCallsPerTurn?: number;
     retry?: ModelRetryOptions | false;
     compaction?: { keepRecentTokens?: number; maxOutputTokens?: number };
     onActivity?: (frame: SessionActivityFrame) => void;
@@ -649,15 +649,21 @@ test("interrupting during a tool stops after the paired result", async (context)
       return Promise.resolve({ content: [{ type: "text", text: "done" }], isError: false });
     },
   });
-  const port = makePort([callTool("call-1", {})]); // a second model call would throw
+  const port = makePort([callTool("call-1", {}), say("recovered")]);
   const { session } = await makeSession(context, port, registry);
 
   const result = await session.runTurn([{ type: "text", text: "go" }], controller.signal);
   assert.equal(result.stopReason, "aborted");
   assert.deepEqual(
     result.events.map((event) => event.type),
-    ["user.message", "assistant.message", "tool.call", "tool.result"],
+    ["user.message", "assistant.message", "tool.call", "tool.result", "assistant.message"],
   );
+  assert.equal(port.requests.length, 1, "aborting tools must not dispatch another model request");
+  const terminal = result.events.at(-1);
+  assert.equal(terminal?.type, "assistant.message");
+  if (terminal?.type === "assistant.message") assert.equal(terminal.payload.stopReason, "aborted");
+  const next = await session.runTurn([{ type: "text", text: "next prompt" }]);
+  assert.equal(next.stopReason, "stop");
   verifyToolCallIntegrity(SessionTree.fromEvents(sessionId, (await session.log.read()).events));
 });
 
@@ -852,24 +858,55 @@ test("reopening a session projects history and appends no duplicate root", async
   await reopened.dispose();
 });
 
-test("the turn model-call limit fails loudly", async (context) => {
+test("a turn can complete more than 50 model and tool rounds", async (context) => {
   const registry = new ToolRegistry();
-  const { tool } = echoTool();
+  const { tool, calls } = echoTool();
   registry.register(tool);
-  const endless = makePort([
-    callTool("call-1", {}),
-    callTool("call-2", {}),
-    callTool("call-3", {}),
+  const port = makePort([
+    ...Array.from({ length: 60 }, (_, index) => callTool(`call-${index}`, {})),
+    say("finished"),
+    say("next answer"),
   ]);
-  const { session } = await makeSession(context, endless, registry, { maxModelCallsPerTurn: 2 });
+  const { session } = await makeSession(context, port, registry);
 
-  const result = await session.runTurn([{ type: "text", text: "loop forever" }]);
-  assert.equal(result.stopReason, "error");
-  const last = result.events[result.events.length - 1];
-  assert.equal(last?.type, "session.error");
-  if (last?.type === "session.error") {
-    assert.equal(last.payload.code, "turn_model_call_limit");
-  }
+  const result = await session.runTurn([{ type: "text", text: "finish the task" }]);
+  assert.equal(result.stopReason, "stop");
+  assert.equal(port.requests.length, 61);
+  assert.equal(calls.length, 60);
+  assert.equal(
+    result.events.some((event) => event.type === "session.error"),
+    false,
+  );
+  const next = await session.runTurn([{ type: "text", text: "next prompt" }]);
+  assert.equal(next.stopReason, "stop");
+  verifyToolCallIntegrity(SessionTree.fromEvents(sessionId, (await session.log.read()).events));
+});
+
+test("a turn beyond 50 rounds remains cancellable and accepts another prompt", async (context) => {
+  const controller = new AbortController();
+  const registry = new ToolRegistry();
+  let calls = 0;
+  registry.register({
+    name: "echo",
+    description: "Abort after a long sequence of tool calls",
+    inputSchema: {},
+    execute: async () => {
+      if (++calls === 60) controller.abort();
+      return { content: [{ type: "text", text: "done" }], isError: false };
+    },
+  });
+  const port = makePort([
+    ...Array.from({ length: 60 }, (_, index) => callTool(`call-${index}`, {})),
+    say("recovered"),
+  ]);
+  const { session } = await makeSession(context, port, registry);
+  const result = await session.runTurn([{ type: "text", text: "work" }], controller.signal);
+  assert.equal(result.stopReason, "aborted");
+  assert.equal(port.requests.length, 60);
+  assert.equal(calls, 60);
+  const next = await session.runTurn([{ type: "text", text: "next prompt" }]);
+  assert.equal(next.stopReason, "stop");
+  verifyToolCallIntegrity(SessionTree.fromEvents(sessionId, (await session.log.read()).events));
 });
 
 test("the extension host seam activates and disposes with the session", async (context) => {

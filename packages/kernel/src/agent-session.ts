@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Kaushik Kumar
 // SPDX-FileCopyrightText: 2026 Lokesh
 // SPDX-FileCopyrightText: 2026 VishnuM449
+// SPDX-FileCopyrightText: 2026 Shaan Narendran
 // SPDX-License-Identifier: Apache-2.0
 
 import { randomUUID } from "node:crypto";
@@ -59,9 +60,6 @@ export class CompactionUnavailableError extends Error {
     this.name = "CompactionUnavailableError";
   }
 }
-
-/** The maximum model calls one turn may make before the kernel stops loudly. */
-const DEFAULT_MAX_MODEL_CALLS_PER_TURN = 50;
 
 export interface ModelRetryPolicy {
   readonly maxAttempts: number;
@@ -163,7 +161,6 @@ export interface AgentSessionOptions {
   readonly system?: string;
   readonly cwd: string;
   readonly extensionHost?: ExtensionHost;
-  readonly maxModelCallsPerTurn?: number;
   readonly retry?: ModelRetryOptions | false;
   readonly compaction?: Partial<CompactionSettings>;
   readonly log?: EventLogOptions;
@@ -231,7 +228,6 @@ export class AgentSession {
   private readonly onEvent: ((event: CanonicalEvent) => void) | undefined;
   private readonly onActivity: ((frame: SessionActivityFrame) => void) | undefined;
   private readonly system: string | undefined;
-  private readonly maxModelCalls: number;
   private readonly retry: ModelRetryPolicy | undefined;
   private readonly retrySleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   private readonly retryRandom: () => number;
@@ -255,10 +251,6 @@ export class AgentSession {
     this.onEvent = options.onEvent;
     this.onActivity = options.onActivity;
     this.system = options.prompt?.text ?? options.system;
-    this.maxModelCalls = options.maxModelCallsPerTurn ?? DEFAULT_MAX_MODEL_CALLS_PER_TURN;
-    if (!Number.isSafeInteger(this.maxModelCalls) || this.maxModelCalls < 1) {
-      throw new TypeError("maxModelCallsPerTurn must be a positive safe integer");
-    }
     this.retry = options.retry === false ? undefined : modelRetryPolicy(options.retry);
     this.retrySleep =
       options.retry === false ? abortableSleep : (options.retry?.sleep ?? abortableSleep);
@@ -523,18 +515,7 @@ export class AgentSession {
       await this.appendUserMessage(operationId, content, appended);
 
       const activity = { sequence: 0 };
-      for (let call = 0; ; call += 1) {
-        if (call >= this.maxModelCalls) {
-          appended.push(
-            await this.append(operationId, "session.error", {
-              code: "turn_model_call_limit",
-              message: `Turn exceeded ${this.maxModelCalls} model calls`,
-              retryable: false,
-            }),
-          );
-          return { events: appended, stopReason: "error" };
-        }
-
+      while (true) {
         const outcome = await this.modelTurn(operationId, activity, signal, appended);
         const assistantEvent = await this.append(operationId, "assistant.message", {
           content: outcome.content,
@@ -576,7 +557,8 @@ export class AgentSession {
             appended,
             signal,
           );
-          if (aborted) return { events: appended, stopReason: "aborted" };
+          // Use the normal terminal-message path without dispatching another model request.
+          if (aborted) continue;
         }
         if (await this.appendNextQueuedMessage(this.steeringMessages, operationId, appended)) {
           continue;
@@ -644,6 +626,9 @@ export class AgentSession {
     signal: AbortSignal | undefined,
     appended: CanonicalEvent[],
   ): Promise<TurnOutcome> {
+    if (signal?.aborted) {
+      return { content: [], toolCalls: [], stopReason: "aborted", exposedOutput: false };
+    }
     const retry = this.retry;
     const maxAttempts = retry?.maxAttempts ?? 1;
     for (let attempt = 1; ; attempt += 1) {

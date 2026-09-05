@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Kaushik Kumar
 // SPDX-FileCopyrightText: 2026 Lokesh
 // SPDX-FileCopyrightText: 2026 VishnuM449
+// SPDX-FileCopyrightText: 2026 Shaan Narendran
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from "node:child_process";
@@ -753,9 +754,7 @@ export class AxlApp {
         await this.prepareEventMedia(event);
         if (!this.stopped) this.commitEvent(event, !this.hydrating);
       },
-      onChange: (projection: ConversationProjector) => {
-        if (this.liveAssistant.replace(projection.overview.activity)) this.scheduleActivityRender();
-      },
+      onChange: (projection: ConversationProjector) => this.syncProjection(projection),
       onResyncRequired: (error: Error) => {
         if (this.stopped) return;
         this.notice = this.view.palette.error(`✖ event resync: ${error.message}`);
@@ -1462,14 +1461,21 @@ export class AxlApp {
     this.fullscreen.invalidate();
   }
 
-  private scheduleActivityRender(): void {
-    this.invalidateFullscreenRows();
-    if (this.liveAssistant.active) this.setWorking(true);
-    else if (!this.sending) this.setWorking(false);
-    this.redraw();
+  private syncProjection(projection: ConversationProjector): void {
+    if (this.stopped) return;
+    const overview = projection.overview;
+    const activityChanged = this.liveAssistant.replace(overview.activity);
+    if (this.hydrating) return;
+    const working =
+      overview.activeOperationId !== undefined || (this.sending && this.activeRequest !== "turn");
+    if (activityChanged || working !== this.view.working) {
+      this.setWorking(working);
+      this.redraw();
+    }
   }
 
   private setWorking(working: boolean): void {
+    working = working && !this.stopped;
     const changed = this.view.working !== working;
     this.view.working = working;
     if (changed) {
@@ -1537,17 +1543,15 @@ export class AxlApp {
     if (event.type === "tool.call") {
       this.view.apply(event);
       this.liveAssistant.clear();
-      if (!this.hydrating) this.setWorking(true);
       this.toolTransactions.start(event, this.hydrating ? "pending" : "running");
       this.invalidateFullscreenRows();
       if (redraw) this.redraw();
       return;
     }
 
-    if (event.type === "queue.started" && !this.hydrating) this.setWorking(true);
-
     const completesOperation =
-      event.type === "assistant.message" && event.payload.stopReason !== "tool_use";
+      event.type === "session.error" ||
+      (event.type === "assistant.message" && event.payload.stopReason !== "tool_use");
     if (event.type === "assistant.message") {
       this.liveAssistant.clear();
     }
@@ -1601,10 +1605,7 @@ export class AxlApp {
         prompt: event.type === "user.message",
       });
     }
-    if (completesOperation) {
-      this.commitToolGroup();
-      this.setWorking(false);
-    }
+    if (completesOperation) this.commitToolGroup();
     if (this.developerPanelEnabled && (event.type === "tool.result" || completesOperation)) {
       void this.refreshWorkspaceDiff();
     }
@@ -2376,7 +2377,7 @@ export class AxlApp {
     };
     this.pendingAttachments.length = 0;
     if (
-      this.view.working &&
+      this.sessionSubscription?.projector.overview.activeOperationId !== undefined &&
       this.activeRequest !== "shell" &&
       this.activeRequest !== "compaction"
     ) {
@@ -3576,9 +3577,7 @@ export class AxlApp {
         if (!this.stopped) this.commitEvent(event, !this.hydrating);
       },
       onChange: (projector) => {
-        if (activated && this.liveAssistant.replace(projector.overview.activity)) {
-          this.scheduleActivityRender();
-        }
+        if (activated) this.syncProjection(projector);
       },
       onResyncRequired: (error) => {
         if (!activated || this.stopped) return;
@@ -4054,9 +4053,9 @@ export class AxlApp {
         );
       }
     } finally {
-      this.setWorking(false);
       this.sending = false;
       this.activeRequest = undefined;
+      this.setWorking(this.sessionSubscription?.projector.overview.activeOperationId !== undefined);
       this.redraw();
       void this.drainQueue();
     }
@@ -4179,7 +4178,7 @@ export class AxlApp {
     } finally {
       this.sending = false;
       this.activeRequest = undefined;
-      this.setWorking(false);
+      this.setWorking(this.sessionSubscription?.projector.overview.activeOperationId !== undefined);
       this.redraw();
     }
   }
@@ -4216,7 +4215,7 @@ export class AxlApp {
     } finally {
       this.sending = false;
       this.activeRequest = undefined;
-      this.setWorking(false);
+      this.setWorking(this.sessionSubscription?.projector.overview.activeOperationId !== undefined);
       this.redraw();
       void this.drainQueue();
     }

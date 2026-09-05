@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Kaushik Kumar
 // SPDX-FileCopyrightText: 2026 Lokesh
 // SPDX-FileCopyrightText: 2026 VishnuM449
+// SPDX-FileCopyrightText: 2026 Shaan Narendran
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
@@ -1155,6 +1156,103 @@ test("Escape interrupts a running operation", async (context) => {
   await until(() => operationAborted, "escape interruption");
   app.stop();
 });
+
+for (const submission of ["local", "other attachment"] as const) {
+  for (const terminal of ["session.error", "tool abort"] as const) {
+    test(`${submission} ${terminal} clears Working and accepts the next prompt`, async (context) => {
+      let releaseTool = () => {};
+      const toolGate = new Promise<void>((resolve) => {
+        releaseTool = resolve;
+      });
+      let requests = 0;
+      let toolStarted = false;
+      const model: ModelPort = {
+        async *stream() {
+          requests += 1;
+          if (requests === 1) {
+            yield { type: "tool_call", callId: "gated-call", name: "echo", input: {} };
+            yield { type: "completed", stopReason: "tool_use", usage };
+          } else if (requests === 2 && terminal === "session.error") {
+            // A malformed tool-use completion emits a terminal session.error, not a final assistant.
+            yield { type: "completed", stopReason: "tool_use", usage };
+          } else {
+            yield { type: "text_delta", text: "recovered answer" };
+            yield { type: "completed", stopReason: "stop", usage };
+          }
+        },
+      };
+      const { socketPath, directory } = await startStack(context, model, () => {
+        const tools = new ToolRegistry();
+        tools.register({
+          name: "echo",
+          description: "Wait for completion or interruption",
+          inputSchema: {},
+          async execute(_input, signal) {
+            toolStarted = true;
+            signal.addEventListener("abort", releaseTool, { once: true });
+            try {
+              await toolGate;
+              return { content: [{ type: "text", text: "tool settled" }], isError: false };
+            } finally {
+              signal.removeEventListener("abort", releaseTool);
+            }
+          },
+        });
+        return tools;
+      });
+      const input = new PassThrough();
+      const { output, text } = captureOutput();
+      const client = await connectUnixClient(socketPath);
+      const app = await AxlApp.start({ client, input, output, cwd: directory, color: false });
+      const sender = await connectUnixClient(socketPath);
+      context.after(() => {
+        releaseTool();
+        app.stop();
+        sender.close();
+      });
+      const rpc = context.mock.method(client, "request");
+      const screen = () => {
+        const terminal = new VirtualTerminal(100, 24);
+        terminal.write(text());
+        return terminal.rows().join("\n");
+      };
+      const pending =
+        submission === "other attachment"
+          ? sender.request("session.send", {
+              sessionId: app.sessionId,
+              delivery: "prompt",
+              content: [{ type: "text", text: "start work" }],
+            })
+          : undefined;
+      if (submission === "local") input.write("start work\r");
+      await until(() => toolStarted && screen().includes("Working"), "active tool");
+      if (terminal === "tool abort") input.write("\x1b[27u");
+      else releaseTool();
+      if (pending !== undefined) await pending;
+      await until(
+        () => text().includes(terminal === "tool abort" ? "interrupted" : "missing_tool_call"),
+        "terminal event",
+      );
+      await until(() => !screen().includes("Working"), "idle TUI");
+      const resumed = await sender.request("session.resume", { sessionId: app.sessionId });
+      assert.equal(resumed.runtime.state, "idle");
+      const interrupts = () =>
+        rpc.mock.calls.filter((call) => call.arguments[0] === "session.interrupt").length;
+      const beforeEscape = interrupts();
+      input.write("\x1b[27u");
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(interrupts(), beforeEscape, "Escape must not interrupt completed work");
+      input.write("next prompt\r");
+      await until(() => text().includes("recovered answer"), "next answer");
+      await until(() => !screen().includes("Working"), "idle after recovery");
+      assert.equal(
+        rpc.mock.calls.some((call) => call.arguments[0] === "session.steer"),
+        false,
+      );
+      assert.doesNotMatch(text(), /No active model turn can receive steer/);
+    });
+  }
+}
 
 test("terminal extensions cannot replace encoded safety shortcuts", async (context) => {
   const { socketPath, directory } = await startStack(context);
