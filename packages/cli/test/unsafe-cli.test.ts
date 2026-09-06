@@ -94,6 +94,19 @@ test("resume mode rejects an explicit session ID", async () => {
   assert.match(result.stderr, /--resume cannot be combined with a session ID/);
 });
 
+test("rejects invalid model request settings before credentials or daemon startup", async () => {
+  for (const args of [
+    ["print", "hello", "--max-output-tokens", "0"],
+    ["print", "hello", "--max-output-tokens", "nope"],
+    ["print", "hello", "--http-idle-timeout", "-1"],
+    ["print", "hello", "--http-idle-timeout", "1.5"],
+  ]) {
+    const result = await runCli(args);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /maxOutputTokens|httpIdleTimeoutMs/);
+  }
+});
+
 test("rejects invalid session profile arguments", async () => {
   const unknown = await runCli(["--profile", "unknown"]);
   assert.equal(unknown.code, 1);

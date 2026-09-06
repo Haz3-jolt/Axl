@@ -16,3 +16,4 @@ export * from "./sse.ts";
 export * from "./stream.ts";
 export * from "./thinking.ts";
 export * from "./usage.ts";
+export * from "./request-configuration.ts";

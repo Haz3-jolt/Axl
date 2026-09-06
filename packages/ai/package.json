@@ -24,6 +24,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@axl/protocol": "workspace:*"
+    "@axl/protocol": "workspace:*",
+    "undici": "8.10.2"
   }
 }

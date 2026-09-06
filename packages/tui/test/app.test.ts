@@ -20,6 +20,7 @@ import {
   type ModelTurnRequest,
   ToolRegistry,
 } from "@axl/kernel";
+import { DEFAULT_MODEL_REQUEST_SETTINGS } from "@axl/protocol";
 import type {
   CanonicalEvent,
   EventPayloadMap,
@@ -78,6 +79,7 @@ async function startStack(
     dataDirectory: join(directory, "data"),
     runtime: ({ selection, interact }) => ({
       model,
+      configRequest: selection.requestSettings ?? DEFAULT_MODEL_REQUEST_SETTINGS,
       tools: makeTools(interact),
       system: "You are Axl.",
       ...(sandbox === undefined ? {} : { sandbox }),
@@ -2429,4 +2431,60 @@ test("confirmed shared quit does not make the other TUI relaunch the daemon", as
   await until(() => second.text().includes("daemon shut down"), "observer shutdown notice");
   await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal(reconnects, 0);
+});
+
+test("request settings are visible, configurable, persisted, and survive resume", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const input = new PassThrough();
+  const { output, text } = captureOutput();
+  const preferences: unknown[] = [];
+  const app = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    input,
+    output,
+    cwd: directory,
+    color: false,
+    currentModel: "test-model",
+    onPreferenceChange: (update) => {
+      preferences.push(update);
+    },
+  });
+  context.after(() => app.stop());
+  input.write("/request\r");
+  await until(
+    () => text().includes("model maximum") && text().includes("300000 ms"),
+    "default request settings",
+  );
+  input.write("/request output 2048\r");
+  await until(() => preferences.length === 1, "output setting preference");
+  input.write("/request idle disabled\r");
+  await until(() => preferences.length === 2, "request settings preferences");
+  input.write("/status\r");
+  await until(
+    () => text().includes("output    2048") && text().includes("HTTP idle disabled"),
+    "updated request status",
+  );
+  assert.deepEqual(preferences, [
+    { requestSettings: { maxOutputTokens: 2048, httpIdleTimeoutMs: 300_000 } },
+    { requestSettings: { maxOutputTokens: 2048, httpIdleTimeoutMs: 0 } },
+  ]);
+  const sessionId = app.sessionId;
+  app.stop();
+  const resumedInput = new PassThrough();
+  const resumed = captureOutput();
+  const resumedApp = await AxlApp.start({
+    client: await connectUnixClient(socketPath),
+    sessionId,
+    input: resumedInput,
+    output: resumed.output,
+    cwd: directory,
+    color: false,
+  });
+  context.after(() => resumedApp.stop());
+  resumedInput.write("/request\r");
+  await until(
+    () =>
+      resumed.text().includes("output    2048") && resumed.text().includes("HTTP idle disabled"),
+    "resumed request settings",
+  );
 });

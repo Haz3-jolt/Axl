@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Kaushik Kumar
 // SPDX-FileCopyrightText: 2026 Lokesh
 // SPDX-FileCopyrightText: 2026 VishnuM449
+// SPDX-FileCopyrightText: 2026 Shaan Narendran
 // SPDX-License-Identifier: Apache-2.0
 
 import type { BlobReference, CanonicalEvent } from "@axl/protocol";
@@ -320,6 +321,8 @@ export class SessionView {
           lines.push(
             ...this.errorLines(sanitizeTerminalText(event.payload.errorMessage ?? "model error")),
           );
+        } else if (event.payload.stopReason === "length") {
+          lines.push(...this.wrap(dim("■ output limit reached; response may be incomplete")));
         } else if (event.payload.stopReason === "aborted") {
           lines.push(...this.wrap(dim("■ interrupted")));
         }

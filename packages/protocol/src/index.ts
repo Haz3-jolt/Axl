@@ -10,3 +10,4 @@ export * from "./model-stream.ts";
 export * from "./version.ts";
 export * from "./wire.ts";
 export * from "./host-control.ts";
+export * from "./model-request.ts";

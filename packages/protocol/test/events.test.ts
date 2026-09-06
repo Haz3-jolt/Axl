@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2026 Lokesh
 // SPDX-FileCopyrightText: 2026 Srihari
 // SPDX-FileCopyrightText: 2026 VishnuM449
+// SPDX-FileCopyrightText: 2026 Shaan Narendran
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
@@ -64,6 +65,15 @@ const validPayloads = {
     content: [{ type: "text", text: "contents" }],
     isError: false,
     details: { lines: 1 },
+  },
+  "config.request": { maxOutputTokens: null, httpIdleTimeoutMs: 300_000 },
+  "model.request_configured": {
+    maxOutputTokens: 8192,
+    httpIdleTimeoutMs: 300_000,
+    estimatedInputTokens: 1000,
+    contextWindow: 128000,
+    contextReserveTokens: 4096,
+    modelMaxOutputTokens: 8192,
   },
   "config.model": { modelId: "model-1" },
   "config.provider": { providerId: "provider-1" },
@@ -147,6 +157,15 @@ test("rejects invalid event payloads", () => {
     event("context.compacted", { summary: "empty", replacedEventIds: [] }),
     event("permission.resolved", { requestId: "not-a-uuid", decision: "deny" }),
     event("config.profile", { profile: "unknown" }),
+    event("config.request", { maxOutputTokens: 0, httpIdleTimeoutMs: 300_000 }),
+    event("model.request_configured", {
+      maxOutputTokens: 9000,
+      httpIdleTimeoutMs: 300_000,
+      estimatedInputTokens: 1,
+      contextWindow: 128000,
+      contextReserveTokens: 4096,
+      modelMaxOutputTokens: 8192,
+    }),
     event("child.result", { childSessionId: sessionId, status: "unknown" }),
   ];
 

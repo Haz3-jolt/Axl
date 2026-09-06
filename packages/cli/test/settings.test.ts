@@ -37,6 +37,7 @@ test("persists and restores session defaults atomically", async (context) => {
     version: 1 as const,
     modelId: "gpt-5.6",
     thinkingLevel: "high" as const,
+    requestSettings: { maxOutputTokens: null, httpIdleTimeoutMs: 300_000 },
     theme: "ocean",
     webFetch: false,
     webSearch: true,
@@ -83,6 +84,16 @@ test("uses empty defaults only for a missing file and rejects invalid settings",
   await assert.rejects(loadTuiSettings(path), /invalid diffLayout/);
   await writeFile(path, '{"version":1,"imageDisplay":"huge"}\n');
   await assert.rejects(loadTuiSettings(path), /invalid imageDisplay/);
+  await writeFile(
+    path,
+    '{"version":1,"requestSettings":{"maxOutputTokens":0,"httpIdleTimeoutMs":300000}}\n',
+  );
+  await assert.rejects(loadTuiSettings(path), /maxOutputTokens/);
+  await writeFile(
+    path,
+    '{"version":1,"requestSettings":{"maxOutputTokens":null,"httpIdleTimeoutMs":-1}}\n',
+  );
+  await assert.rejects(loadTuiSettings(path), /httpIdleTimeoutMs/);
   await writeFile(path, '{"version":1,"webFetch":"yes"}\n');
   await assert.rejects(loadTuiSettings(path), /webFetch must be a boolean/);
 });

@@ -38,6 +38,8 @@ import {
   type EventId,
   type EventPayloadMap,
   encodeCanonicalEvent,
+  DEFAULT_MODEL_REQUEST_SETTINGS,
+  type ModelRequestSettings,
   type InteractionAction,
   type JsonObject,
   type JsonValue,
@@ -94,6 +96,7 @@ export interface SessionRuntime {
   readonly retry?: ModelRetryOptions | false;
   readonly sandbox?: EventPayloadMap["sandbox.configured"];
   readonly configModel?: EventPayloadMap["config.model"];
+  readonly configRequest?: EventPayloadMap["config.request"];
   readonly configThinking?: EventPayloadMap["config.thinking"];
   readonly configProfile?: EventPayloadMap["config.profile"];
   readonly configTools?: EventPayloadMap["config.tools"];
@@ -431,6 +434,7 @@ export class SessionManager {
       ...(runtime.compaction === undefined ? {} : { compaction: runtime.compaction }),
       ...(runtime.retry === undefined ? {} : { retry: runtime.retry }),
       ...(runtime.sandbox === undefined ? {} : { sandbox: runtime.sandbox }),
+      ...(runtime.configRequest === undefined ? {} : { configRequest: runtime.configRequest }),
       ...(runtime.configModel === undefined ? {} : { configModel: runtime.configModel }),
       ...(runtime.configThinking === undefined ? {} : { configThinking: runtime.configThinking }),
       ...(runtime.configProfile === undefined ? {} : { configProfile: runtime.configProfile }),
@@ -1061,11 +1065,13 @@ export class SessionManager {
     }
     let modelId: string | undefined;
     let thinkingLevel: SessionConfiguration["thinkingLevel"];
+    let requestSettings: ModelRequestSettings | undefined;
     let webFetch: boolean | undefined;
     let webSearch: boolean | undefined;
     let profile: SessionConfiguration["profile"];
     for (const event of events) {
       if (event.type === "config.model") modelId = event.payload.modelId;
+      else if (event.type === "config.request") requestSettings = event.payload;
       else if (event.type === "config.thinking") thinkingLevel = event.payload.requested;
       else if (event.type === "config.profile") profile = event.payload.profile;
       else if (event.type === "config.tools") {
@@ -1074,6 +1080,7 @@ export class SessionManager {
       }
     }
     return this.open(sessionId, created.payload.cwd, {
+      ...(requestSettings === undefined ? {} : { requestSettings }),
       ...(modelId === undefined ? {} : { modelId }),
       ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
       ...(webFetch === undefined ? {} : { webFetch }),
@@ -1112,6 +1119,7 @@ export class SessionManager {
     profile: NonNullable<SessionConfiguration["profile"]>;
     webFetch: boolean;
     webSearch: boolean;
+    requestSettings: ModelRequestSettings;
     boundaryEventIds: readonly EventId[];
   }> {
     const managed = this.managed(sessionId);
@@ -1125,7 +1133,24 @@ export class SessionManager {
         "An operation owns this branch; change configuration after it",
       );
     }
-    const selection = { ...managed.selection, ...update };
+    const model = managed.events.findLast((event) => event.type === "config.model");
+    const thinking = managed.events.findLast((event) => event.type === "config.thinking");
+    const request = managed.events.findLast((event) => event.type === "config.request");
+    const tools = managed.events.findLast((event) => event.type === "config.tools");
+    const profile = managed.events.findLast((event) => event.type === "config.profile");
+    const selection = {
+      ...(model?.type === "config.model" ? { modelId: model.payload.modelId } : {}),
+      ...(thinking?.type === "config.thinking"
+        ? { thinkingLevel: thinking.payload.requested }
+        : {}),
+      ...(request?.type === "config.request" ? { requestSettings: request.payload } : {}),
+      ...(tools?.type === "config.tools"
+        ? { webFetch: tools.payload.webFetch, webSearch: tools.payload.webSearch }
+        : {}),
+      ...(profile?.type === "config.profile" ? { profile: profile.payload.profile } : {}),
+      ...managed.selection,
+      ...update,
+    };
     if (selection.modelId === undefined) {
       throw new DaemonError(
         "unsupported_capability",
@@ -1155,18 +1180,29 @@ export class SessionManager {
     profile: NonNullable<SessionConfiguration["profile"]>;
     webFetch: boolean;
     webSearch: boolean;
+    requestSettings: ModelRequestSettings;
     boundaryEventIds: readonly EventId[];
   } {
-    const modelId = managed.selection.modelId;
+    const model = managed.events.findLast((event) => event.type === "config.model");
+    const modelId =
+      managed.selection.modelId ??
+      (model?.type === "config.model" ? model.payload.modelId : undefined);
     if (modelId === undefined) {
       throw new DaemonError("corrupt_session", "Configured session has no model identity");
     }
     const thinking = managed.events.findLast((event) => event.type === "config.thinking");
     const tools = managed.events.findLast((event) => event.type === "config.tools");
-    const requestedThinkingLevel = managed.selection.thinkingLevel ?? "off";
+    const requestedThinkingLevel =
+      managed.selection.thinkingLevel ??
+      (thinking?.type === "config.thinking" ? thinking.payload.requested : "off");
+    const request = managed.events.findLast((event) => event.type === "config.request");
     return {
       modelId,
       requestedThinkingLevel,
+      requestSettings:
+        request?.type === "config.request"
+          ? request.payload
+          : (managed.selection.requestSettings ?? DEFAULT_MODEL_REQUEST_SETTINGS),
       effectiveThinkingLevel:
         thinking?.type === "config.thinking" ? thinking.payload.effective : requestedThinkingLevel,
       profile: managed.selection.profile ?? "standard",

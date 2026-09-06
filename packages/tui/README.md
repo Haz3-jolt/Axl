@@ -102,3 +102,7 @@ Ctrl plus Backspace also depends on a distinct terminal sequence. When a termina
 ## Quit and detach
 
 `/detach` releases this attachment without cancelling work. `/quit` uses the host-injected SDK lifecycle surface to interrupt work and shut down the daemon after durable cleanup. Shared sessions or clients require confirmation. Escape interrupts while staying attached. Ctrl+C clears the editor; a second press within 500 ms quits. Ctrl+D quits with an empty editor. A missing host-control surface produces an explicit error, not a detach fallback. Failed or stalled graceful cleanup offers a separate force confirmation when the host supports it.
+
+## Model requests
+
+`/request` and `/status` show the configured output ceiling, HTTP idle timeout, and latest effective context fit. `/request output <tokens|model>` and `/request idle <milliseconds|disabled>` update daemon-owned session behavior and save the choice as a default for new sessions. Output-limit completions and transport-idle failures are rendered as distinct terminal outcomes.

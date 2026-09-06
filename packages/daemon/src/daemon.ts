@@ -964,12 +964,14 @@ export class AxlDaemon {
         return { cancellationRequested: controller !== undefined };
       }
       case "session.create": {
-        const { cwd, modelId, thinkingLevel, webFetch, webSearch, profile } = request.params;
+        const { cwd, modelId, thinkingLevel, webFetch, webSearch, profile, requestSettings } =
+          request.params;
         const reservation = this.creationReservation(acceptance);
         const created = await this.sessions.create(
           cwd,
           {
             ...(modelId === undefined ? {} : { modelId }),
+            ...(requestSettings === undefined ? {} : { requestSettings }),
             ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
             ...(webFetch === undefined ? {} : { webFetch }),
             ...(webSearch === undefined ? {} : { webSearch }),
@@ -1072,11 +1074,13 @@ export class AxlDaemon {
       case "session.reload":
         return this.sessions.reload(request.params.sessionId, this.mutationOperationId(acceptance));
       case "session.configure": {
-        const { sessionId, modelId, thinkingLevel, webFetch, webSearch, profile } = request.params;
+        const { sessionId, modelId, thinkingLevel, webFetch, webSearch, profile, requestSettings } =
+          request.params;
         return this.sessions.configure(
           sessionId,
           {
             ...(modelId === undefined ? {} : { modelId }),
+            ...(requestSettings === undefined ? {} : { requestSettings }),
             ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
             ...(webFetch === undefined ? {} : { webFetch }),
             ...(webSearch === undefined ? {} : { webSearch }),

@@ -35,6 +35,8 @@ import {
   AxlClientError,
   type DaemonHostControl,
   type DaemonHostStatus,
+  type ModelRequestSettings,
+  parseModelRequestSettings,
   type ClientModelInfo,
   ConversationProjector,
   orderPendingTurnInputs,
@@ -335,6 +337,7 @@ const COMMANDS: readonly { readonly name: string; readonly summary: string }[] =
   { name: "/hotkeys", summary: "browse and search keyboard shortcuts" },
   { name: "/help", summary: "show commands and keys" },
   { name: "/detach", summary: "leave the session running in the daemon" },
+  { name: "/request", summary: "show or configure model output and HTTP idle limits" },
   { name: "/quit", summary: "interrupt work and shut down the daemon" },
 ];
 
@@ -438,6 +441,7 @@ export interface ResumeSessionConnection {
 }
 
 export interface AxlAppOptions {
+  readonly requestSettings?: ModelRequestSettings;
   readonly client: AxlClient;
   readonly daemonHost?: DaemonHostControl;
   readonly reconnectClient?: () => Promise<AxlClient>;
@@ -477,6 +481,7 @@ export interface AxlAppOptions {
   readonly onPreferenceChange?: (update: {
     modelId?: string;
     thinkingLevel?: ThinkingLevel;
+    requestSettings?: ModelRequestSettings;
     webFetch?: boolean;
     webSearch?: boolean;
     theme?: string;
@@ -581,6 +586,7 @@ export class AxlApp {
     readonly text: string;
   }> = [];
   private sending = false;
+  private interrupting = false;
   private activeRequest: "turn" | "shell" | "compaction" | undefined;
   private configuring = false;
   private webFetchEnabled: boolean;
@@ -899,6 +905,9 @@ export class AxlApp {
       : options.sessionId === undefined
         ? await options.client.request("session.create", {
             cwd: options.cwd,
+            ...(options.requestSettings === undefined
+              ? {}
+              : { requestSettings: options.requestSettings }),
             ...(options.currentModel === undefined ? {} : { modelId: options.currentModel }),
             ...(options.currentThinking === undefined
               ? {}
@@ -2363,6 +2372,43 @@ export class AxlApp {
       } else void this.openDiffReview((argument || "working") as WorkspaceReviewScope);
       return;
     }
+    if (command === "/request") {
+      const current = this.sessionSubscription?.projector.overview.requestSettings;
+      if (!argument) {
+        this.commitLines([
+          ...this.requestConfigurationLines(),
+          "  /request output <tokens|model> · /request idle <milliseconds|disabled>",
+        ]);
+      } else if (current === undefined) {
+        this.notice = this.view.palette.error(
+          "✖ Request settings are unavailable for this runtime",
+        );
+      } else {
+        const [field, value, extra] = arguments_;
+        try {
+          if (
+            extra !== undefined ||
+            value === undefined ||
+            !["output", "idle"].includes(field ?? "")
+          )
+            throw new Error(
+              "Use /request output <tokens|model> or /request idle <milliseconds|disabled>",
+            );
+          const requestSettings = parseModelRequestSettings({
+            ...current,
+            ...(field === "output"
+              ? { maxOutputTokens: value === "model" ? null : Number(value) }
+              : { httpIdleTimeoutMs: value === "disabled" ? 0 : Number(value) }),
+          });
+          await this.configure({ requestSettings });
+        } catch (error) {
+          this.notice = this.view.palette.error(
+            `✖ ${sanitizeTerminalText(error instanceof Error ? error.message : "Invalid request settings")}`,
+          );
+        }
+      }
+      return;
+    }
     if (command === "/status") {
       this.commitLines([
         this.view.palette.accent("Session"),
@@ -2370,6 +2416,7 @@ export class AxlApp {
         `  profile   ${this.view.profile ?? "?"}`,
         `  model     ${this.view.model ?? "?"}`,
         `  thinking  ${this.view.thinking ?? "?"}`,
+        ...this.requestConfigurationLines(),
         `  sandbox   ${this.view.sandbox ?? "?"}`,
         `  connection ${this.connectionState}`,
         `  display   ${this.tuiMode}${this.tuiMode === "fullscreen" ? ` · mouse ${this.fullscreenMouse}` : ""}`,
@@ -2892,10 +2939,31 @@ export class AxlApp {
     this.redraw();
   }
 
+  private requestConfigurationLines(): string[] {
+    const overview = this.sessionSubscription?.projector.overview;
+    const settings = overview?.requestSettings;
+    if (settings === undefined) return ["  requests  unavailable"];
+    const last = overview?.lastRequest;
+    return [
+      `  output    ${settings.maxOutputTokens === null ? "model maximum" : settings.maxOutputTokens}`,
+      `  HTTP idle ${settings.httpIdleTimeoutMs === 0 ? "disabled" : `${settings.httpIdleTimeoutMs} ms`}`,
+      ...(last === undefined
+        ? []
+        : [
+            `  last call ${last.maxOutputTokens} output tokens · ${last.estimatedInputTokens} input estimate + ${last.contextReserveTokens} reserve / ${last.contextWindow} context`,
+          ]),
+    ];
+  }
+
   private openSettings(): void {
     this.openPicker({
       title: "Terminal settings",
       items: [
+        {
+          value: "requests",
+          label: "Model requests",
+          description: "output ceiling and transport idle timeout",
+        },
         { value: "theme", label: "Theme", description: this.currentTheme },
         { value: "tools", label: "Tool details", description: this.view.toolOutputDisplay },
         { value: "thoughts", label: "Thoughts", description: this.view.thinkingDisplay },
@@ -2935,7 +3003,10 @@ export class AxlApp {
       ],
       current: "",
       onPick: (value) => {
-        if (value === "theme") this.selectTheme("");
+        if (value === "requests") {
+          this.commitLines(this.requestConfigurationLines());
+          this.editor.setText("/request ");
+        } else if (value === "theme") this.selectTheme("");
         else if (value === "tools") this.selectToolDisplay();
         else if (value === "thoughts") this.selectThinkingDisplay();
         else if (value === "mode") this.selectTuiMode();
@@ -4103,6 +4174,7 @@ export class AxlApp {
   private async persistPreferences(update: {
     modelId?: string;
     thinkingLevel?: ThinkingLevel;
+    requestSettings?: ModelRequestSettings;
     webFetch?: boolean;
     webSearch?: boolean;
     theme?: string;
@@ -4134,6 +4206,7 @@ export class AxlApp {
   private async configure(update: {
     modelId?: string;
     thinkingLevel?: ThinkingLevel;
+    requestSettings?: ModelRequestSettings;
     webFetch?: boolean;
     webSearch?: boolean;
   }): Promise<void> {
@@ -4150,6 +4223,8 @@ export class AxlApp {
       });
       if (update.modelId) this.options.onModelChange?.(update.modelId);
       await this.persistPreferences(update);
+      if (update.requestSettings !== undefined)
+        this.notice = this.view.palette.dim("· model request settings updated");
     } catch (error) {
       this.notice = this.view.palette.error(
         `✖ ${error instanceof Error ? error.message : "configuration failed"}`,
@@ -4376,11 +4451,21 @@ export class AxlApp {
   }
 
   private async interrupt(): Promise<void> {
+    if (this.interrupting) return;
+    this.interrupting = true;
     try {
-      await this.client.request("session.interrupt", { sessionId: this.sessionId });
+      let result = await this.client.request("session.interrupt", { sessionId: this.sessionId });
+      // Working is shown optimistically before session.send installs daemon ownership.
+      // Preserve an immediate Escape across that short admission window.
+      while (!result.interrupted && this.sending && !this.stopped) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+        result = await this.client.request("session.interrupt", { sessionId: this.sessionId });
+      }
     } catch {
       this.notice = this.view.palette.dim("· turn already finished");
       this.redraw();
+    } finally {
+      this.interrupting = false;
     }
   }
 }

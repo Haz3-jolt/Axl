@@ -50,6 +50,15 @@ test("projects messages, configuration, usage, interactions, and generic tools d
   const events = [
     event("session.created", { cwd: "/workspace" }),
     event("config.model", { modelId: "fixture/model" }),
+    event("config.request", { maxOutputTokens: null, httpIdleTimeoutMs: 300_000 }),
+    event("model.request_configured", {
+      maxOutputTokens: 64000,
+      httpIdleTimeoutMs: 300_000,
+      estimatedInputTokens: 1000,
+      contextWindow: 128000,
+      contextReserveTokens: 4096,
+      modelMaxOutputTokens: 64000,
+    }),
     event("config.provider", { providerId: "fixture" }),
     event("config.thinking", { requested: "high", effective: "medium", clamped: true }),
     event("tool.call", { callId: "future-1", name: "future_tool", input: { value: 1 } }),
@@ -86,6 +95,11 @@ test("projects messages, configuration, usage, interactions, and generic tools d
     two.applyEvent(item);
   }
   assert.deepEqual(one.state, two.state);
+  assert.deepEqual(one.state.requestSettings, {
+    maxOutputTokens: null,
+    httpIdleTimeoutMs: 300_000,
+  });
+  assert.equal(one.state.lastRequest?.maxOutputTokens, 64000);
   assert.equal(one.state.tools[0]?.renderIntent, "generic");
   assert.equal(one.state.tools[0]?.result?.content[0]?.type, "text");
   assert.equal(one.state.interactions[0]?.resolution?.payload.action, "accept");

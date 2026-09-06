@@ -5,10 +5,14 @@ import type {
   CanonicalEvent,
   EventId,
   ModelMessage,
+  ModelRequestConfiguration,
   ModelStreamEvent,
   ToolCallRequest,
   Usage,
 } from "@axl/protocol";
+
+import { estimateModelInputTokens, estimateModelMessageTokens } from "@axl/protocol";
+export { estimateModelMessageTokens } from "@axl/protocol";
 
 import type { ModelPort } from "./model-port.ts";
 import { ReplayError } from "./replay.ts";
@@ -22,7 +26,7 @@ export interface CompactionSettings {
 }
 
 const TOOL_RESULT_MAX_CHARACTERS = 2_000;
-const ESTIMATED_BLOB_CHARACTERS = 4_800;
+
 const COMPACTION_SUMMARY_PREFIX =
   "Earlier conversation history was compacted into this continuation summary:\n\n<summary>\n";
 const COMPACTION_SUMMARY_SUFFIX = "\n</summary>";
@@ -206,31 +210,6 @@ export function messagesFromCompactedLineage(
   ];
 }
 
-function contentCharacters(
-  content: readonly { readonly type: string; readonly text?: string }[],
-): number {
-  return content.reduce(
-    (total, item) =>
-      total +
-      (item.type === "text" || item.type === "thinking"
-        ? (item.text?.length ?? 0)
-        : ESTIMATED_BLOB_CHARACTERS),
-    0,
-  );
-}
-
-export function estimateModelMessageTokens(message: ModelMessage): number {
-  let characters = contentCharacters(message.content);
-  if (message.role === "assistant") {
-    for (const call of message.toolCalls ?? []) {
-      characters += call.name.length + JSON.stringify(call.input).length;
-    }
-  } else if (message.role === "tool") {
-    characters += message.name.length;
-  }
-  return Math.ceil(characters / 4);
-}
-
 export function prepareCompaction(
   events: readonly CanonicalEvent[],
   keepRecentTokens = DEFAULT_COMPACTION_KEEP_RECENT_TOKENS,
@@ -348,15 +327,23 @@ export async function summarizeCompaction(
   customInstructions?: string,
   signal?: AbortSignal,
   maxOutputTokens = DEFAULT_COMPACTION_MAX_OUTPUT_TOKENS,
+  onRequestConfigured?: (configuration: ModelRequestConfiguration) => Promise<void>,
 ): Promise<CompactionSummary> {
   signal?.throwIfAborted();
   let summary = "";
   let terminal: Extract<ModelStreamEvent, { type: "completed" }> | undefined;
+  const messages: ModelMessage[] = [
+    { role: "user", content: [{ type: "text", text: summaryPrompt(plan, customInstructions) }] },
+  ];
   for await (const event of model.stream({
+    onRequestConfigured,
+    estimatedInputTokens: estimateModelInputTokens({
+      system: SUMMARIZATION_SYSTEM_PROMPT,
+      messages,
+      tools: [],
+    }),
     system: SUMMARIZATION_SYSTEM_PROMPT,
-    messages: [
-      { role: "user", content: [{ type: "text", text: summaryPrompt(plan, customInstructions) }] },
-    ],
+    messages,
     tools: [],
     maxOutputTokens,
     toolChoice: "none",

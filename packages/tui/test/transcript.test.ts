@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Kaushik Kumar
 // SPDX-FileCopyrightText: 2026 Srihari
 // SPDX-FileCopyrightText: 2026 VishnuM449
+// SPDX-FileCopyrightText: 2026 Shaan Narendran
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
@@ -96,6 +97,15 @@ test("leaves tool presentation to retained transactions and renders errors loudl
       }),
     ),
     ["", "  ✖ boom"],
+  );
+  assert.deepEqual(
+    view.apply(
+      makeEvent("assistant.message", {
+        content: [{ type: "text", text: "partial" }],
+        stopReason: "length",
+      }),
+    ),
+    ["", "  partial", "  ■ output limit reached; response may be incomplete"],
   );
   assert.deepEqual(
     view.apply(

@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelMessage, ModelStreamEvent, ToolDeclaration } from "@axl/protocol";
+import type {
+  ModelMessage,
+  ModelRequestConfiguration,
+  ModelStreamEvent,
+  ToolDeclaration,
+} from "@axl/protocol";
 
 /** One model turn as the kernel requests it. Model identity is the adapter's concern. */
 export interface ModelTurnRequest {
@@ -9,6 +14,10 @@ export interface ModelTurnRequest {
   readonly messages: readonly ModelMessage[];
   readonly tools: readonly ToolDeclaration[];
   readonly maxOutputTokens?: number | undefined;
+  readonly estimatedInputTokens?: number | undefined;
+  readonly onRequestConfigured?:
+    | ((configuration: ModelRequestConfiguration) => Promise<void>)
+    | undefined;
   readonly toolChoice?: "auto" | "required" | "none" | undefined;
   readonly signal?: AbortSignal | undefined;
 }

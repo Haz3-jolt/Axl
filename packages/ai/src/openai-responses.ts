@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-FileCopyrightText: 2026 Kaushik Kumar
+// SPDX-FileCopyrightText: 2026 Shaan Narendran
 // SPDX-License-Identifier: Apache-2.0
 
 // Axl-native OpenAI Responses codec and transport implementation.
@@ -12,6 +13,9 @@ import type {
   Usage,
 } from "@axl/protocol";
 
+import { EnvHttpProxyAgent, fetch as modelFetch } from "undici";
+import { fitModelRequest } from "./request-configuration.ts";
+
 import { AuthError, type ResolvedAuth } from "./auth.ts";
 import { assertModelSupports } from "./capabilities.ts";
 import type { AuthMethod, ModelInfo, ModelRequest, ModelStreamEvent } from "./model.ts";
@@ -20,6 +24,21 @@ import { decodeSseStream, type SseFrame } from "./sse.ts";
 
 /** OpenAI Responses rejects max_output_tokens below 16. */
 const MIN_OUTPUT_TOKENS = 16;
+// Independently implements Pi's byte-idle timeout semantics from http-dispatcher.ts at 6c87d9a02.
+// https://github.com/badlogic/pi-mono/blob/6c87d9a02/packages/coding-agent/src/core/http-dispatcher.ts
+// Model-only connection pooling. Per-dispatch overrides also override fetch's internal defaults.
+let modelDispatcher: EnvHttpProxyAgent | undefined;
+function dispatcherFor(timeoutMs: number) {
+  modelDispatcher ??= new EnvHttpProxyAgent({
+    allowH2: false,
+    connect: { autoSelectFamilyAttemptTimeout: 2_000 },
+  });
+  return modelDispatcher.compose(
+    (dispatch) => (options, handler) =>
+      dispatch({ ...options, headersTimeout: timeoutMs, bodyTimeout: timeoutMs }, handler),
+  );
+}
+const IDLE_TIMEOUT_CODES = new Set(["UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"]);
 const SAFE_CONNECT_FAILURES = new Set([
   "EAI_AGAIN",
   "ENOTFOUND",
@@ -133,9 +152,12 @@ export function encodeResponsesRequest(
     store: false,
   };
   if (request.system !== undefined) body.instructions = request.system;
-  if (request.maxOutputTokens !== undefined) {
-    body.max_output_tokens = Math.max(request.maxOutputTokens, MIN_OUTPUT_TOKENS);
-  }
+  const configuration = fitModelRequest(model, request);
+  if (configuration.maxOutputTokens < MIN_OUTPUT_TOKENS)
+    throw new ResponsesCodecError(
+      `OpenAI Responses needs at least ${MIN_OUTPUT_TOKENS} output tokens; the requested or available ceiling is ${configuration.maxOutputTokens}`,
+    );
+  body.max_output_tokens = configuration.maxOutputTokens;
   if (request.tools !== undefined && request.tools.length > 0) {
     body.tools = request.tools.map((tool) => ({
       type: "function",
@@ -354,7 +376,7 @@ export class OpenAiResponsesProvider implements ModelProvider {
   private readonly endpoint: ResponsesEndpoint;
   private readonly models: readonly ModelInfo[];
   private readonly resolveAuth: () => Promise<ResolvedAuth>;
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: typeof fetch | undefined;
 
   constructor(options: OpenAiResponsesProviderOptions) {
     this.id = options.id;
@@ -363,7 +385,7 @@ export class OpenAiResponsesProvider implements ModelProvider {
     this.endpoint = options.endpoint;
     this.models = options.models;
     this.resolveAuth = options.resolveAuth;
-    this.fetchImpl = options.fetch ?? fetch;
+    this.fetchImpl = options.fetch;
   }
 
   listModels(): Promise<readonly ModelInfo[]> {
@@ -384,7 +406,12 @@ export class OpenAiResponsesProvider implements ModelProvider {
     request: ModelRequest,
   ): AsyncGenerator<ModelStreamEvent, void, undefined> {
     let url: string;
-    let init: RequestInit;
+    let init: {
+      method: string;
+      headers: Record<string, string>;
+      body: string;
+      signal?: AbortSignal;
+    };
     try {
       const resolved = await this.resolveAuth();
       const body = encodeResponsesRequest(
@@ -420,9 +447,15 @@ export class OpenAiResponsesProvider implements ModelProvider {
       return;
     }
 
-    let response: Response;
+    let response: Pick<Response, "ok" | "status" | "headers" | "body">;
     try {
-      response = await this.fetchImpl(url, init);
+      response =
+        this.fetchImpl === undefined
+          ? await modelFetch(url, {
+              ...init,
+              dispatcher: dispatcherFor(fitModelRequest(model, request).httpIdleTimeoutMs),
+            })
+          : await this.fetchImpl(url, init);
     } catch (error) {
       const code = nestedErrorCode(error);
       const safeToRetry = code !== undefined && SAFE_CONNECT_FAILURES.has(code);
@@ -491,11 +524,23 @@ export class OpenAiResponsesProvider implements ModelProvider {
     request: ModelRequest,
     error: unknown,
     code: string,
-    requestPhase: "before_dispatch" | "streaming" | "unknown",
+    requestPhase: "before_dispatch" | "awaiting_response" | "streaming" | "unknown",
     retryable: boolean,
     category: ModelErrorCategory,
   ): ModelStreamEvent {
     if (request.signal?.aborted) return { type: "aborted" };
+    const transportCode = nestedErrorCode(error);
+    if (transportCode !== undefined && IDLE_TIMEOUT_CODES.has(transportCode)) {
+      return {
+        type: "error",
+        code: "model_request_idle_timeout",
+        message: `Provider transport was idle for ${request.httpIdleTimeoutMs ?? 300_000} ms while ${transportCode === "UND_ERR_HEADERS_TIMEOUT" ? "waiting for response headers" : "reading the response body"}`,
+        retryable: false,
+        category: "timeout",
+        requestPhase:
+          transportCode === "UND_ERR_HEADERS_TIMEOUT" ? "awaiting_response" : "streaming",
+      };
+    }
     return {
       type: "error",
       code,

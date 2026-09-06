@@ -65,7 +65,15 @@ export function thinkingBudgetForLevel(
   level: Exclude<ThinkingLevel, "off">,
   budgets?: ThinkingBudgets,
 ): number {
+  if (!THINKING_LEVELS.includes(level) || (level as ThinkingLevel) === "off")
+    throw new TypeError("Invalid budgeted thinking level");
   const merged = { ...DEFAULT_THINKING_BUDGETS, ...budgets };
+  for (const [name, value] of Object.entries(merged)) {
+    if (!(name in DEFAULT_THINKING_BUDGETS) || !Number.isSafeInteger(value) || value < 0)
+      throw new TypeError(
+        "Thinking budgets must be nonnegative safe integers for supported levels",
+      );
+  }
   const folded = level === "xhigh" || level === "max" ? "high" : level;
   return merged[folded];
 }
@@ -91,19 +99,28 @@ export function fitThinkingBudget(input: {
   readonly budgets?: ThinkingBudgets;
 }): FittedThinkingBudget {
   const { level, modelMaxTokens, requestedMaxTokens, budgets } = input;
+  if (
+    !Number.isSafeInteger(modelMaxTokens) ||
+    modelMaxTokens < 1 ||
+    (requestedMaxTokens !== undefined &&
+      (!Number.isSafeInteger(requestedMaxTokens) || requestedMaxTokens < 1))
+  )
+    throw new TypeError("Output limits must be positive safe integers");
   if (level === "off") {
     return {
       maxTokens: Math.min(requestedMaxTokens ?? modelMaxTokens, modelMaxTokens),
       thinkingBudget: 0,
     };
   }
+  if (modelMaxTokens < MIN_ANSWER_TOKENS)
+    throw new TypeError(
+      `Thinking requires at least ${MIN_ANSWER_TOKENS} output tokens to preserve answer room`,
+    );
   let thinkingBudget = thinkingBudgetForLevel(level, budgets);
   const maxTokens =
     requestedMaxTokens === undefined
       ? modelMaxTokens
       : Math.min(requestedMaxTokens + thinkingBudget, modelMaxTokens);
-  if (maxTokens <= thinkingBudget) {
-    thinkingBudget = Math.min(thinkingBudget, Math.max(0, maxTokens - MIN_ANSWER_TOKENS));
-  }
+  thinkingBudget = Math.min(thinkingBudget, Math.max(0, maxTokens - MIN_ANSWER_TOKENS));
   return { maxTokens, thinkingBudget };
 }

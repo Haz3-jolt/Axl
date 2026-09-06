@@ -67,6 +67,8 @@ export interface ModelRequest {
   readonly tools?: readonly ToolDeclaration[];
   readonly thinkingLevel?: ThinkingLevel;
   readonly maxOutputTokens?: number;
+  readonly httpIdleTimeoutMs?: number;
+  readonly estimatedInputTokens?: number;
   readonly toolChoice?: "auto" | "required" | "none";
   /** Resolves content-addressed media without placing bytes in canonical events. */
   readonly readBlob?: (reference: BlobReference) => Promise<Uint8Array>;

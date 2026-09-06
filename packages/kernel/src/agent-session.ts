@@ -13,6 +13,8 @@ import {
   type AssistantStopReason,
   type CanonicalEvent,
   EVENT_FORMAT_VERSION,
+  estimateModelInputTokens,
+  estimateModelMessageTokens,
   type EventId,
   type EventPayloadMap,
   type EventType,
@@ -168,6 +170,7 @@ export interface AgentSessionOptions {
   readonly sandbox?: EventPayloadMap["sandbox.configured"];
   /** Model configuration announced at every open as a `config.model` event. */
   readonly configModel?: EventPayloadMap["config.model"];
+  readonly configRequest?: EventPayloadMap["config.request"];
   /** Thinking configuration announced at every open as a `config.thinking` event. */
   readonly configThinking?: EventPayloadMap["config.thinking"];
   /** Effective tool profile announced at every open as a `config.profile` event. */
@@ -222,6 +225,7 @@ interface TurnOutcome {
  */
 export class AgentSession {
   readonly log: JsonlEventLog;
+  private contextUsage: { tokens: number; messageCount: number } | undefined;
   private readonly model: ModelPort;
   private readonly tools: ToolRegistry;
   private readonly host: ExtensionHost;
@@ -330,6 +334,8 @@ export class AgentSession {
     if (options.sandbox !== undefined) {
       await session.append(options.boundaryOperationId, "sandbox.configured", options.sandbox);
     }
+    if (options.configRequest !== undefined)
+      await session.append(options.boundaryOperationId, "config.request", options.configRequest);
     if (options.configModel !== undefined) {
       await session.append(options.boundaryOperationId, "config.model", options.configModel);
     }
@@ -482,6 +488,9 @@ export class AgentSession {
         instructions,
         signal,
         this.compaction.maxOutputTokens,
+        async (configuration) => {
+          await this.append(operationId, "model.request_configured", configuration);
+        },
       );
       signal?.throwIfAborted();
       const event = await this.append(operationId, "context.compacted", {
@@ -490,6 +499,7 @@ export class AgentSession {
         usage: result.usage,
       });
       this.messages = [...messagesFromLineage([...lineage, event])];
+      this.contextUsage = undefined;
       return event;
     } finally {
       this.activeOperation = null;
@@ -539,6 +549,14 @@ export class AgentSession {
 
         if (outcome.stopReason === "error" || outcome.stopReason === "aborted") {
           return { events: appended, stopReason: outcome.stopReason };
+        }
+        if (outcome.usage !== undefined) {
+          const tokens =
+            outcome.usage.inputTokens +
+            outcome.usage.outputTokens +
+            outcome.usage.cacheReadTokens +
+            outcome.usage.cacheWriteTokens;
+          if (tokens > 0) this.contextUsage = { tokens, messageCount: this.messages.length };
         }
         if (outcome.stopReason === "tool_use") {
           if (outcome.toolCalls.length === 0) {
@@ -632,7 +650,7 @@ export class AgentSession {
     const retry = this.retry;
     const maxAttempts = retry?.maxAttempts ?? 1;
     for (let attempt = 1; ; attempt += 1) {
-      const outcome = await this.modelAttempt(operationId, activity, signal);
+      const outcome = await this.modelAttempt(operationId, activity, signal, appended);
       const error = outcome.error;
       if (
         retry === undefined ||
@@ -686,6 +704,7 @@ export class AgentSession {
     operationId: OperationId,
     activity: { sequence: number },
     signal: AbortSignal | undefined,
+    appended: CanonicalEvent[],
   ): Promise<TurnOutcome> {
     let thinking = "";
     let text = "";
@@ -695,7 +714,22 @@ export class AgentSession {
 
     try {
       // Snapshot: the port must never observe the turn mutating history under it.
+      const estimatedInputTokens =
+        this.contextUsage === undefined
+          ? estimateModelInputTokens({
+              system: this.system,
+              messages: this.messages,
+              tools: this.tools.declarations(),
+            })
+          : this.contextUsage.tokens +
+            this.messages
+              .slice(this.contextUsage.messageCount)
+              .reduce((sum, message) => sum + estimateModelMessageTokens(message), 0);
       for await (const event of this.model.stream({
+        estimatedInputTokens,
+        onRequestConfigured: async (configuration) => {
+          appended.push(await this.append(operationId, "model.request_configured", configuration));
+        },
         system: this.system,
         messages: [...this.messages],
         tools: this.tools.declarations(),

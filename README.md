@@ -129,6 +129,7 @@ A session belongs to the daemon, not to the terminal that created it. Closing a 
 - `axl -r` opens the all-placement resume picker.
 - `axl <session-id>` resumes a known session directly.
 - `session.interrupt` is the explicit cancellation operation.
+- `/request` shows or changes the daemon-owned output ceiling and HTTP idle timeout. The default output ceiling is the model maximum, fitted to available context; the idle timeout is five minutes and refreshes on response bytes.
 - Daemon restart recovery reconciles accepted operations against canonical history before serving clients.
 
 Resume uses a frozen, paged snapshot followed by an acknowledged live event stream. The SDK rejects altered duplicates, detects gaps, and replaces a projection from an authoritative snapshot when a cursor cannot be resumed safely.

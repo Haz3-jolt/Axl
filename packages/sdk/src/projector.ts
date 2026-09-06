@@ -104,6 +104,8 @@ export interface ConversationState {
   readonly provider?: string;
   readonly entitlement?: string;
   readonly thinking?: ThinkingLevel;
+  readonly requestSettings?: EventPayloadMap["config.request"];
+  readonly lastRequest?: EventPayloadMap["model.request_configured"];
   readonly profile?: SessionProfile;
   readonly webFetch?: boolean;
   readonly webSearch?: boolean;
@@ -201,6 +203,8 @@ export class ConversationProjector {
   private provider: string | undefined;
   private entitlement: string | undefined;
   private thinking: ThinkingLevel | undefined;
+  private requestSettings: EventPayloadMap["config.request"] | undefined;
+  private lastRequest: EventPayloadMap["model.request_configured"] | undefined;
   private profile: SessionProfile | undefined;
   private webFetch: boolean | undefined;
   private webSearch: boolean | undefined;
@@ -249,6 +253,8 @@ export class ConversationProjector {
       ...(this.model === undefined ? {} : { model: this.model }),
       ...(this.provider === undefined ? {} : { provider: this.provider }),
       ...(this.entitlement === undefined ? {} : { entitlement: this.entitlement }),
+      ...(this.requestSettings === undefined ? {} : { requestSettings: this.requestSettings }),
+      ...(this.lastRequest === undefined ? {} : { lastRequest: this.lastRequest }),
       ...(this.thinking === undefined ? {} : { thinking: this.thinking }),
       ...(this.profile === undefined ? {} : { profile: this.profile }),
       ...(this.webFetch === undefined ? {} : { webFetch: this.webFetch }),
@@ -288,6 +294,8 @@ export class ConversationProjector {
     this.provider = undefined;
     this.entitlement = undefined;
     this.thinking = undefined;
+    this.requestSettings = undefined;
+    this.lastRequest = undefined;
     this.profile = undefined;
     this.webFetch = undefined;
     this.webSearch = undefined;
@@ -430,6 +438,12 @@ export class ConversationProjector {
         break;
       case "config.entitlement":
         this.entitlement = event.payload.entitlementId;
+        break;
+      case "config.request":
+        this.requestSettings = event.payload;
+        break;
+      case "model.request_configured":
+        this.lastRequest = event.payload;
         break;
       case "config.thinking":
         this.thinking = event.payload.effective;

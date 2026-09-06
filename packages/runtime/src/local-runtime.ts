@@ -9,9 +9,16 @@ import { join } from "node:path";
 
 import type { CredentialStore } from "@axl/ai";
 import { type AxlDaemon, listStoredSessions } from "@axl/daemon";
-import type { SessionSummary, ThinkingLevel } from "@axl/protocol";
+import {
+  DEFAULT_MODEL_REQUEST_SETTINGS,
+  parseModelRequestSettings,
+  type ModelRequestSettings,
+  type SessionSummary,
+  type ThinkingLevel,
+} from "@axl/protocol";
 
 export interface LocalRuntimeDefaults {
+  readonly requestSettings?: ModelRequestSettings;
   readonly modelId: string;
   readonly thinkingLevel: ThinkingLevel;
   readonly webFetch?: boolean;
@@ -270,7 +277,11 @@ export async function startLocalDaemon(options: LocalDaemonOptions): Promise<Axl
         readableRoots: [cwd],
         protectedPaths: [axlHome],
       };
+      const requestSettings = parseModelRequestSettings(
+        selection.requestSettings ?? defaults.requestSettings ?? DEFAULT_MODEL_REQUEST_SETTINGS,
+      );
       const model = ai.modelPortForSession(provider, {
+        requestSettings,
         modelId: active.modelId,
         thinkingLevel: thinking.effective,
         readBlob,
@@ -348,6 +359,7 @@ export async function startLocalDaemon(options: LocalDaemonOptions): Promise<Axl
         },
         sandbox: sandbox.configuredPayload(),
         configModel: { modelId: active.modelId },
+        configRequest: requestSettings,
         configThinking: thinking,
         configProfile: { profile },
         configTools: { webFetch: active.webFetch, webSearch: active.webSearch },

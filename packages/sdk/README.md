@@ -215,3 +215,7 @@ pnpm check:boundaries
 Pass the current session and attachment IDs to `status` for a quit preview. Pass that status and the same context to `shutdown`, with explicit interruption and confirmation intent. The daemon checks instance identity and revision atomically. Requests are not retried automatically. A timeout leaves the shutdown outcome uncertain; inspect status before deciding to force. Force is a separate operation, requires prior shutdown, and is unavailable unless the process host supplies self-termination.
 
 Host messages use their own version and connection on the protected Unix socket. An incompatible session wire remains incompatible. Legacy daemons without host control report an explicit recovery error. Normal clients receiving `daemon_stopping` stop automatic retries and reconnect only on explicit intent. Closing a subscription after daemon shutdown remains safe.
+
+## Model request configuration
+
+Wire version 11 adds `requestSettings` to session create and configure RPCs. `config.request` records the selected output and transport-idle settings. `model.request_configured` records each effective output ceiling, idle timeout, estimated input, context reserve, context window, and model maximum before dispatch. `ConversationProjector` exposes these as `requestSettings` and `lastRequest` so every client can present the same daemon-owned values.

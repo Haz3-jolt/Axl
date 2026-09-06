@@ -930,3 +930,89 @@ test("the extension host seam activates and disposes with the session", async (c
   await session.dispose();
   assert.deepEqual(lifecycle, ["activate", "dispose"]);
 });
+
+test("records effective request configuration before each model dispatch", async (context) => {
+  const configurations = [
+    {
+      maxOutputTokens: 8192,
+      httpIdleTimeoutMs: 300_000,
+      estimatedInputTokens: 10,
+      contextWindow: 128000,
+      contextReserveTokens: 4096,
+      modelMaxOutputTokens: 8192,
+    },
+    {
+      maxOutputTokens: 8000,
+      httpIdleTimeoutMs: 300_000,
+      estimatedInputTokens: 1920,
+      contextWindow: 14016,
+      contextReserveTokens: 4096,
+      modelMaxOutputTokens: 8192,
+    },
+  ];
+  let calls = 0;
+  const port: ModelPort = {
+    stream(request) {
+      const configuration = configurations[calls++];
+      return (async function* () {
+        if (!configuration) throw new Error("unexpected call");
+        await request.onRequestConfigured?.(configuration);
+        yield { type: "completed", stopReason: "stop", usage } as const;
+      })();
+    },
+  };
+  const { session, path } = await makeSession(context, port);
+  const first = await session.runTurn([{ type: "text", text: "first" }]);
+  assert.deepEqual(
+    first.events.map((event) => event.type),
+    ["user.message", "model.request_configured", "assistant.message"],
+  );
+  await session.runTurn([{ type: "text", text: "second" }]);
+  const stored = (await session.log.read()).events.filter(
+    (event) => event.type === "model.request_configured",
+  );
+  assert.deepEqual(
+    stored.map((event) => event.payload),
+    configurations,
+  );
+  await session.dispose();
+  const reopened = await AgentSession.open(path, sessionId, {
+    model: makePort([say("again")]),
+    tools: new ToolRegistry(),
+    cwd: "/workspace",
+  });
+  assert.equal(
+    (await reopened.log.read()).events.filter((event) => event.type === "model.request_configured")
+      .length,
+    2,
+  );
+  await reopened.dispose();
+});
+
+test("an idle timeout is terminal without retry and the session accepts another prompt", async (context) => {
+  const port = makePort([
+    [
+      {
+        type: "error",
+        code: "model_request_idle_timeout",
+        message: "Provider transport was idle",
+        retryable: false,
+        category: "timeout",
+        requestPhase: "awaiting_response",
+      },
+    ],
+    say("recovered after timeout"),
+  ]);
+  const { session } = await makeSession(context, port, new ToolRegistry(), {
+    retry: { sleep: () => Promise.resolve(), random: () => 0.5 },
+  });
+  const failed = await session.runTurn([{ type: "text", text: "first" }]);
+  assert.equal(failed.stopReason, "error");
+  assert.equal(port.requests.length, 1);
+  const terminal = failed.events.at(-1);
+  assert.equal(terminal?.type, "assistant.message");
+  if (terminal?.type === "assistant.message")
+    assert.match(terminal.payload.errorMessage ?? "", /model_request_idle_timeout/);
+  assert.equal((await session.runTurn([{ type: "text", text: "second" }])).stopReason, "stop");
+  assert.equal(port.requests.length, 2);
+});

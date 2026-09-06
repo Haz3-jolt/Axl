@@ -23,12 +23,15 @@ import type {
 } from "./events.ts";
 import { parseBlobReference, parseEvent, parseUserContent } from "./events.ts";
 
+import { type ModelRequestSettings, parseModelRequestSettings } from "./model-request.ts";
+
 export const MAX_HISTORY_PAGE_EVENTS = 5_000;
 export const MAX_WIRE_MESSAGE_BYTES = 1024 * 1024;
 
 export type EventCursor = string;
 
 export interface SessionModelSelection {
+  readonly requestSettings?: ModelRequestSettings;
   readonly modelId?: string;
   readonly thinkingLevel?: ThinkingLevel;
 }
@@ -800,6 +803,7 @@ export interface RpcMethodMap {
       readonly modelId: string;
       readonly requestedThinkingLevel: ThinkingLevel;
       readonly effectiveThinkingLevel: ThinkingLevel;
+      readonly requestSettings: ModelRequestSettings;
       readonly profile: SessionProfile;
       readonly webFetch: boolean;
       readonly webSearch: boolean;
@@ -1366,6 +1370,14 @@ function selection(params: Record<string, unknown>, path: string): SessionSelect
     }
   }
   return {
+    ...(params.requestSettings === undefined
+      ? {}
+      : {
+          requestSettings: parseModelRequestSettings(
+            params.requestSettings,
+            `${path}.requestSettings`,
+          ),
+        }),
     ...(modelId === undefined ? {} : { modelId }),
     ...(thinkingLevel === undefined ? {} : { thinkingLevel: thinkingLevel as ThinkingLevel }),
     ...(params.webFetch === undefined ? {} : { webFetch: params.webFetch as boolean }),
@@ -1440,6 +1452,7 @@ export function parseWireRequest(value: unknown): WireRequest {
       "cwd",
       "modelId",
       "thinkingLevel",
+      "requestSettings",
       "webFetch",
       "webSearch",
       "profile",
@@ -1685,6 +1698,7 @@ export function parseWireRequest(value: unknown): WireRequest {
       "sessionId",
       "modelId",
       "thinkingLevel",
+      "requestSettings",
       "webFetch",
       "webSearch",
       "profile",
@@ -1692,6 +1706,7 @@ export function parseWireRequest(value: unknown): WireRequest {
     const configured = selection(params, "request.params");
     const profile = sessionProfile(params.profile, "request.params.profile");
     if (
+      configured.requestSettings === undefined &&
       configured.modelId === undefined &&
       configured.thinkingLevel === undefined &&
       configured.webFetch === undefined &&
@@ -1700,7 +1715,7 @@ export function parseWireRequest(value: unknown): WireRequest {
     ) {
       throw new ProtocolValidationError(
         "request.params",
-        "must include modelId, thinkingLevel, webFetch, webSearch, or profile",
+        "must include modelId, thinkingLevel, requestSettings, webFetch, webSearch, or profile",
       );
     }
     return {
@@ -2306,6 +2321,7 @@ export function parseRpcResult<Method extends RpcMethod>(
       "modelId",
       "requestedThinkingLevel",
       "effectiveThinkingLevel",
+      "requestSettings",
       "profile",
       "webFetch",
       "webSearch",
@@ -2339,6 +2355,7 @@ export function parseRpcResult<Method extends RpcMethod>(
       modelId: boundedString(result.modelId, `${path}.modelId`, 512),
       requestedThinkingLevel: result.requestedThinkingLevel,
       effectiveThinkingLevel: result.effectiveThinkingLevel,
+      requestSettings: parseModelRequestSettings(result.requestSettings, `${path}.requestSettings`),
       profile,
       webFetch: result.webFetch,
       webSearch: result.webSearch,

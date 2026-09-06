@@ -40,6 +40,7 @@ import type {
   WorkspaceStatusResult,
 } from "@axl/protocol";
 import {
+  DEFAULT_MODEL_REQUEST_SETTINGS,
   encodeWireMessage,
   isRpcErrorAllowed,
   MAX_CANONICAL_EVENT_BYTES,
@@ -3500,6 +3501,7 @@ test("configuration changes rebuild and log the selected model and thinking", as
       return {
         model: replyPort(),
         tools: new ToolRegistry(),
+        configRequest: selection.requestSettings ?? DEFAULT_MODEL_REQUEST_SETTINGS,
         ...(selection.modelId === undefined ? {} : { configModel: { modelId: selection.modelId } }),
         ...(selection.thinkingLevel === undefined
           ? {}
@@ -3522,6 +3524,7 @@ test("configuration changes rebuild and log the selected model and thinking", as
     cwd: directory,
     modelId: "gpt-5",
     thinkingLevel: "medium",
+    requestSettings: { maxOutputTokens: null, httpIdleTimeoutMs: 300_000 },
   });
   const configureKey = "00000000-0000-4000-8000-000000000105";
   const changed = await client.request(
@@ -3530,6 +3533,7 @@ test("configuration changes rebuild and log the selected model and thinking", as
       sessionId: created.sessionId,
       modelId: "gpt-4.1",
       thinkingLevel: "high",
+      requestSettings: { maxOutputTokens: 2048, httpIdleTimeoutMs: 0 },
     },
     { idempotencyKey: configureKey },
   );
@@ -3541,10 +3545,11 @@ test("configuration changes rebuild and log the selected model and thinking", as
   assert.equal(changed.modelId, "gpt-4.1");
   assert.equal(changed.requestedThinkingLevel, "high");
   assert.equal(changed.effectiveThinkingLevel, "high");
+  assert.deepEqual(changed.requestSettings, { maxOutputTokens: 2048, httpIdleTimeoutMs: 0 });
   assert.equal(changed.profile, "standard");
   assert.equal(changed.webFetch, false);
   assert.equal(changed.webSearch, false);
-  assert.equal(changed.boundaryEventIds.length, 2);
+  assert.equal(changed.boundaryEventIds.length, 3);
 
   client.close();
   await daemon.stop();
@@ -3555,6 +3560,7 @@ test("configuration changes rebuild and log the selected model and thinking", as
     runtime: ({ selection }) => ({
       model: replyPort(),
       tools: new ToolRegistry(),
+      configRequest: selection.requestSettings ?? DEFAULT_MODEL_REQUEST_SETTINGS,
       ...(selection.modelId === undefined ? {} : { configModel: { modelId: selection.modelId } }),
       ...(selection.thinkingLevel === undefined
         ? {}
@@ -3578,6 +3584,7 @@ test("configuration changes rebuild and log the selected model and thinking", as
         sessionId: created.sessionId,
         modelId: "gpt-4.1",
         thinkingLevel: "high",
+        requestSettings: { maxOutputTokens: 2048, httpIdleTimeoutMs: 0 },
       },
       { idempotencyKey: configureKey },
     ),

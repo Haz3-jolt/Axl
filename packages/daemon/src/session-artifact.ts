@@ -296,7 +296,7 @@ function remapEvents(
       ...event,
       id: remapReference(eventIds, event.id, "event"),
       sessionId: targetSessionId,
-      operationId,
+      ...(operationId === undefined ? {} : { operationId }),
       parentId:
         event.parentId === null
           ? null

@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-FileCopyrightText: 2026 Kaushik Kumar
+// SPDX-FileCopyrightText: 2026 Shaan Narendran
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
@@ -42,16 +43,16 @@ const request: ModelRequest = {
   ],
   tools: [{ name: "shell", description: "Run a command", inputSchema: { type: "object" } }],
   thinkingLevel: "xhigh",
-  maxOutputTokens: 4,
+  maxOutputTokens: 16,
 };
 
-test("encodes messages, tools, thinking, and the output-token floor", () => {
+test("encodes messages, tools, thinking, and an explicit output ceiling", () => {
   const body = encodeResponsesRequest(model, request, "gpt-5.6-sol");
   assert.equal(body.model, "gpt-5.6-sol");
   assert.equal(body.stream, true);
   assert.equal(body.store, false);
   assert.equal(body.instructions, "You are Axl.");
-  assert.equal(body.max_output_tokens, 16); // floor of 16
+  assert.equal(body.max_output_tokens, 16);
   assert.deepEqual(body.reasoning, { effort: "xhigh" });
   assert.deepEqual(body.input, [
     { role: "user", content: [{ type: "input_text", text: "run the tests" }] },
@@ -393,5 +394,12 @@ test("undecodable frames and tool arguments fail loudly", async () => {
     ]),
     (error: unknown) =>
       error instanceof ResponsesCodecError && /arguments must be an object/.test(String(error)),
+  );
+});
+
+test("rejects an impossible output cap rather than silently exceeding it", () => {
+  assert.throws(
+    () => encodeResponsesRequest(model, { ...request, maxOutputTokens: 4 }, "gpt-5"),
+    /at least 16/,
   );
 });

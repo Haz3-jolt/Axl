@@ -104,3 +104,21 @@ test("off requests no thinking budget", () => {
     thinkingBudget: 0,
   });
 });
+
+test("thinking budgets leave answer room even when they are just below the ceiling", () => {
+  assert.deepEqual(
+    fitThinkingBudget({ level: "high", modelMaxTokens: 17000, requestedMaxTokens: 8192 }),
+    { maxTokens: 17000, thinkingBudget: 15976 },
+  );
+  for (const modelMaxTokens of [1024, 1025, 16384, 17000, 17408, 32000]) {
+    const fitted = fitThinkingBudget({ level: "high", modelMaxTokens });
+    assert.ok(fitted.maxTokens - fitted.thinkingBudget >= MIN_ANSWER_TOKENS);
+  }
+  assert.throws(() => fitThinkingBudget({ level: "high", modelMaxTokens: 1023 }), /answer room/);
+  for (const invalid of [0, -1, NaN, Infinity, 1.5]) {
+    assert.throws(() => fitThinkingBudget({ level: "high", modelMaxTokens: invalid }));
+    assert.throws(() =>
+      fitThinkingBudget({ level: "high", modelMaxTokens: 128000, requestedMaxTokens: invalid }),
+    );
+  }
+});

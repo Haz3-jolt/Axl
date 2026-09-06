@@ -138,6 +138,10 @@ test("assembles an authoritative local runtime without a presentation client", a
       .map((event) => (event.type === "tool.schema" ? event.payload.name : "")),
     ["bash", "read", "write", "edit", "web_fetch", "web_search"],
   );
+  assert.deepEqual(events.find((event) => event.type === "config.request")?.payload, {
+    maxOutputTokens: null,
+    httpIdleTimeoutMs: 300_000,
+  });
   assert.deepEqual(events.find((event) => event.type === "config.profile")?.payload, {
     profile: "standard",
   });

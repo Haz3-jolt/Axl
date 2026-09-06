@@ -16,6 +16,9 @@ import type { AuthContext, CredentialStore } from "@axl/ai";
 import { AZURE_OPENAI_MODELS } from "@axl/ai/models";
 import {
   type CanonicalEvent,
+  DEFAULT_MODEL_REQUEST_SETTINGS,
+  type ModelRequestSettings,
+  parseModelRequestSettings,
   encodeCanonicalEvent,
   MAX_WIRE_MESSAGE_BYTES,
   type SessionProfile,
@@ -52,6 +55,8 @@ Options:
   --cwd <path>       Set the workspace directory
   --model <id>       Select the initial model
   --thinking <level> Select the initial reasoning effort
+  --max-output-tokens <n|model>  Set an output ceiling or use the model maximum
+  --http-idle-timeout <ms>       Header/body idle timeout; 0 disables it
   --profile <name>   Select the standard or Bash-only exec profile
   --theme <name>     Select the terminal theme
   --tui-mode <mode>  Use regular or fullscreen terminal mode
@@ -101,6 +106,8 @@ interface CliArguments {
   socket?: string;
   model?: string;
   thinking?: ThinkingLevel;
+  maxOutputTokens?: number | null;
+  httpIdleTimeoutMs?: number;
   profile?: SessionProfile;
   webFetch?: boolean;
   webSearch?: boolean;
@@ -172,7 +179,20 @@ function parseArguments(argv: readonly string[]): CliArguments {
     else if (argument === "--raw") parsed.raw = true;
     else if (argument === "--confirm-prefix") parsed.confirmPrefix = true;
     else if (argument === "--model") parsed.model = next();
-    else if (argument === "--thinking") parsed.thinking = next() as ThinkingLevel;
+    else if (argument === "--max-output-tokens") {
+      const value = next();
+      parsed.maxOutputTokens = value === "model" ? null : Number(value);
+      parseModelRequestSettings({
+        ...DEFAULT_MODEL_REQUEST_SETTINGS,
+        maxOutputTokens: parsed.maxOutputTokens,
+      });
+    } else if (argument === "--http-idle-timeout") {
+      parsed.httpIdleTimeoutMs = Number(next());
+      parseModelRequestSettings({
+        ...DEFAULT_MODEL_REQUEST_SETTINGS,
+        httpIdleTimeoutMs: parsed.httpIdleTimeoutMs,
+      });
+    } else if (argument === "--thinking") parsed.thinking = next() as ThinkingLevel;
     else if (argument === "--profile") {
       const profile = next();
       if (profile !== "standard" && profile !== "exec") {
@@ -238,6 +258,13 @@ function parseArguments(argv: readonly string[]): CliArguments {
     throw new Error("--force requires daemon stop --yes after graceful shutdown was requested");
   if (parsed.command === "daemon" && parsed.sessionId !== undefined)
     throw new Error("Unexpected daemon argument");
+  if (
+    (parsed.maxOutputTokens !== undefined || parsed.httpIdleTimeoutMs !== undefined) &&
+    (parsed.resume || parsed.sessionId !== undefined)
+  )
+    throw new Error(
+      "Request settings flags select new sessions; use /request to configure a resumed session",
+    );
   if (parsed.resume && parsed.sessionId !== undefined) {
     throw new Error("--resume cannot be combined with a session ID");
   }
@@ -352,6 +379,7 @@ async function ensureCredentials(
 }
 
 interface ActiveConfig {
+  readonly requestSettings: ModelRequestSettings;
   readonly modelId: string;
   readonly thinkingLevel: ThinkingLevel;
   readonly webFetch: boolean;
@@ -426,6 +454,7 @@ async function connectExpectedDaemon(
 }
 
 async function connectOrStartDaemon(input: {
+  readonly requestSettings: ModelRequestSettings;
   readonly socketPath: string;
   readonly model: string;
   readonly thinking: ThinkingLevel;
@@ -460,6 +489,12 @@ async function connectOrStartDaemon(input: {
         input.model,
         "--thinking",
         input.thinking,
+        "--http-idle-timeout",
+        String(input.requestSettings.httpIdleTimeoutMs),
+        "--max-output-tokens",
+        input.requestSettings.maxOutputTokens === null
+          ? "model"
+          : String(input.requestSettings.maxOutputTokens),
         ...(input.unsafe ? ["--unsafe"] : []),
         ...(input.sandbox === "native" ? [] : ["--sandbox", input.sandbox]),
         ...(input.image === undefined ? [] : ["--image", input.image]),
@@ -575,6 +610,7 @@ async function runHeadless(
 ): Promise<AssistantMessageEvent> {
   const opened = await client.request("session.create", {
     cwd: input.cwd,
+    requestSettings: input.active.requestSettings,
     modelId: input.active.modelId,
     thinkingLevel: input.active.thinkingLevel,
     webFetch: input.active.webFetch,
@@ -844,6 +880,16 @@ async function main(): Promise<void> {
   }
 
   const active: ActiveConfig = {
+    requestSettings: parseModelRequestSettings({
+      maxOutputTokens:
+        cli.maxOutputTokens === undefined
+          ? (settings.requestSettings?.maxOutputTokens ?? null)
+          : cli.maxOutputTokens,
+      httpIdleTimeoutMs:
+        cli.httpIdleTimeoutMs ??
+        settings.requestSettings?.httpIdleTimeoutMs ??
+        DEFAULT_MODEL_REQUEST_SETTINGS.httpIdleTimeoutMs,
+    }),
     modelId: cli.model ?? settings.modelId ?? "gpt-5",
     thinkingLevel: cli.thinking ?? settings.thinkingLevel ?? "medium",
     webFetch: cli.webFetch ?? settings.webFetch ?? true,
@@ -904,6 +950,7 @@ async function main(): Promise<void> {
       const { store } = await credentials();
       await ensureCredentials(store, cli.command === undefined);
       return connectOrStartDaemon({
+        requestSettings: active.requestSettings,
         socketPath: target.socketPath,
         model: active.modelId,
         thinking: active.thinkingLevel,
@@ -1045,6 +1092,7 @@ async function main(): Promise<void> {
     onPreferenceChange: persistSettings,
     models: AZURE_OPENAI_MODELS.map((model) => model.modelId),
     modelCatalog: AZURE_OPENAI_MODELS,
+    requestSettings: active.requestSettings,
     currentModel: active.modelId,
     currentThinking: active.thinkingLevel,
     ...(cli.profile === undefined ? {} : { profile: cli.profile }),

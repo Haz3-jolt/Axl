@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2026 Lokesh
 // SPDX-FileCopyrightText: 2026 Srihari
 // SPDX-FileCopyrightText: 2026 VishnuM449
+// SPDX-FileCopyrightText: 2026 Shaan Narendran
 // SPDX-License-Identifier: Apache-2.0
 
 import {
@@ -16,6 +17,13 @@ import {
   parseSessionId,
   type SessionId,
 } from "./event-envelope.ts";
+
+import {
+  type ModelRequestConfiguration,
+  type ModelRequestSettings,
+  parseModelRequestConfiguration,
+  parseModelRequestSettings,
+} from "./model-request.ts";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type SessionProfile = "minimal" | "standard" | "chat" | "exec";
@@ -97,6 +105,8 @@ export type EventPayloadMap = {
     readonly isError: boolean;
     readonly details?: JsonValue;
   };
+  "config.request": ModelRequestSettings;
+  "model.request_configured": ModelRequestConfiguration;
   "config.model": { readonly modelId: string };
   "config.provider": { readonly providerId: string };
   "config.entitlement": { readonly entitlementId: string };
@@ -414,6 +424,8 @@ const payloadParsers: { readonly [Type in EventType]: PayloadParser } = {
     boolean(payload.isError, `${path}.isError`);
     return payload;
   },
+  "config.request": (payload, path) => parseModelRequestSettings(payload, path),
+  "model.request_configured": (payload, path) => parseModelRequestConfiguration(payload, path),
   "config.model": (payload, path) => {
     exact(payload, path, ["modelId"]);
     string(payload.modelId, `${path}.modelId`);

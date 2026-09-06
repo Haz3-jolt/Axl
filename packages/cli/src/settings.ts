@@ -8,7 +8,11 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname } from "node:path";
 
 import { THINKING_LEVELS } from "@axl/ai/models";
-import type { ThinkingLevel } from "@axl/protocol";
+import {
+  type ThinkingLevel,
+  type ModelRequestSettings,
+  parseModelRequestSettings,
+} from "@axl/protocol";
 
 type ImageDisplay = "auto" | "inline" | "metadata";
 type ThinkingDisplay = "show" | "compact" | "hide";
@@ -23,6 +27,7 @@ export interface AxlSettings {
 }
 
 export interface TuiSettings {
+  readonly requestSettings?: ModelRequestSettings;
   readonly version: 1;
   readonly modelId?: string;
   readonly thinkingLevel?: ThinkingLevel;
@@ -88,6 +93,7 @@ function parseSettings(value: unknown, path: string): TuiSettings {
     "version",
     "modelId",
     "thinkingLevel",
+    "requestSettings",
     "theme",
     "webFetch",
     "webSearch",
@@ -109,6 +115,8 @@ function parseSettings(value: unknown, path: string): TuiSettings {
   for (const key of Object.keys(input)) {
     if (!allowed.has(key)) throw new Error(`${path}: unknown setting ${key}`);
   }
+  if (input.requestSettings !== undefined)
+    parseModelRequestSettings(input.requestSettings, `${path}.requestSettings`);
   if (input.version !== 1) throw new Error(`${path}: version must be 1`);
   if (input.modelId !== undefined && (typeof input.modelId !== "string" || !input.modelId)) {
     throw new Error(`${path}: modelId must be a non-empty string`);

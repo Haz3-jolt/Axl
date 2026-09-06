@@ -66,7 +66,7 @@ axl daemon stop --interrupt --yes
 
 Use the same `--unsafe`, `--sandbox`, `--image`, or `--socket` selection as the running daemon. Status and stop do not require provider credentials. Restart refuses to switch data directories. Stop and restart refuse active work unless `--interrupt` explicitly authorizes cancellation. `--yes` confirms disconnecting clients. A changed confirmation snapshot requires a fresh command. Exit codes are 0 for success, 1 for errors, 2 for refused or stale confirmation, and 3 for a missing daemon on status or stop. Restart starts a missing daemon.
 
-An incompatible session wire fails loudly and points to these commands. No daemon is automatically replaced on a version mismatch. Host-control version 1 operates independently of session wire version 10 on a separate connection to the same owner-only Unix socket. It does not bypass the session handshake.
+An incompatible session wire fails loudly and points to these commands. No daemon is automatically replaced on a version mismatch. Host-control version 1 operates independently of session wire version 11 on a separate connection to the same owner-only Unix socket. It does not bypass the session handshake.
 
 If graceful cleanup fails or exceeds the host's ten-second wait, inspect `axl daemon status`. Shutdown can still be running. The TUI offers a separate force confirmation when available. From the CLI, explicitly request:
 
@@ -77,6 +77,24 @@ axl daemon stop --force --yes
 Force is accepted only after graceful shutdown has begun, and only by the same daemon instance. It asks the trusted process host to terminate itself. It never signals a PID taken from a lock file. Forced termination may lose unflushed data or leave tool processes running. If the process cannot service control requests at all, force through this channel is unavailable.
 
 Daemons from builds before host control cannot be recovered through these new commands. For that one-time transition, inspect the old process with operating-system tools, verify its command, owner, and socket, then send SIGTERM to that verified process. A PID in `.axl-data.lock` alone is not proof. Do not delete an active lock or kill every Node process. Once the old process has exited, normal startup reclaims its stale socket and lock. Preserved sessions remain resumable.
+
+### Model request limits
+
+Ordinary requests default to the selected model's advertised output maximum. Axl reduces that ceiling only when needed to fit the estimated input plus 4,096 reserved tokens inside the model context window. Every request sends an explicit provider output ceiling. The selected reasoning level remains unchanged. Providers that use explicit thinking-token budgets reserve at least 1,024 tokens for the answer.
+
+The HTTP idle timeout defaults to five minutes and applies separately while waiting for response headers and between response-body bytes. Streaming bytes, including SSE heartbeat comments, refresh it. It is not an absolute turn or request deadline. A timeout is reported separately from user cancellation and is never automatically retried after dispatch because provider acceptance may be uncertain.
+
+Show or change daemon-owned settings in the TUI:
+
+```text
+/request
+/request output 8192
+/request output model
+/request idle 300000
+/request idle disabled
+```
+
+For a new CLI session, use `--max-output-tokens <n|model>` and `--http-idle-timeout <milliseconds>`. Zero disables the idle timeout. Effective settings are recorded in canonical history and shown by `/status`. Axl has no numerical model-call ceiling or absolute turn-duration limit. Session budgets and proactive compaction remain separate features.
 
 
 Inspect local sandbox support without configuring provider credentials:
