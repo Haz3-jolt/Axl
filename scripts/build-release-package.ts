@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
+  cpSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -87,7 +88,20 @@ function digest(path: string): string {
 export function buildReleasePackage(versionOverride?: string): ReleasePackageResult {
   const source = JSON.parse(readFileSync(TEMPLATE, "utf8")) as Record<string, unknown>;
   const manifest = publicManifest(source, versionOverride ?? String(source.version ?? ""));
+  const sourceRevision = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  }).trim();
 
+  execFileSync("pnpm", ["--filter", "@axl/web", "build"], {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      AXL_BUILD_VERSION: manifest.version,
+      AXL_SOURCE_REVISION: sourceRevision,
+    },
+  });
   rmSync(join(ROOT, ".release"), { recursive: true, force: true });
   mkdirSync(join(STAGE, "dist"), { recursive: true });
   mkdirSync(ARTIFACTS, { recursive: true });
@@ -102,9 +116,13 @@ export function buildReleasePackage(versionOverride?: string): ReleasePackageRes
     target: "node22",
     sourcemap: false,
     legalComments: "none",
+    banner: {
+      js: 'import { createRequire as __axlCreateRequire } from "node:module";\nconst require = __axlCreateRequire(import.meta.url);',
+    },
     external: ["@modelcontextprotocol/sdk", "@modelcontextprotocol/sdk/*", "yaml"],
     define: {
       "process.env.AXL_BUILD_VERSION": JSON.stringify(manifest.version),
+      "process.env.AXL_WEB_ASSET_PATH": JSON.stringify("web"),
     },
   });
   let bundled = readFileSync(executable, "utf8");
@@ -113,6 +131,9 @@ export function buildReleasePackage(versionOverride?: string): ReleasePackageRes
     writeFileSync(executable, bundled);
   }
   chmodSync(executable, 0o755);
+  cpSync(join(ROOT, "packages", "web", "dist"), join(STAGE, "dist", "web"), {
+    recursive: true,
+  });
 
   writeFileSync(join(STAGE, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   copyFileSync(join(ROOT, "distribution", "npm", "README.md"), join(STAGE, "README.md"));

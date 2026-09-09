@@ -27,5 +27,5 @@ for (const file of files)
     .digest("hex");
 await writeFile(
   resolve(dist, "asset-metadata.json"),
-  `${JSON.stringify({ webAssetVersion: 1, packageVersion: "0.0.0", sourceRevision: process.env.AXL_SOURCE_REVISION ?? "development", wireVersion: WIRE_PROTOCOL_VERSION, entrypoints: ["index.html"], sha256 }, null, 2)}\n`,
+  `${JSON.stringify({ webAssetVersion: 1, packageVersion: process.env.AXL_BUILD_VERSION ?? "0.0.0-dev", sourceRevision: process.env.AXL_SOURCE_REVISION ?? "development", wireVersion: WIRE_PROTOCOL_VERSION, entrypoints: ["index.html"], sha256 }, null, 2)}\n`,
 );

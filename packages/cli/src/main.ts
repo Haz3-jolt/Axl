@@ -44,6 +44,7 @@ import { providerErrorMessage, runProviderCommand, usageLine } from "./provider-
 import { loadTuiSettings, saveTuiSettings, type TuiSettings } from "./settings.ts";
 
 const AXL_VERSION = process.env.AXL_BUILD_VERSION ?? "0.0.0-dev";
+const WEB_ASSET_RELATIVE_PATH = process.env.AXL_WEB_ASSET_PATH ?? "../../web/dist";
 
 const HELP = `Usage: axl [session-id] [options]
        axl web [session-id] [--no-open]
@@ -1071,7 +1072,8 @@ async function main(): Promise<void> {
     const gateway = await startWebGateway({
       socketPath,
       cwd: cli.cwd,
-      assetDirectory: resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist"),
+      assetDirectory: resolve(dirname(fileURLToPath(import.meta.url)), WEB_ASSET_RELATIVE_PATH),
+      packageVersion: AXL_VERSION,
     });
     process.stdout.write(`Axl web: ${gateway.origin}\n`);
     if (!cli.noOpen) {

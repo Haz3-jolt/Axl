@@ -23,6 +23,8 @@ const SECURITY_HEADERS = {
 
 interface AssetMetadata {
   readonly webAssetVersion: 1;
+  readonly packageVersion: string;
+  readonly sourceRevision: string;
   readonly wireVersion: number;
   readonly entrypoints: readonly string[];
   readonly sha256: Readonly<Record<string, string>>;
@@ -32,6 +34,7 @@ export interface WebGatewayOptions {
   readonly socketPath: string;
   readonly assetDirectory: string;
   readonly cwd: string;
+  readonly packageVersion: string;
   readonly launchToken?: Buffer;
   readonly pathToken?: Buffer;
 }
@@ -84,12 +87,18 @@ function mime(path: string): string {
   );
 }
 
-export async function verifyWebAssets(directory: string): Promise<AssetMetadata> {
+export async function verifyWebAssets(
+  directory: string,
+  packageVersion?: string,
+): Promise<AssetMetadata> {
   const metadata = JSON.parse(
     await readFile(resolve(directory, "asset-metadata.json"), "utf8"),
   ) as Partial<AssetMetadata>;
   if (
     metadata.webAssetVersion !== 1 ||
+    typeof metadata.packageVersion !== "string" ||
+    typeof metadata.sourceRevision !== "string" ||
+    (packageVersion !== undefined && metadata.packageVersion !== packageVersion) ||
     metadata.wireVersion !== WIRE_PROTOCOL_VERSION ||
     !Array.isArray(metadata.entrypoints) ||
     metadata.entrypoints.length === 0 ||
@@ -117,7 +126,7 @@ export async function verifyWebAssets(directory: string): Promise<AssetMetadata>
 }
 
 export async function startWebGateway(options: WebGatewayOptions): Promise<WebGateway> {
-  const metadata = await verifyWebAssets(options.assetDirectory);
+  const metadata = await verifyWebAssets(options.assetDirectory, options.packageVersion);
   const launchToken = options.launchToken ?? randomBytes(32);
   const pathToken = options.pathToken ?? randomBytes(16);
   const browserCredential = randomBytes(32);
