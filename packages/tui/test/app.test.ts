@@ -2723,6 +2723,11 @@ test("request settings are visible, configurable, persisted, and survive resume"
     () => text().includes("output    2048") && text().includes("HTTP idle disabled"),
     "updated request status",
   );
+  input.write("/usage\r");
+  await until(
+    () => text().includes("Session usage") && text().includes("cache hit   0.0%"),
+    "session usage",
+  );
   assert.deepEqual(preferences, [
     { requestSettings: { maxOutputTokens: 2048, httpIdleTimeoutMs: 300_000 } },
     { requestSettings: { maxOutputTokens: 2048, httpIdleTimeoutMs: 0 } },

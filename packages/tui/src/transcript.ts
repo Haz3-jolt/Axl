@@ -122,6 +122,7 @@ export class SessionView {
   outputTokens = 0;
   cacheReadTokens = 0;
   cacheWriteTokens = 0;
+  reasoningTokens = 0;
   contextTokens: number | undefined = 0;
   cacheHitPercent: number | undefined;
   totalCostUsd = 0;
@@ -268,6 +269,7 @@ export class SessionView {
     this.outputTokens = projected.usage.outputTokens;
     this.cacheReadTokens = projected.usage.cacheReadTokens;
     this.cacheWriteTokens = projected.usage.cacheWriteTokens;
+    this.reasoningTokens = projected.usage.reasoningTokens;
     this.totalTokens = projected.usage.inputTokens + projected.usage.outputTokens;
     this.totalCostUsd = projected.usage.costUsd + this.fallbackCostUsd;
     const { dim, error } = this.palette;
