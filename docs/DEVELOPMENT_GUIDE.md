@@ -300,6 +300,7 @@ Do not commit secrets. Configuration entries reference environment variable name
 | `/login` | Configure and verify Azure OpenAI credentials |
 | `/reload` | Rebuild instructions, prompt, tools, skills, and extensions |
 | `/status` | Show session, model, thinking, sandbox, usage, speed, and queue state |
+| `/usage` | Show session token, cache, cost, and speed totals |
 | `/help` | Show commands and keyboard controls |
 | `/quit` | Detach without deleting the session or stopping active daemon-owned work |
 | `/detach` | Alias for `/quit` |

@@ -361,6 +361,7 @@ const COMMANDS: readonly { readonly name: string; readonly summary: string }[] =
   { name: "/reload", summary: "reload AGENTS.md, prompt, and tools" },
   { name: "/compact", summary: "summarize older context, optionally with instructions" },
   { name: "/status", summary: "show session, display, and queue state" },
+  { name: "/usage", summary: "show session token, cache, cost, and speed totals" },
   { name: "/requeue", summary: "re-queue a paused prompt by queue item ID" },
   { name: "/resume", summary: "open another saved session" },
   { name: "/fork", summary: "fork from an earlier user message" },
@@ -2547,6 +2548,24 @@ export class AxlApp {
         `  editor    ${this.editorMode}`,
         `  favorites ${this.modelFavorites.length}`,
         `  developer ${this.developerPanelEnabled ? "on" : "off"}`,
+      ]);
+      return;
+    }
+    if (command === "/usage") {
+      const promptTokens =
+        this.view.inputTokens + this.view.cacheReadTokens + this.view.cacheWriteTokens;
+      const cacheHit = promptTokens === 0 ? 0 : (this.view.cacheReadTokens / promptTokens) * 100;
+      this.commitLines([
+        this.view.palette.accent("Session usage"),
+        `  model       ${this.view.provider ?? "?"}/${this.view.model ?? "?"} · ${this.view.thinking ?? "?"}`,
+        `  input       ${this.view.inputTokens}`,
+        `  output      ${this.view.outputTokens}`,
+        `  cache read  ${this.view.cacheReadTokens}`,
+        `  cache write ${this.view.cacheWriteTokens}`,
+        `  cache hit   ${cacheHit.toFixed(1)}%`,
+        `  reasoning   ${this.view.reasoningTokens}`,
+        `  cost        $${this.view.totalCostUsd.toFixed(4)}`,
+        `  speed       ${this.view.tpsLabel() || "unknown"}`,
       ]);
       return;
     }
