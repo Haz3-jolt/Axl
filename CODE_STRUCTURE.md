@@ -48,6 +48,7 @@ axl/
     cli/               # axl executable, process startup, and client selection
     tui/               # terminal event projection and interaction UI
     web/               # web client
+    ui/                # shared presentation tokens and React renderers
     sdk/               # shared TypeScript client SDK when multiple clients need it
     extensions/        # first-party extensions, one package per feature (roadmap §2.9)
   apps/
@@ -68,6 +69,7 @@ These rules keep package ownership clear:
 - Apps use the public protocol SDK rather than package internals.
 - `packages/runtime` assembles providers, tools, extensions, sandboxing, and the authoritative daemon without importing a presentation client.
 - `packages/tui` is a daemon client projection. It does not construct the runtime or depend at runtime on sandbox, kernel, or concrete extension implementations. It may depend on the dependency-free public `@axl/extension-api` for client-local presentation customization.
+- `packages/ui` owns shared presentation tokens and React renderers. It may depend only on `packages/sdk` and presentation libraries. It owns no daemon or process authority.
 - `packages/cli` owns process startup and selects the current client, so replacing the TUI does not move backend assembly.
 
 CI enforces these boundaries.

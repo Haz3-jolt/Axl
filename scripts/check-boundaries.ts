@@ -91,11 +91,18 @@ export function checkWorkspace(root: string): string[] {
   const kernel = packages.find(({ directory }) => directory === resolve(root, "packages/kernel"));
   const runtime = packages.find(({ directory }) => directory === resolve(root, "packages/runtime"));
   const sdk = packages.find(({ directory }) => directory === resolve(root, "packages/sdk"));
+  const ui = packages.find(({ directory }) => directory === resolve(root, "packages/ui"));
   const tui = packages.find(({ directory }) => directory === resolve(root, "packages/tui"));
   const protocolName = protocol?.manifest.name ?? "@axl/protocol";
   const kernelName = kernel?.manifest.name ?? "@axl/kernel";
   const tuiName = tui?.manifest.name ?? "@axl/tui";
   const sdkName = sdk?.manifest.name ?? "@axl/sdk";
+  const uiRuntimeAllowed = new Set([
+    sdkName,
+    "@fontsource-variable/inter",
+    "highlight.js",
+    "react",
+  ]);
   const tuiRuntimeAllowed = new Set([
     "@axl/extension-api",
     sdkName,
@@ -139,6 +146,16 @@ export function checkWorkspace(root: string): string[] {
     );
   }
 
+  if (ui) {
+    for (const dependency of runtimeDependencies(ui.manifest)) {
+      if (!uiRuntimeAllowed.has(dependency)) {
+        errors.push(
+          `${relative(root, ui.directory)} may depend only on shared client presentation packages, found ${dependency}`,
+        );
+      }
+    }
+  }
+
   if (tui) {
     for (const dependency of runtimeDependencies(tui.manifest)) {
       if (!tuiRuntimeAllowed.has(dependency)) {
@@ -167,6 +184,16 @@ export function checkWorkspace(root: string): string[] {
         ) {
           errors.push(
             `${relative(root, path)} imports ${specifier}; kernel may import only Node.js and ${protocolName}`,
+          );
+        }
+        if (
+          directory === ui?.directory &&
+          !specifier.startsWith(".") &&
+          !uiRuntimeAllowed.has(specifier) &&
+          ![...uiRuntimeAllowed].some((dependency) => specifier.startsWith(`${dependency}/`))
+        ) {
+          errors.push(
+            `${relative(root, path)} imports ${specifier}; UI source may import only shared client presentation packages`,
           );
         }
         if (

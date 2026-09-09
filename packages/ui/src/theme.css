@@ -1,0 +1,25 @@
+/* SPDX-FileCopyrightText: 2026 Hari Srinivasan */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/inter/wght-italic.css";
+
+:root {
+  color-scheme: dark;
+  font-family: "Inter Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  color: #f0f0f2;
+  background: #101011;
+  --bg: #101011;
+  --sidebar: #09090a;
+  --panel: #17171a;
+  --raised: #202024;
+  --selected: #242428;
+  --line: #29292e;
+  --line-soft: #202024;
+  --text: #f0f0f2;
+  --muted: #96969d;
+  --subtle: #626268;
+  --accent: #6267c8;
+  --green: #2fc779;
+}

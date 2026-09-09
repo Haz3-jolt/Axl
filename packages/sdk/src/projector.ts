@@ -173,7 +173,8 @@ export class ProjectionError extends Error {
 
 function renderIntent(name: string): ProjectedToolCall["renderIntent"] {
   const normalized = name.toLowerCase();
-  if (normalized === "shell" || normalized.includes("terminal")) return "shell";
+  if (normalized === "bash" || normalized === "shell" || normalized.includes("terminal"))
+    return "shell";
   if (normalized === "read" || normalized.includes("read_file")) return "read";
   if (normalized === "edit" || normalized.includes("write") || normalized.includes("diff")) {
     return "edit";

@@ -115,6 +115,23 @@ test("projects messages, configuration, usage, interactions, and generic tools d
   });
 });
 
+test("classifies first-party tool presentation intents", () => {
+  const projector = new ConversationProjector(sessionId);
+  projector.applyEvent(event("session.created", { cwd: "/workspace" }));
+  for (const [callId, name] of [
+    ["bash-1", "bash"],
+    ["read-1", "read"],
+    ["write-1", "write"],
+    ["edit-1", "edit"],
+  ] as const) {
+    projector.applyEvent(event("tool.call", { callId, name, input: {} }));
+  }
+  assert.deepEqual(
+    projector.state.tools.map((tool) => tool.renderIntent),
+    ["shell", "read", "edit", "edit"],
+  );
+});
+
 test("derives operation and interaction lifecycle from canonical events", () => {
   const projector = new ConversationProjector(sessionId);
   const operationId = parseOperationId("00000000-0000-4000-8000-000000000098");

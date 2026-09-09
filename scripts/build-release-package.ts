@@ -71,7 +71,7 @@ export function publicManifest(
     type: "module",
     bin: { axl: "dist/axl.js" },
     engines: { node: "^22.19.0 || >=24.0.0" },
-    files: ["dist", "LICENSE", "NOTICE", "README.md"],
+    files: ["dist", "LICENSE", "LICENSES", "NOTICE", "README.md"],
     license: "Apache-2.0",
     repository: source.repository as Record<string, string>,
     bugs: source.bugs as Record<string, string>,
@@ -138,6 +138,7 @@ export function buildReleasePackage(versionOverride?: string): ReleasePackageRes
   writeFileSync(join(STAGE, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   copyFileSync(join(ROOT, "distribution", "npm", "README.md"), join(STAGE, "README.md"));
   copyFileSync(join(ROOT, "LICENSE"), join(STAGE, "LICENSE"));
+  cpSync(join(ROOT, "LICENSES"), join(STAGE, "LICENSES"), { recursive: true });
   copyFileSync(join(ROOT, "NOTICE"), join(STAGE, "NOTICE"));
 
   const packed = JSON.parse(
