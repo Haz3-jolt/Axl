@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AxlClient } from "@axl/sdk";
-import { loadModelCatalog } from "../src/model-catalog.ts";
+import { loadProviderDirectory } from "../src/model-catalog.ts";
 
 test("caches the daemon model directory until an explicit refresh", async () => {
   let calls = 0;
@@ -41,9 +41,11 @@ test("caches the daemon model directory until an explicit refresh", async () => 
     },
   } as unknown as AxlClient;
 
-  assert.equal((await loadModelCatalog(client))[0]?.modelId, "claude-sonnet-4-6");
-  await loadModelCatalog(client);
+  const directory = await loadProviderDirectory(client);
+  assert.equal(directory.providers[0]?.providerId, "anthropic");
+  assert.equal(directory.models[0]?.modelId, "claude-sonnet-4-6");
+  await loadProviderDirectory(client);
   assert.equal(calls, 1);
-  await loadModelCatalog(client, true);
+  await loadProviderDirectory(client, true);
   assert.equal(calls, 2);
 });

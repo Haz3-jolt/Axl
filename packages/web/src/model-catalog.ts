@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AxlClient, ThinkingLevel } from "@axl/sdk";
+import type { AxlClient, ProviderInventoryGroup, ThinkingLevel } from "@axl/sdk";
 
 export interface ModelChoice {
   readonly providerId: string;
@@ -10,17 +10,23 @@ export interface ModelChoice {
   readonly thinkingLevels: readonly ThinkingLevel[];
 }
 
-const cache = new WeakMap<AxlClient, Promise<readonly ModelChoice[]>>();
+export interface ProviderDirectory {
+  readonly providers: readonly ProviderInventoryGroup[];
+  readonly models: readonly ModelChoice[];
+}
 
-export function loadModelCatalog(
+const cache = new WeakMap<AxlClient, Promise<ProviderDirectory>>();
+
+export function loadProviderDirectory(
   client: AxlClient,
   refresh = false,
-): Promise<readonly ModelChoice[]> {
+): Promise<ProviderDirectory> {
   if (refresh) cache.delete(client);
   const cached = cache.get(client);
   if (cached !== undefined) return cached;
-  const loading = client.listProviders().then(({ providers }) =>
-    providers
+  const loading = client.listProviders().then(({ providers }) => ({
+    providers,
+    models: providers
       .filter((provider) => provider.enabled)
       .flatMap((provider) => provider.models)
       .filter((model) => model.availability.status !== "unavailable")
@@ -30,7 +36,7 @@ export function loadModelCatalog(
         displayName: model.displayName,
         thinkingLevels: model.supportedThinkingLevels,
       })),
-  );
+  }));
   cache.set(client, loading);
   return loading;
 }
