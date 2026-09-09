@@ -1071,6 +1071,7 @@ async function main(): Promise<void> {
     const { startWebGateway } = await import("./web-gateway.ts");
     const gateway = await startWebGateway({
       socketPath,
+      stateDirectory,
       cwd: cli.cwd,
       assetDirectory: resolve(dirname(fileURLToPath(import.meta.url)), WEB_ASSET_RELATIVE_PATH),
       packageVersion: AXL_VERSION,

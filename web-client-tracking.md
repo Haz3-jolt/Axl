@@ -27,24 +27,39 @@ This tracker stops at the reusable static browser boundary and local process hos
 
 ## Current repository state
 
-- `packages/web` has no tracked implementation on `main`.
-- Bare `axl` connects to or starts the selected daemon and launches the TUI.
-- `axl web` is not a recognized subcommand. It is currently interpreted as session ID `web` and still launches the TUI.
-- `--web` and `--no-web` currently control model web tools, not the browser interface.
-- The protocol, SDK client, subscription manager, projector, Unix transport, workspace RPCs, provider inventory, delivery semantics, and local gateway specifications exist.
-- The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
+The branch now contains the first complete local-session slice:
+
+- `axl web [session-id]` launches an authenticated loopback gateway and packaged static client.
+- The browser creates or resumes sessions, projects canonical history, follows live activity, sends prompts, interrupts work, reconnects, and switches sessions.
+- Rich conversation, tool, syntax, diff, workspace-change, responsive, and persistent-layout presentation is implemented.
+- The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
+- Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
+- Provider auth, staged Chat/Code creation, the shared command plane, active-turn delivery modes, attachments, and full protocol capability parity remain.
+
+The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
+
+## Progress snapshot
+
+The visual foundation and ordinary local conversation path are mostly complete. The full tracker is not: the remaining work is primarily command architecture and capability workflows rather than base rendering.
+
+1. Finish and verify the current UI wave, including browser smoke, installed-package smoke, mobile review, and licensing checks.
+2. Implement the shared human-command plane and migrate `/reload`, `/model`, `/thinking`, and the remaining commands.
+3. Add staged Chat/Code creation and complete provider configuration and authentication flows.
+4. Add steer, follow-up, queue, interrupt-and-deliver, and interaction response flows.
+5. Add attachments, remaining session lifecycle operations, import/export, shell, workspace browsing, and checkpoints.
+6. Finish transcript search/actions, cost and truncation states, accessibility focus behavior, and parity tests.
 
 ## CLI contract
 
-- [ ] Bare `axl` launches the TUI.
-- [ ] `axl <session-id>` opens that session in the TUI.
-- [ ] `axl web` starts the local gateway and opens the browser without importing or launching the TUI.
-- [ ] `axl web <session-id>` opens that session in the browser without launching the TUI.
-- [ ] `axl web --no-open` starts the gateway and prints the safe token-free origin.
+- [x] Bare `axl` launches the TUI.
+- [x] `axl <session-id>` opens that session in the TUI.
+- [x] `axl web` starts the local gateway and opens the browser without importing or launching the TUI.
+- [x] `axl web <session-id>` opens that session in the browser without launching the TUI.
+- [x] `axl web --no-open` starts the gateway and prints the safe token-free origin.
 - [ ] `axl web --dev` uses the explicit same-origin development proxy.
 - [ ] Rename the ambiguous model-tool flags `--web` and `--no-web` to `--web-tools` and `--no-web-tools` before stable release. Keep `--web-search` and `--web-fetch` explicit.
-- [ ] Make command parsing distinguish the `web` subcommand from session IDs before any daemon or TUI startup work.
-- [ ] Keep gateway shutdown distinct from browser detach, operation interrupt, session disposal, and daemon shutdown.
+- [x] Make command parsing distinguish the `web` subcommand from session IDs before any daemon or TUI startup work.
+- [x] Keep gateway shutdown distinct from browser detach, operation interrupt, session disposal, and daemon shutdown.
 
 ## Architecture decision
 
@@ -73,37 +88,37 @@ The browser must never implement an agent loop, canonical event reducer, prompt 
 
 The web client is a static single-page application. It has no server-side rendering dependency.
 
-- [ ] Build production HTML with no inline scripts or styles.
-- [ ] Emit content-hashed JavaScript and CSS.
-- [ ] Emit validated metadata containing package, source, web-asset, and wire versions plus asset hashes.
-- [ ] Load a small validated bootstrap document before constructing application state.
+- [x] Build production HTML with no inline scripts or styles.
+- [x] Emit content-hashed JavaScript and CSS.
+- [x] Emit validated metadata containing package, source, web-asset, and wire versions plus asset hashes.
+- [x] Load a small validated bootstrap document before constructing application state.
 - [ ] Have bootstrap supply an initialized SDK transport and only the trusted host operations available in the current environment.
-- [ ] Keep React code independent of loopback hostname, selected port, cookie format, process path prefix, and Unix socket details.
-- [ ] Do not let React launch or stop a process, acquire credentials, or infer authority from its environment name.
+- [x] Keep React code independent of loopback hostname, selected port, cookie format, process path prefix, and Unix socket details.
+- [x] Do not let React launch or stop a process, acquire credentials, or infer authority from its environment name.
 - [ ] Drive controls from granted protocol capabilities and injected host operations.
-- [ ] Keep browser preferences independent of the gateway's random origin where persistence across launches is required.
+- [x] Keep browser preferences independent of the gateway's random origin where persistence across launches is required.
 - [ ] Add an IndexedDB cursor-store adapter. Cursor-store failure must remain visible and fall back to a fresh snapshot.
-- [ ] Avoid a service worker initially. Entry documents use `no-store`; hashed assets may be immutable.
+- [x] Avoid a service worker initially. Entry documents use `no-store`; hashed assets may be immutable.
 - [ ] Test the application with fake environment adapters so presentation code is not coupled to the loopback gateway.
 
 ## Trusted local gateway
 
-- [ ] Validate production asset metadata and hashes before listening.
-- [ ] Connect to or start the selected daemon through CLI process-host code.
-- [ ] Bind only one canonical loopback IP origin on an OS-assigned port.
-- [ ] Validate exact `Host` and `Origin` values.
-- [ ] Create a 256-bit, one-use, 60-second launch token.
-- [ ] Pass the launch token only in the URL fragment.
-- [ ] Remove the fragment before application startup.
-- [ ] Exchange it for a process-scoped HttpOnly, host-only, path-scoped, SameSite Strict cookie.
-- [ ] Require cookie, exact origin, exact host, and random process path for each WebSocket upgrade.
-- [ ] Keep browser credentials out of JavaScript, URLs, persistent storage, and logs.
-- [ ] Apply CSP, frame denial, nosniff, no-referrer, no-store, and cross-origin isolation headers.
+- [x] Validate production asset metadata and hashes before listening.
+- [x] Connect to or start the selected daemon through CLI process-host code.
+- [x] Bind only one canonical loopback IP origin on an OS-assigned port.
+- [x] Validate exact `Host` and `Origin` values.
+- [x] Create a 256-bit, one-use, 60-second launch token.
+- [x] Pass the launch token only in the URL fragment.
+- [x] Remove the fragment before application startup.
+- [x] Exchange it for a process-scoped HttpOnly, host-only, path-scoped, SameSite Strict cookie.
+- [x] Require cookie, exact origin, exact host, and random process path for each WebSocket upgrade.
+- [x] Keep browser credentials out of JavaScript, URLs, persistent storage, and logs.
+- [x] Apply CSP, frame denial, nosniff, no-referrer, no-store, and cross-origin isolation headers.
 - [ ] Bound handshakes, requests, frames, assembled messages, rates, queues, and attachment count.
-- [ ] Reject binary frames and disable compression.
-- [ ] Evict a slow browser attachment without blocking another attachment.
-- [ ] Open one independent daemon connection per browser attachment.
-- [ ] Stop only gateway attachments when the gateway exits. Leave daemon sessions and accepted work running.
+- [x] Reject binary frames and disable compression.
+- [x] Evict a slow browser attachment without blocking another attachment.
+- [x] Open one independent daemon connection per browser attachment.
+- [x] Stop only gateway attachments when the gateway exits. Leave daemon sessions and accepted work running.
 - [ ] Keep development browser traffic on the authenticated gateway origin while proxying only approved Vite paths.
 
 ## Shared human-command plane
@@ -165,17 +180,17 @@ web tool configuration
 
 ## Model and thinking selection
 
-- [ ] Use provider-qualified `{ providerId, modelId }` identity throughout.
-- [ ] Load one provider/model directory for the active daemon generation.
-- [ ] Share one focused picker between `/model`, composer controls, and new-session creation.
+- [x] Use provider-qualified `{ providerId, modelId }` identity throughout.
+- [x] Load one provider/model directory for the active daemon generation.
+- [ ] Share one focused picker between `/model`, composer controls, and new-session creation. The composer picker is implemented.
 - [ ] Group searchable model rows by provider.
 - [ ] Show provider-local errors without erasing usable providers.
-- [ ] Disable unavailable models and explain why.
+- [ ] Disable unavailable models and explain why. Unavailable models are currently omitted.
 - [ ] Reject ambiguous bare model IDs.
-- [ ] Derive thinking choices from the selected model's supported levels.
-- [ ] Preserve the daemon thinking default until the user explicitly changes it.
+- [x] Derive thinking choices from the selected model's supported levels.
+- [x] Preserve the daemon thinking default until the user explicitly changes it.
 - [ ] Stage model and thinking choices before creation and configure them after creation.
-- [ ] Show effective clamped thinking values.
+- [x] Show effective clamped thinking values.
 - [ ] Remove model and thinking controls from generic Settings.
 
 ## Honest Search and Fetch controls
@@ -201,7 +216,7 @@ Also:
 
 - [ ] Do not make Send and Queue perform the same operation.
 - [ ] Preserve drafts across failed send, queue, steer, follow-up, and interrupt-and-deliver calls.
-- [ ] Show accepted, delivered, queued, paused, rejected, interrupted, and uncertain outcomes accurately.
+- [ ] Show accepted, delivered, queued, paused, rejected, interrupted, and uncertain outcomes accurately. Canonical queue and interrupt delivery states are rendered; remaining delivery actions and uncertain outcomes remain.
 - [ ] Never simulate atomic interrupt-and-deliver with Stop followed by Send.
 
 ## Slash-command coverage
@@ -224,6 +239,7 @@ The browser command interface must use the shared live command directory.
 | `/reload` | Daemon-owned runtime reload with visible state. |
 | `/compact` | Optional instructions, progress, cancellation, and failure. |
 | `/status` | Inspectable synchronized status surface. |
+| `/usage` | Session token, cache-hit, cost, and throughput summary. |
 | `/requeue` | Paused-item selection instead of an opaque required ID. |
 | `/resume` | Searchable session picker and exact-ID support. |
 | `/fork` | Selected-message and earlier-user-message selection. |
@@ -259,22 +275,22 @@ The browser should support every capability granted to its connection.
 
 ### Session lifecycle and delivery
 
-- [ ] `session.create`
-- [ ] `session.list`
-- [ ] `session.resume`
-- [ ] `session.fork`
+- [x] `session.create`
+- [x] `session.list`
+- [x] `session.resume`
+- [x] `session.fork`
 - [ ] `session.clone`
 - [ ] `session.rename`
 - [ ] `session.delete`
 - [ ] `session.export`
 - [ ] `session.import`
-- [ ] `session.send.prompt`
+- [x] `session.send.prompt`
 - [ ] `session.steer`
 - [ ] `session.follow_up`
 - [ ] `session.interrupt_deliver`
 - [ ] `session.queue.enqueue`
 - [ ] `session.queue.requeue`
-- [ ] `session.interrupt`
+- [x] `session.interrupt`
 - [ ] `session.dispose`
 
 ### Runtime and interaction
@@ -282,10 +298,10 @@ The browser should support every capability granted to its connection.
 - [ ] `session.compact`
 - [ ] `session.shell`
 - [ ] `session.reload`
-- [ ] `session.configure`
-- [ ] `session.interaction.respond`
-- [ ] `session.subscribe`
-- [ ] `session.activity`
+- [x] `session.configure`
+- [ ] `session.interaction.respond` for explicit MCP and `ask_user_question` interactions, not routine sandboxed tool approval
+- [x] `session.subscribe`
+- [x] `session.activity`
 - [ ] `session.presence`
 
 ### Blobs and workspace
@@ -297,13 +313,13 @@ The browser should support every capability granted to its connection.
 - [ ] `session.blob.read`
 - [ ] `session.workspace.list`
 - [ ] `session.workspace.read`
-- [ ] `session.workspace.status`
-- [ ] `session.workspace.diff`
+- [x] `session.workspace.status`
+- [x] `session.workspace.diff`
 - [ ] `session.workspace.checkpoint`
 
 ### Providers
 
-- [ ] `provider.list`
+- [x] `provider.list`
 - [ ] `provider.catalog.refresh`
 - [ ] `provider.auth.status`
 - [ ] `provider.auth.login`
@@ -323,24 +339,26 @@ Do not request a capability before its interaction, error behavior, and security
 
 ## Conversation and workspace presentation
 
-- [ ] Render projected user, assistant, thinking, error, compaction, and interruption records.
-- [ ] Render shell, read, edit, search, fetch, MCP, workflow, and bounded generic tool cards.
+- [x] Render projected user, assistant, thinking, error, compaction, and interruption records.
+- [ ] Render shell, read, edit, search, fetch, MCP, workflow, and bounded generic tool cards. Shell, read, write, edit, fetch, and generic tools are implemented; specialized search, MCP, and workflow treatment remains.
 - [ ] Show complete structured tool inputs and useful result metadata when expanded.
-- [ ] Provide a bounded route to inspect truncated tool output.
-- [ ] Render image attachments as media rather than metadata text.
-- [ ] Show a clear incomplete-response warning for `stopReason: "length"`.
-- [ ] Attribute cost to the provider, model, and thinking level that produced each usage record.
-- [ ] Distinguish unknown cost from zero cost.
-- [ ] Add transcript search and turn/message navigation.
-- [ ] Add message copy, feedback, and fork actions.
-- [ ] Clear conversation, workspace, queue, dialog, and selection state before loading another session.
-- [ ] Keep generation checks for workspace list, read, status, diff, and checkpoint views.
+- [ ] Provide a bounded route to inspect truncated tool output. Truncation metadata and preserved-output location are rendered; browser retrieval remains.
+- [ ] Render image attachments as media rather than metadata text. Shared image and file presentation is implemented; production blob retrieval and upload remain.
+- [x] Show a clear incomplete-response warning for `stopReason: "length"`.
+- [x] Attribute cost to the provider, model, and thinking level that produced each usage record.
+- [x] Distinguish unknown cost from zero cost.
+- [x] Show per-turn cache-hit rate and throughput, collapsed by default.
+- [x] Add an inspectable whole-session usage summary in web and `/usage` in the TUI.
+- [x] Add transcript search and prompt navigation.
+- [x] Add message copy and fork actions. Do not add response ratings without a daemon-owned feedback contract and a real consumer.
+- [x] Clear conversation, workspace, queue, dialog, and selection state before loading another session.
+- [x] Keep generation checks for implemented workspace status and diff views.
 - [ ] Measure long-session rendering before adding optimization abstractions.
 
 ## Browser state and settings
 
-- [ ] Separate browser preferences from session configuration and trusted host actions.
-- [ ] Define durable preference storage that survives random local gateway ports without placing authority credentials in application storage.
+- [x] Separate browser preferences from session configuration and trusted host actions.
+- [x] Define durable preference storage that survives random local gateway ports without placing authority credentials in application storage.
 - [ ] Refresh session catalog metadata after another client changes it.
 - [ ] Replace hardcoded English copy with a typed localization owner when the first second locale is implemented.
 - [ ] Show errors inside the dialog or picker that initiated the action.
@@ -368,8 +386,8 @@ Do not request a capability before its interaction, error behavior, and security
 
 ### Architecture
 
-- [ ] `packages/web` has no runtime dependency on kernel, daemon, runtime, AI, sandbox, or TUI packages.
-- [ ] React consumes the public SDK projector instead of reducing canonical events.
+- [x] `packages/web` has no runtime dependency on kernel, daemon, runtime, AI, sandbox, or TUI packages.
+- [x] React consumes the public SDK projector instead of reducing canonical events.
 - [ ] The same browser behavior suite passes through fake and loopback gateway environments.
 - [ ] Missing capabilities remove or disable controls with an explicit reason.
 - [ ] Detaching the browser never interrupts daemon-owned work.
@@ -378,40 +396,40 @@ Do not request a capability before its interaction, error behavior, and security
 
 - [ ] TUI and browser converge on one session under simultaneous use.
 - [ ] Reconnect neither loses nor duplicates canonical events.
-- [ ] Session switching cannot display state from the prior session.
+- [x] Session switching cannot display state from the prior session.
 - [ ] Chat has no workspace or tool interface.
 - [ ] Code requires an explicit workspace.
-- [ ] Model identity remains provider-qualified.
-- [ ] Thinking choices match model support.
+- [x] Model identity remains provider-qualified.
+- [x] Thinking choices match model support.
 - [ ] Active-turn delivery modes remain distinct.
-- [ ] Failed actions preserve drafts and show visible errors.
+- [x] Ordinary failed prompt sends preserve drafts and show visible errors. Other delivery modes remain.
 - [ ] Attachments survive upload, reload, retrieval, and second-client projection.
 
 ### Security and packaging
 
 - [ ] Gateway security acceptance tests in `docs/architecture/web-gateway-security.md` pass.
-- [ ] Production assets fail closed when missing, altered, or incompatible.
+- [x] Production assets fail closed when missing, altered, or incompatible.
 - [ ] Development mode keeps one authenticated browser origin.
 - [ ] The installed package works without the repository, Vite, or pnpm.
-- [ ] No source maps ship unless separately approved.
-- [ ] No browser credential appears in logs, URLs, storage, fixtures, or errors.
+- [x] No source maps ship unless separately approved.
+- [x] No browser credential appears in logs, URLs, storage, fixtures, or errors.
 
 ### Accessibility and presentation
 
 - [ ] Session navigation, tabs, dialogs, menus, composer, interrupt, and reconnect are keyboard-operable.
 - [ ] Focus restoration and Escape behavior are deterministic.
-- [ ] Connection and action outcomes use accessible status regions.
-- [ ] Reduced motion and no-color-only meaning are supported.
+- [x] Connection and action outcomes use accessible status regions.
+- [x] Reduced motion and no-color-only meaning are supported.
 - [ ] Wide and narrow viewport layouts receive one bounded browser inspection and one correction pass.
 - [ ] Run the Impeccable detector once over changed web targets after behavior is complete.
 - [ ] Do not commit screenshots or generated review artifacts unless explicitly requested.
 
 ### Repository checks
 
-- [ ] Run the smallest focused tests for each vertical slice.
-- [ ] Run the web package tests.
+- [x] Run the smallest focused tests for each implemented vertical slice.
+- [x] Run the web package tests.
 - [ ] Run production-package and development-gateway browser smoke tests.
-- [ ] Run `pnpm check` before publication.
+- [x] Run `pnpm check` after the current UI wave. Run it again before publication.
 - [ ] Run `reuse lint` when available.
 - [ ] Run a live provider smoke only when credentials and external effects are explicitly authorized.
 

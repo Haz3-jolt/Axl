@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,6 +68,7 @@ test("the gateway exchanges one launch token and authenticates one daemon bridge
   const gateway = await startWebGateway({
     socketPath,
     assetDirectory: directory,
+    stateDirectory: directory,
     cwd: "/workspace",
     packageVersion: "0.0.0-test",
     launchToken,
@@ -102,6 +103,29 @@ test("the gateway exchanges one launch token and authenticates one daemon bridge
   assert.deepEqual(await bootstrap.json(), {
     cwd: "/workspace",
     webSocketPath: `${new URL(gateway.origin).pathname}ws`,
+    preferences: {
+      sidebarWidth: 264,
+      changesWidth: 680,
+      sidebarCollapsed: false,
+      changesView: "files",
+    },
+  });
+  const preferences = await fetch(new URL("preferences", gateway.origin), {
+    method: "POST",
+    headers: { origin, cookie: cookieHeader, "content-type": "application/json" },
+    body: JSON.stringify({
+      sidebarWidth: 300,
+      changesWidth: 720,
+      sidebarCollapsed: true,
+      changesView: "all",
+    }),
+  });
+  assert.equal(preferences.status, 200);
+  assert.deepEqual(JSON.parse(await readFile(join(directory, "web-preferences.json"), "utf8")), {
+    sidebarWidth: 300,
+    changesWidth: 720,
+    sidebarCollapsed: true,
+    changesView: "all",
   });
 
   const socket = new WebSocket(new URL("ws", gateway.origin), {
