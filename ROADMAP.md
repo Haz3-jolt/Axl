@@ -443,6 +443,8 @@ Example manifest:
 
 The runtime does not expose arbitrary kernel internals. Once a public extension point exists, first-party and third-party features use the same interface. A future need does not justify a speculative API.
 
+Shared human commands follow [`docs/architecture/human-command-plane.md`](docs/architecture/human-command-plane.md). The daemon publishes and executes commands that affect shared or durable state. SDK workflows coordinate staged client intent and typed RPCs. TUI-only and web-only presentation commands use their client extension hosts. A presentation extension cannot register a shared-state command.
+
 #### 5.1 Resource types
 
 The full set of things a user or package can add to Axl:
@@ -2110,6 +2112,7 @@ Do not build public or multi-language SDKs before this phase. The second real cl
 #### Wire protocol
 
 - [ ] Complete RPCs for session lifecycle, branching, transfer, configuration, permissions, placement, and commands.
+- [ ] Add the daemon-owned command catalog, generation, and invalidation contract plus SDK invocation routing from `docs/architecture/human-command-plane.md`.
 - [ ] Add event subscription from any tree node.
 - [ ] Add resumable cursors with at-least-once delivery.
 - [ ] Add idempotency keys for sends and permission responses.

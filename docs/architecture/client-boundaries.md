@@ -69,6 +69,14 @@ Clients submit commands and user responses. The daemon validates them, applies p
 
 Platform and authorization limits narrow the capabilities granted by the daemon. A client must not silently omit a granted capability or provide a local fallback that changes the meaning of a missing capability. A missing capability is unavailable until the daemon implements and grants it.
 
+## Human commands
+
+Shared human commands follow [the human command plane](human-command-plane.md). Commands that affect shared or durable state are published and executed by the daemon through protocol and SDK contracts. Clients collect intent and render command-specific interfaces without reimplementing the effect.
+
+Built-in and custom presentation commands run through the owning client's extension host. They may change layout, editor, draft, or other client-local state but cannot manufacture canonical events or access daemon internals. An extension command that needs a shared effect must register through the daemon extension API and remains subject to ordinary capability and policy enforcement.
+
+The SDK merges daemon and client-extension descriptors into one validated directory and attaches reusable workflows for collection and typed invocation. Command names and aliases may not silently shadow one another.
+
 ## Transport, authentication, and cursor storage
 
 Unify contracts and behavior. Keep platform mechanisms in small adapters.
