@@ -25,7 +25,7 @@ const operationId = parseOperationId("018f47a5-4f18-7cc2-8000-123456789abe");
 const sessionId = parseSessionId("123e4567-e89b-42d3-a456-426614174000");
 
 const validPayloads = {
-  "session.created": { cwd: "/workspace" },
+  "session.created": { cwd: "/workspace", profile: "chat" },
   "session.resumed": {},
   "session.closed": { reason: "completed" },
   "user.message": { content: [{ type: "text", text: "hello" }] },

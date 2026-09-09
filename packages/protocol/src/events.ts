@@ -68,6 +68,7 @@ export type Usage = {
 export type EventPayloadMap = {
   "session.created": {
     readonly cwd: string;
+    readonly profile?: SessionProfile;
     readonly parentSessionId?: SessionId;
     readonly sourceEventId?: EventId;
   };
@@ -340,8 +341,11 @@ function validateEventIds(value: JsonValue | undefined, path: string): void {
 
 const payloadParsers: { readonly [Type in EventType]: PayloadParser } = {
   "session.created": (payload, path) => {
-    exact(payload, path, ["cwd"], ["parentSessionId", "sourceEventId"]);
+    exact(payload, path, ["cwd"], ["profile", "parentSessionId", "sourceEventId"]);
     string(payload.cwd, `${path}.cwd`);
+    if (payload.profile !== undefined) {
+      choice(payload.profile, `${path}.profile`, ["minimal", "standard", "chat", "exec"]);
+    }
     if (payload.parentSessionId !== undefined)
       parseSessionId(payload.parentSessionId, `${path}.parentSessionId`);
     if (payload.sourceEventId !== undefined)
