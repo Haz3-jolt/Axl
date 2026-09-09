@@ -270,6 +270,7 @@ No gate may silently substitute an unavailable later feature.
 
 ## Supporting specifications
 
+- [Human command plane](human-command-plane.md)
 - [Typed RPC and SDK](web-protocol.md)
 - [Idempotency, snapshots, delivery, and presence](web-delivery.md)
 - [Gateway security](web-gateway-security.md)

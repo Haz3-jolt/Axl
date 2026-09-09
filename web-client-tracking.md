@@ -108,10 +108,14 @@ The web client is a static single-page application. It has no server-side render
 
 ## Shared human-command plane
 
+Architecture: `docs/architecture/human-command-plane.md`
+
+Tracking issue: [#389](https://github.com/Observal/Axl/issues/389)
+
 Do not recreate separate hardcoded TUI and browser command tables.
 
 - [ ] Add a daemon-owned, session-aware command registry for shared first-party and extension commands.
-- [ ] Add typed protocol and SDK operations for command discovery and execution.
+- [ ] Add typed protocol discovery and SDK execution over existing typed RPC operations.
 - [ ] Include command name, description, aliases, input hint, input requirement, attachment acceptance, capability requirements, and current availability.
 - [ ] Publish command-catalog invalidation when session composition or extension registration changes.
 - [ ] Execute commands against the exact target session without converting them into model messages.
@@ -413,6 +417,7 @@ Do not request a capability before its interaction, error behavior, and security
 
 ## Required issue alignment
 
+- [ ] #389 shared human-command plane
 - [ ] #101 browser WebSocket SDK adapter
 - [ ] #108 trusted `axl web` host and packaged assets epic
 - [ ] #109 trusted `axl web` process host
