@@ -116,7 +116,7 @@ Do not recreate separate hardcoded TUI and browser command tables.
 
 - [ ] Add a daemon-owned, session-aware command registry for shared first-party and extension commands.
 - [ ] Add typed protocol discovery and SDK execution over existing typed RPC operations.
-- [ ] Include command name, description, aliases, input hint, input requirement, attachment acceptance, capability requirements, and current availability.
+- [ ] Include command name, description, aliases, input hint, input requirement, capability requirements, and current availability.
 - [ ] Publish command-catalog invalidation when session composition or extension registration changes.
 - [ ] Execute commands against the exact target session without converting them into model messages.
 - [ ] Preserve cancellation and structured failures.

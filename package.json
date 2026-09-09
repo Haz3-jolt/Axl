@@ -8,7 +8,7 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "build": "tsc -b packages/*/tsconfig.build.json packages/extensions/*/tsconfig.build.json --force",
+    "build": "tsc -b packages/*/tsconfig.build.json packages/extensions/*/tsconfig.build.json --force && pnpm --filter @axl/web build",
     "build:release": "node scripts/build-release-package.ts",
     "build:release-metadata": "node scripts/build-release-metadata.ts",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm check:boundaries && pnpm check:generated",
@@ -21,7 +21,7 @@
     "release": "node scripts/release.ts",
     "release:preview": "node scripts/release.ts --preview",
     "test": "pnpm build && node --test --test-concurrency=1 --test-timeout=30000 packages/*/test/*.test.ts packages/extensions/*/test/*.test.ts scripts/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && pnpm --filter @axl/web typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.5",
