@@ -1,0 +1,41 @@
+{
+  "name": "@axl/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared Axl presentation tokens and React renderers",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/conversation.d.ts",
+      "import": "./dist/conversation.js"
+    },
+    "./theme.css": "./src/theme.css",
+    "./conversation.css": "./src/conversation.css"
+  },
+  "files": [
+    "dist",
+    "src/theme.css",
+    "src/conversation.css"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json --force",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@axl/sdk": "workspace:*",
+    "@fontsource-variable/inter": "5.3.0",
+    "highlight.js": "11.12.0"
+  },
+  "peerDependencies": {
+    "react": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "react": "19.2.8"
+  }
+}

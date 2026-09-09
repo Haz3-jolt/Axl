@@ -6,12 +6,14 @@
   "description": "Static browser client for Axl",
   "license": "Apache-2.0",
   "scripts": {
+    "dev": "vite --host 127.0.0.1",
     "build": "vite build --base ./ --manifest && node scripts/write-metadata.ts",
-    "test": "pnpm --filter @axl/protocol build && pnpm --filter @axl/sdk build && node --test test/*.test.ts",
+    "test": "pnpm --filter @axl/protocol build && pnpm --filter @axl/sdk build && pnpm --filter @axl/ui build && node --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@axl/sdk": "workspace:*",
+    "@axl/ui": "workspace:*",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

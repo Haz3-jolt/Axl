@@ -18,6 +18,7 @@ This document defines which behavior is shared, which code remains platform-spec
 | `packages/protocol` | RPC schemas, event schemas, capability names, versioning, and trust-boundary validation |
 | `packages/kernel` and `packages/daemon` | Agent execution, business rules, operation ownership, tools, queues, compaction, policy, persistence, canonical events, and concurrency |
 | `packages/sdk` | Connection mechanics, capability checks, retries, subscriptions, acknowledgements, synchronization, and deterministic derived projections |
+| `packages/ui` | Shared presentation tokens and reusable React renderers without daemon or process authority |
 | Presentation clients | Render SDK state, collect user intent, and invoke supported SDK or protocol operations |
 
 The daemon is the sole authority for session state and effects. The SDK contains reusable client behavior, but it is not an alternate authority. SDK projections and caches are disposable views of daemon-owned canonical events.
@@ -137,6 +138,7 @@ For legacy daemons without host control, the CLI process host may perform explic
 A presentation package should depend at runtime on:
 
 - `packages/sdk`
+- `packages/ui` when it can reuse shared visual tokens or React renderers
 - `packages/extension-api` when it renders extension contributions
 - presentation libraries required by its platform
 

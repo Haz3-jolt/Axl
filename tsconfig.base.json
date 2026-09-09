@@ -22,7 +22,9 @@
       "@axl/sdk": ["./packages/sdk/src/index.ts"],
       "@axl/sdk/browser": ["./packages/sdk/src/browser.ts"],
       "@axl/sdk/unix": ["./packages/sdk/src/unix.ts"],
-      "@axl/tui": ["./packages/tui/src/index.ts"]
+      "@axl/tui": ["./packages/tui/src/index.ts"],
+      "@axl/ui": ["./packages/ui/src/index.ts"],
+      "@axl/ui/react": ["./packages/ui/src/conversation.tsx"]
     },
     "lib": ["ES2023", "ESNext.Array"],
     "strict": true,
