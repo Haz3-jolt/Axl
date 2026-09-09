@@ -9,7 +9,8 @@ import { spawn } from "node:child_process";
 import { mkdir, realpath } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
 
 import type { CredentialStore } from "@axl/ai";
@@ -45,6 +46,7 @@ import { loadTuiSettings, saveTuiSettings, type TuiSettings } from "./settings.t
 const AXL_VERSION = process.env.AXL_BUILD_VERSION ?? "0.0.0-dev";
 
 const HELP = `Usage: axl [session-id] [options]
+       axl web [session-id] [--no-open]
        axl providers [provider-id]
        axl models [provider-id]
        axl login <provider-id> [api_key|oauth]
@@ -104,6 +106,7 @@ interface CliArguments {
     | "json"
     | "print"
     | "rpc"
+    | "web"
     | "session-export"
     | "session-migrate-events";
   daemonAction?: "status" | "stop" | "restart";
@@ -133,6 +136,7 @@ interface CliArguments {
   cwd: string;
   unsafe: boolean;
   resume: boolean;
+  noOpen: boolean;
   showHelp: boolean;
   showVersion: boolean;
 }
@@ -147,6 +151,7 @@ function parseArguments(argv: readonly string[]): CliArguments {
     sandbox: "native",
     unsafe: false,
     resume: false,
+    noOpen: false,
     raw: false,
     confirmPrefix: false,
     showHelp: false,
@@ -156,6 +161,10 @@ function parseArguments(argv: readonly string[]): CliArguments {
     throw new Error(`Use axl daemon ${argv[1]?.slice(2)} (a subcommand, without the leading --)`);
   }
   let startIndex = 0;
+  if (argv[0] === "web") {
+    parsed.command = "web";
+    startIndex = 1;
+  }
   if (argv[0] === "session") {
     const operation = argv[1];
     if (operation !== "export" && operation !== "migrate-events") {
@@ -189,7 +198,8 @@ function parseArguments(argv: readonly string[]): CliArguments {
       parsed.prompt.push(...argv.slice(index + 1));
       break;
     }
-    if (argument === "--interrupt") parsed.interrupt = true;
+    if (argument === "--no-open") parsed.noOpen = true;
+    else if (argument === "--interrupt") parsed.interrupt = true;
     else if (argument === "--yes") parsed.yes = true;
     else if (argument === "--force") parsed.force = true;
     else if (argument === "--socket") parsed.socket = next();
@@ -316,6 +326,7 @@ function parseArguments(argv: readonly string[]): CliArguments {
   ) {
     throw new Error(`${parsed.command} does not accept a session ID`);
   }
+  if (parsed.noOpen && parsed.command !== "web") throw new Error("--no-open requires axl web");
   if (parsed.command === "session-export" && !parsed.raw) {
     throw new Error("session export requires --raw");
   }
@@ -1000,7 +1011,9 @@ async function main(): Promise<void> {
         ? "rpc_probe"
         : ["providers", "models", "login", "logout", "refresh"].includes(cli.command ?? "")
           ? "cli"
-          : "tui";
+          : cli.command === "web"
+            ? "web_host"
+            : "tui";
   const connectTarget = async (target: LocalDaemonTarget): Promise<AxlClient> => {
     await mkdir(target.stateDirectory, { recursive: true, mode: 0o700 });
     try {
@@ -1050,6 +1063,37 @@ async function main(): Promise<void> {
   if (cli.command === "rpc") {
     client.close();
     await bridgeRpc(socketPath);
+    return;
+  }
+  if (cli.command === "web") {
+    client.close();
+    const { startWebGateway } = await import("./web-gateway.ts");
+    const gateway = await startWebGateway({
+      socketPath,
+      cwd: cli.cwd,
+      assetDirectory: resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist"),
+    });
+    process.stdout.write(`Axl web: ${gateway.origin}\n`);
+    if (!cli.noOpen) {
+      const launchUrl =
+        cli.sessionId === undefined
+          ? gateway.launchUrl
+          : `${gateway.launchUrl}&session=${encodeURIComponent(cli.sessionId)}`;
+      const browser =
+        process.platform === "darwin"
+          ? { file: "open", args: [launchUrl] }
+          : process.platform === "win32"
+            ? { file: "rundll32", args: ["url.dll,FileProtocolHandler", launchUrl] }
+            : { file: "xdg-open", args: [launchUrl] };
+      const child = spawn(browser.file, browser.args, { detached: true, stdio: "ignore" });
+      child.unref();
+    }
+    const stop = (): void => {
+      void gateway.close().finally(() => process.exit(0));
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    await new Promise(() => undefined);
     return;
   }
   if (["providers", "models", "login", "logout", "refresh"].includes(cli.command ?? "")) {
