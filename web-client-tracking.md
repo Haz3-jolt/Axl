@@ -320,20 +320,20 @@ The browser should support every capability granted to its connection.
 ### Providers
 
 - [x] `provider.list`
-- [ ] `provider.catalog.refresh`
+- [x] `provider.catalog.refresh`
 - [ ] `provider.auth.status`
 - [ ] `provider.auth.login`
-- [ ] `provider.auth.logout`
+- [x] `provider.auth.logout`
 
 Do not request a capability before its interaction, error behavior, and security boundary are implemented. Missing capability UI must fail explicitly rather than provide a local fallback.
 
 ## Provider management
 
-- [ ] Add `/providers` with provider, authentication, catalog, region, enabled, and model availability state.
-- [ ] Refresh inventory after login, logout, catalog refresh, settings changes, and reconnect.
-- [ ] Add per-provider progress, cancellation, result, and retry.
-- [ ] Preserve usable provider groups when one provider fails.
-- [ ] Present errors beside the owning provider.
+- [ ] Add `/providers` with provider, authentication, catalog, region, enabled, and model availability state. The web provider status surface covers authentication, catalog, enabled state, and model counts; shared command routing and region detail remain.
+- [ ] Refresh inventory after login, logout, catalog refresh, settings changes, and reconnect. Web refreshes after logout and catalog refresh; login and reconnect invalidation remain.
+- [ ] Add per-provider progress, cancellation, result, and retry. Web shows bounded refresh progress and retry controls; cancellation remains.
+- [x] Preserve usable provider groups when one provider fails.
+- [x] Present errors beside the owning provider.
 - [ ] Acquire credentials only through an injected trusted-process-host interaction.
 - [ ] Keep credential values out of React, browser storage, URLs, logs, and canonical events.
 
@@ -359,6 +359,7 @@ Do not request a capability before its interaction, error behavior, and security
 
 - [x] Separate browser preferences from session configuration and trusted host actions.
 - [x] Define durable preference storage that survives random local gateway ports without placing authority credentials in application storage.
+- [x] Expose browser-owned layout and change-review preferences through a focused Web settings surface.
 - [ ] Refresh session catalog metadata after another client changes it.
 - [ ] Replace hardcoded English copy with a typed localization owner when the first second locale is implemented.
 - [ ] Show errors inside the dialog or picker that initiated the action.
@@ -417,7 +418,7 @@ Do not request a capability before its interaction, error behavior, and security
 ### Accessibility and presentation
 
 - [ ] Session navigation, tabs, dialogs, menus, composer, interrupt, and reconnect are keyboard-operable.
-- [ ] Focus restoration and Escape behavior are deterministic.
+- [x] Focus restoration and Escape behavior are deterministic for Web settings, provider status, transcript search, and the mobile session drawer.
 - [x] Connection and action outcomes use accessible status regions.
 - [x] Reduced motion and no-color-only meaning are supported.
 - [ ] Wide and narrow viewport layouts receive one bounded browser inspection and one correction pass.
