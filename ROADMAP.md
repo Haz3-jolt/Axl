@@ -1245,9 +1245,11 @@ Axl has one coding interface with three session placements:
 
 - `local`: the agent loop runs on the user's machine, driven from the terminal, desktop, or local web client.
 - `cloud`: the loop runs on a cloud worker in an OCI sandbox (sections 11 and 12).
-- `attach`: a phone or web client controls an existing session without starting another loop (section 16.3).
+- `attach`: a remote browser or phone controls a reachable daemon without starting another loop (sections 16.2 and 16.3).
 
-Placement changes where the loop runs, not its protocol or event format. Sessions can move through cloud transfer. `axl web` serves a local web client with a full **code** mode and a tool-free **chat** mode. Both use the same daemon and event log. A broader cowork interface is outside the initial scope.
+Placement changes where the loop runs, not its protocol or event format. Sessions can move through cloud transfer. Running `axl` opens the TUI. Running `axl web` starts the trusted loopback gateway and opens the local web client without starting the TUI. The local web client has a full **code** mode and a tool-free **chat** mode. Both use the same daemon and event log. A broader cowork interface is outside the initial scope.
+
+The browser application is one static client-side build with no server-side rendering requirement. The installed CLI embeds the build for local use. The managed service retains immutable compatible builds for remote use. A small bootstrap configuration selects a transport and trusted host capabilities; it does not change session behavior.
 
 Parallel sessions on the same repository isolate their working state in git worktrees, so mission control (section 18.3) can run several agents against one repo without them fighting over files. Worktrees are created on demand when a session opens an already-busy repo and cleaned up automatically when a session ends without changes.
 
@@ -1323,6 +1325,15 @@ Use DSH's plugin-oriented presentation principles:
 - Live permission and sandbox state
 - Detachable and reconnectable sessions
 
+The web client is a static single-page application. It receives an initialized SDK client and a narrow set of trusted host capabilities from its environment. It never launches a daemon, acquires host credentials, or selects transport authority itself.
+
+The same application supports two environments:
+
+- Local `axl web` uses an authenticated loopback gateway and the exact assets embedded in the CLI release.
+- Hosted `app.axldev.ai` uses account bootstrap, browser-held device identity, and the selected installation's compatible immutable client build before connecting through the authenticated end-to-end encrypted relay.
+
+The hosted account portal may also be client-rendered. OAuth redirects and JSON APIs do not require server-side rendering. Hosted service authentication establishes account eligibility only; paired device credentials and daemon-granted capabilities establish session authority.
+
 #### 16.3 Mobile
 
 The mobile app is a remote-control client over the same daemon protocol, in the way Claude Code and Codex expose sessions on a phone. It runs no agent loop of its own and is a projection like every other client.
@@ -1339,7 +1350,7 @@ Capabilities:
 
 Requirements:
 
-- Connections use an authenticated relay or direct daemon pairing, while the daemon remains authoritative
+- Connections use the authenticated end-to-end encrypted hosted relay first, while the daemon remains authoritative; direct LAN or tailnet routing may reuse the same pairing and encryption protocol later
 - Device pairing with revocable per-device credentials
 - Read-only observer mode for watching a session without steering rights
 - Notification payloads exclude secrets and full file contents
@@ -1472,7 +1483,7 @@ Axl should not add:
 7. Global and project learning budgets.
 8. Whether cloud transfer moves a session or creates a fork.
 9. Licensing and attribution policy for any future approved third-party code.
-10. Whether the mobile app connects through a hosted relay service or direct daemon pairing first.
+10. Remote connectivity topology: decided. Ship the authenticated end-to-end encrypted hosted relay first for remote web and mobile clients. Add direct LAN or tailnet routing later through the same pairing, device-scope, and encryption protocol.
 11. Whether a pool may span providers by default, or only entitlements of the same provider and model family (section 13.2).
 12. Whether shared team pools ship in the first release, or pooling stays single-owner until the ownership and accounting model is proven (section 13.4).
 
@@ -2092,7 +2103,7 @@ Child sessions remain inspectable, budgeted, cancellable, policy-narrowed, repla
 
 ### Phase 9: Full protocol, SDK, web, and viewer
 
-The local web client and only the TypeScript SDK, wire-protocol, transport, security, workspace, and packaging work required for it are brought forward as an explicit exception to phase ordering. This work may proceed while the current dogfood follow-up remains incomplete, but those prerequisites still block expanded dogfooding of credentialed or untrusted capabilities. Unavailable features remain explicitly unsupported. This exception does not bring forward the session viewer, media roles, public SDK publication, multi-language generation, remote-device access, cloud placement, or unrelated protocol work, and it does not mark Phase 9 complete.
+The local web client and only the TypeScript SDK, wire-protocol, transport, security, workspace, packaging, and transport-neutral browser boundaries required for it are brought forward as an explicit exception to phase ordering. This work may proceed while the current dogfood follow-up remains incomplete, but those prerequisites still block expanded dogfooding of credentialed or untrusted capabilities. Unavailable features remain explicitly unsupported. This exception does not bring forward remote accounts, pairing, encrypted relay transport, hosted-service deployment, the session viewer, media roles, public SDK publication, multi-language generation, cloud placement, or unrelated protocol work, and it does not mark Phase 9 complete.
 
 Do not build public or multi-language SDKs before this phase. The second real client creates the need.
 
@@ -2103,7 +2114,6 @@ Do not build public or multi-language SDKs before this phase. The second real cl
 - [ ] Add resumable cursors with at-least-once delivery.
 - [ ] Add idempotency keys for sends and permission responses.
 - [ ] Add the separate blob channel.
-- [ ] Add revocable device credentials with observer and steering scopes.
 - [ ] Add capability negotiation and loud version mismatch behavior.
 - [ ] Add attachment presence.
 - [ ] Add WebSocket transport while retaining local Unix sockets.
@@ -2118,12 +2128,18 @@ Do not build public or multi-language SDKs before this phase. The second real cl
 
 #### Web client
 
+- [ ] Make bare `axl` launch the TUI and make `axl web [session-id]` launch the local web gateway and browser without starting the TUI.
+- [ ] Build one static single-page application with no server-side rendering dependency.
+- [ ] Load a validated bootstrap configuration that supplies the SDK transport and only the trusted host capabilities available in the current environment.
+- [ ] Keep presentation state independent of loopback hostnames, ports, cookies, and `local_control` assumptions.
+- [ ] Build content-hashed immutable assets that the installed CLI embeds and a later hosted service can retain by compatible web-asset and wire version.
 - [ ] Add localhost `code` and zero-tool `chat` modes.
 - [ ] Render one conversation event projection.
 - [ ] Add diff, terminal, read, search, web, workflow, and generic cards.
 - [ ] Support extension-provided panels and nodes.
 - [ ] Show permissions, budgets, costs, sandbox state, and background operations live.
 - [ ] Support detach, reconnect, steering, follow-ups, and interruption.
+- [ ] Drive controls only from granted capabilities and injected host operations so an unavailable platform action is never simulated.
 
 #### Session viewer and indexes
 
@@ -2148,7 +2164,7 @@ The local terminal image and blob path was brought forward. It does not complete
 
 #### Exit gate
 
-Terminal and web clients attach simultaneously to one authoritative session, reconnect without loss, and render the same tree and state from the same protocol.
+Terminal and local web clients attach simultaneously to one authoritative session, reconnect without loss, and render the same tree and state from the same protocol. The static web application passes the same browser behavior tests with fake environment adapters, proving that presentation code does not depend on the loopback gateway or trusted process-host internals.
 
 ### Phase 10: Adoption compiler and compatibility catalog
 
@@ -2301,17 +2317,41 @@ Resolve the first cloud provider and whether transfer moves or forks a session b
 
 A session moves or forks to the first cloud provider, survives client detachment, cleans up verifiably, and can spill between two authorized entitlements with switch reason and cache cost logged.
 
-### Phase 13: Mobile, IDE, headless automation, and notifications
+### Phase 13: Remote web, mobile, IDE, headless automation, and notifications
+
+The shared remote-connectivity and remote-web subsections are a scoped sequencing exception. They may begin after the local Phase 9 web exit gate and do not depend on cloud placement or native mobile implementation. Existing-daemon attachment ships before remote session creation.
+
+#### Shared remote connectivity
+
+- [ ] Write and approve the pairing and remote-transport security RFC before implementing remote access.
+- [ ] Add revocable device identities and observer, steering, approval, and session-management grants that the daemon maps to protocol capabilities.
+- [ ] Add bounded encrypted application frames, replay protection, reconnect, and published protocol test vectors.
+- [ ] Add the daemon's opt-in outbound connection and a ciphertext-only hosted relay with no public daemon port.
+- [ ] Keep replay-safe mutations idempotent and preserve explicit uncertain outcomes for direct shell and other non-replayable effects.
+- [ ] Add an account control plane for installation discovery, pairing rendezvous, revocation, and one-use relay tickets without granting session authority.
+- [ ] Ship existing-daemon attachment before remote workspace selection, cloud creation, encrypted attachments, or push notifications.
+- [ ] Add direct LAN or tailnet routing only after the hosted relay path is proven, reusing the same pairing and encryption protocol.
+
+#### Remote web client
+
+- [ ] Serve a protocol-independent static account and installation shell from `app.axldev.ai`.
+- [ ] Retain immutable client bundles by compatible web-asset and wire version rather than placing multiple protocol implementations in one bundle.
+- [ ] Store a non-extractable browser device key through an IndexedDB adapter and require re-pairing when it is lost.
+- [ ] Obtain a one-use, device-bound relay ticket through the authenticated API, then authenticate the WebSocket with a bounded initial frame rather than a URL or subprotocol credential.
+- [ ] Terminate end-to-end encryption in the browser and expose decrypted validated messages through the normal SDK transport contract.
+- [ ] List installations through the control plane, but obtain sessions, transcripts, and live state only from the selected daemon after encrypted attachment.
+- [ ] Keep disconnected input as an explicit draft until the daemon durably accepts it; do not create a browser-authoritative prompt queue.
+- [ ] Support existing-session observation and steering first. Require a daemon-owned approved workspace identifier before creating a remote Code session.
 
 #### Mobile clients
 
 - [ ] Generate Swift and Kotlin SDKs from the protocol schema.
 - [ ] Build native SwiftUI and Jetpack Compose clients.
 - [ ] Add session list, start, open, live events, steering, permissions, diff review, detach, and reconnect.
-- [ ] Add revocable device pairing and read-only observer mode.
+- [ ] Reuse the reviewed remote pairing, encryption, scope, relay, and revocation contracts.
+- [ ] Add read-only observer mode.
 - [ ] Exclude secrets and full file contents from notifications.
 - [ ] Add iOS Live Activities and Android foreground notification actions.
-- [ ] Decide whether hosted relay or direct daemon pairing ships first.
 
 #### IDE clients
 
@@ -2330,7 +2370,7 @@ A session moves or forks to the first cloud provider, survives client detachment
 
 #### Exit gate
 
-Terminal, web, mobile, IDE, and headless clients remain projections of one daemon protocol with no duplicated loop or business state.
+A paired browser can attach through the hosted relay to an existing daemon, observe and steer one session, survive relay and daemon reconnection without duplication, and revoke access without exposing plaintext to the service. Terminal, local web, remote web, mobile, IDE, and headless clients remain projections of one daemon protocol with no duplicated loop or business state.
 
 ### Phase 14: Derived product features
 
@@ -2438,7 +2478,7 @@ Resolve each decision only before its dependent phase:
 | First cloud provider | Phase 12 |
 | Cloud transfer as move or fork | Phase 12 |
 | Cross-provider and shared-team pooling | Phase 12 |
-| Hosted relay or direct mobile pairing | Phase 13 |
+| Remote connectivity topology | Resolved: hosted E2EE relay first; direct routing later |
 
 ### Immediate next slice
 

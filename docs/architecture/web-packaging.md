@@ -14,7 +14,7 @@ This document defines web dependencies, development asset routing, production bu
 
 React and Vite are approved as the only initial web production dependencies. Install only the minimum packages required for the first application shell.
 
-The application starts without a global state framework. SDK projections and React-local state own initial UI state. Any additional production dependency requires approval.
+The application starts without a global state framework or server-side rendering. SDK projections and React-local state own initial UI state. Any additional production dependency requires approval.
 
 All versions are pinned through the pnpm lockfile and included in normal dependency review and audit checks.
 
@@ -28,7 +28,7 @@ The web application lives in `packages/web` when implementation begins. It may i
 
 It must not import daemon, kernel, provider, sandbox, TUI, or private SDK internals.
 
-The application contains no agent loop, direct workspace access, Git invocation, provider credential, or alternate protocol parser.
+The application contains no agent loop, direct workspace access, Git invocation, provider credential, alternate protocol parser, process launcher, or dependency on one transport origin. A validated bootstrap document supplies the initialized SDK transport and narrow trusted host operations.
 
 ## Development mode
 
@@ -88,7 +88,7 @@ The production build:
 6. includes the immutable directory in the CLI release artifact
 7. tests the installed artifact rather than only source-tree output
 
-The release uses no CDN and downloads no runtime application code.
+The installed local release uses no CDN and downloads no runtime application code. The same immutable build may be distributed separately by another static host, but that service deployment is outside this local packaging specification.
 
 ## Gateway verification
 
@@ -122,13 +122,13 @@ The CLI release artifact contains:
 - asset metadata and manifest
 - the matching protocol and SDK runtime
 
-`axl web`:
+Bare `axl` launches the TUI. `axl web [session-id]` does not import or launch the TUI. It:
 
 1. validates assets
 2. connects to or starts the local daemon
 3. binds the loopback gateway on an available port
 4. prints the token-free URL
-5. optionally opens the authenticated launch URL
+5. optionally opens the authenticated launch URL with the selected session in the fragment
 6. leaves active sessions running when the browser or gateway detaches
 
 Packaging must work from the installed artifact without the repository, Vite, pnpm, or development source files.
@@ -179,6 +179,7 @@ The build records the source revision and locked package versions. Release SBOM 
 ## Acceptance criteria
 
 - React and Vite are the only initial web production dependencies.
+- The browser application is a static client-side build with no server-side rendering requirement.
 - The browser uses the gateway origin in development and production.
 - Production starts no development server and performs no network download.
 - Every production asset is content-hashed and declared.

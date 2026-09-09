@@ -51,6 +51,7 @@ The web client work may proceed as the Phase 9 exception recorded in `ROADMAP.md
 6. Keep conversation reduction deterministic and framework-neutral.
 7. Package web assets with explicit compatibility metadata.
 8. Fail loudly when a version, capability, cursor, path, repository state, or asset is unsupported.
+9. Keep the static browser presentation independent of its transport origin and trusted process host so another environment can inject the same public SDK contract later.
 
 ## Non-goals
 
@@ -73,9 +74,11 @@ This work does not add:
 - `packages/sdk` becomes the private in-tree TypeScript SDK. It owns the typed client, reconnect behavior, idempotency and cursor interfaces, delivery reduction, and the conversation projector. It contains no agent loop, policy, Git, React, or credential value.
 - `packages/daemon` remains authoritative for mutations, operation ownership, idempotency decisions, snapshots, subscriptions, presence, path policy, and Git execution.
 - The gateway binds to loopback, authenticates browsers, enforces transport limits, serves or proxies assets, and opens one daemon connection per attachment. It implements no session behavior.
-- `packages/web` contains the React application after transport approval. React and Vite are the only approved initial production dependencies. Any other production dependency requires approval.
+- `packages/web` contains the static React application after transport approval. It receives a validated bootstrap configuration, an initialized public SDK client, and a narrow set of trusted host operations. It does not inspect loopback details or launch processes. React and Vite are the only approved initial production dependencies. Any other production dependency requires approval.
 
 The SDK remains unpublished until an external consumer exists.
+
+Bare `axl` launches the TUI. `axl web [session-id]` starts the trusted local gateway and browser without importing or launching the TUI. The local gateway owns daemon startup and browser launch; the static application owns neither.
 
 ## Client portability
 
@@ -89,7 +92,7 @@ Future native Android and iOS SDKs implement or generate the same protocol and m
 
 Mobile has two product modes. Chat uses a tool-free daemon-owned session through an authenticated remote service. Code mode requires remote control of an authoritative coding session and never runs workspace, tool, or agent authority on the phone. Pairing, remote credentials, relay trust, revocation, push delivery, and mobile protocol compatibility require a separate reviewed specification.
 
-Transport and authentication are adapters. RPC typing, canonical projection, cursors, idempotency, and capability behavior do not depend on Unix sockets, browser cookies, Tauri, Swift, or Kotlin. Client identity is diagnostic and extensible; authenticated scope alone grants authority.
+Transport and authentication are adapters. RPC typing, canonical projection, cursors, idempotency, and capability behavior do not depend on Unix sockets, browser cookies, origins, Tauri, Swift, or Kotlin. Client identity is diagnostic and extensible; authenticated scope alone grants authority. Browser controls derive from granted capabilities and injected host operations rather than hardcoded `local_control` assumptions.
 
 ## Protocol decisions
 
@@ -215,12 +218,13 @@ The detailed build and release contract is specified in [web-packaging.md](web-p
 
 Production assets are:
 
-- built by Vite
+- built by Vite as a static single-page application with no server-side rendering dependency
 - content-hashed
 - described by signed-release-compatible metadata containing package, source, asset, and wire versions
 - verified before the gateway listens
 - included in the CLI release artifact
 - served locally without a CDN or runtime download
+- bootstrapped through a validated environment document rather than inline code or process assumptions
 
 Missing, corrupt, or incompatible assets fail startup. Production never falls back to development assets or starts a package manager.
 
@@ -259,7 +263,7 @@ No compatibility shim preserves the version-7 wire or private TUI projection beh
 
 1. **Protocol and SDK:** mapped unions, runtime parsers, structured errors, capabilities, deterministic idempotency recovery, canonical-event limits, race-free snapshot/cursor resume, transient activity, presence, transport-independent SDK interfaces, cross-language fixtures, and TUI SDK migration.
 2. **Secure transport:** loopback gateway, Host and Origin enforcement, launch exchange, cookie controls, resource limits, backpressure, fault tests, and independent restart tests.
-3. **Application shell:** local session list and switching, conversation, composer, reconnect state, model and thinking controls, and daemon-enforced profiles when supported.
+3. **Application shell:** validated bootstrap, fake environment adapter, local session list and switching, conversation, composer, reconnect state, model and thinking controls, and daemon-enforced profiles when supported.
 4. **Workspace and packaging:** policy-checked Explorer and Changes, structured diffs, hostile Git configuration tests, asset verification, and installed-artifact browser tests.
 
 No gate may silently substitute an unavailable later feature.
