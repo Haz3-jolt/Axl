@@ -1182,7 +1182,7 @@ export class SessionManager {
     let requestSettings: ModelRequestSettings | undefined;
     let webFetch: boolean | undefined;
     let webSearch: boolean | undefined;
-    let profile: SessionConfiguration["profile"];
+    let profile: SessionConfiguration["profile"] = created.payload.profile;
     for (const event of events) {
       if (event.type === "config.provider") providerId = event.payload.providerId;
       else if (event.type === "config.model") modelId = event.payload.modelId;
