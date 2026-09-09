@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createConnection, type Socket } from "node:net";
-import { extname, resolve, sep } from "node:path";
+import { extname, join, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 import { MAX_WIRE_MESSAGE_BYTES, WIRE_PROTOCOL_VERSION } from "@axl/protocol";
@@ -33,10 +33,46 @@ interface AssetMetadata {
 export interface WebGatewayOptions {
   readonly socketPath: string;
   readonly assetDirectory: string;
+  readonly stateDirectory: string;
   readonly cwd: string;
   readonly packageVersion: string;
   readonly launchToken?: Buffer;
   readonly pathToken?: Buffer;
+}
+
+export interface WebPreferences {
+  readonly sidebarWidth: number;
+  readonly changesWidth: number;
+  readonly sidebarCollapsed: boolean;
+  readonly changesView: "files" | "all";
+}
+
+const DEFAULT_WEB_PREFERENCES: WebPreferences = {
+  sidebarWidth: 264,
+  changesWidth: 680,
+  sidebarCollapsed: false,
+  changesView: "files",
+};
+
+function parsePreferences(value: unknown): WebPreferences {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new Error("Web preferences must be an object");
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some(
+      (key) => !["sidebarWidth", "changesWidth", "sidebarCollapsed", "changesView"].includes(key),
+    ) ||
+    !Number.isInteger(record.sidebarWidth) ||
+    Number(record.sidebarWidth) < 200 ||
+    Number(record.sidebarWidth) > 420 ||
+    !Number.isInteger(record.changesWidth) ||
+    Number(record.changesWidth) < 420 ||
+    Number(record.changesWidth) > 900 ||
+    typeof record.sidebarCollapsed !== "boolean" ||
+    (record.changesView !== "files" && record.changesView !== "all")
+  )
+    throw new Error("Web preferences are invalid");
+  return record as unknown as WebPreferences;
 }
 
 export interface WebGateway {
@@ -135,6 +171,14 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
   let launchAvailable = true;
   const launchExpiresAt = Date.now() + 60_000;
   const credentialExpiresAt = Date.now() + 12 * 60 * 60 * 1_000;
+  const preferencesPath = join(options.stateDirectory, "web-preferences.json");
+  let preferences = await readFile(preferencesPath, "utf8")
+    .then((text) => parsePreferences(JSON.parse(text)))
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return DEFAULT_WEB_PREFERENCES;
+      throw error;
+    });
+  let preferenceWrites = Promise.resolve();
   let expectedHost = "";
   let expectedOrigin = "";
   const sockets = new Set<Socket>();
@@ -187,9 +231,31 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
         return send(
           response,
           200,
-          JSON.stringify({ cwd: options.cwd, webSocketPath: `${prefix}ws` }),
+          JSON.stringify({ cwd: options.cwd, webSocketPath: `${prefix}ws`, preferences }),
           "application/json; charset=utf-8",
         );
+      }
+      if (request.method === "POST" && relative === "preferences") {
+        if (!validOrigin(request) || !authorized(request))
+          return send(response, 401, "Authentication required");
+        const chunks: Buffer[] = [];
+        let size = 0;
+        for await (const chunk of request) {
+          const value = Buffer.from(chunk);
+          size += value.length;
+          if (size > 4096) return send(response, 413, "Request too large");
+          chunks.push(value);
+        }
+        const next = parsePreferences(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        preferences = next;
+        preferenceWrites = preferenceWrites.then(async () => {
+          await mkdir(options.stateDirectory, { recursive: true, mode: 0o700 });
+          const temporary = `${preferencesPath}.${process.pid}.tmp`;
+          await writeFile(temporary, `${JSON.stringify(next)}\n`, { mode: 0o600 });
+          await rename(temporary, preferencesPath);
+        });
+        await preferenceWrites;
+        return send(response, 200, "{}", "application/json; charset=utf-8");
       }
       if (request.method !== "GET") return send(response, 405, "Method not allowed");
       const file = relative === "" ? "index.html" : relative;
