@@ -1829,8 +1829,12 @@ test("MCP interactions block the operation until the user responds", async (cont
   });
   assert.match(resumed.text(), /Allow fixture tool/);
   resumedInput.write("y");
-  await until(() => resumed.text().includes("Provide profile data"), "MCP form dialog");
-  resumedInput.write("yes\r\r");
+  await until(() => resumed.text().includes("Provide profile data"), "MCP form introduction");
+  resumedInput.write("\r");
+  await until(() => resumed.text().includes("Confirm action"), "MCP form field");
+  resumedInput.write("\r");
+  await until(() => resumed.text().includes("Review MCP input"), "MCP form review");
+  resumedInput.write("\r");
   await until(() => resumed.text().includes("continued after approval"), "approved continuation");
   resumedApp.stop();
 });
