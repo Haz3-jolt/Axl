@@ -4243,131 +4243,288 @@ export class AxlApp {
       void this.respondToInteraction(request.interactionId, "decline");
       return;
     }
+
+    const controller = new AbortController();
+    const dialog = new ProviderLoginOverlay({
+      title: "MCP input",
+      palette: () => this.view.palette,
+      signal: controller.signal,
+      cancel: () => controller.abort(),
+      refresh: () => this.redraw(),
+    });
+    this.overlays.replace(dialog);
+    this.redraw();
+    void this.collectInteractionForm(request, schema, dialog, controller.signal);
+  }
+
+  private async collectInteractionForm(
+    request: EventPayloadMap["interaction.requested"],
+    schema: JsonObject,
+    dialog: ProviderLoginOverlay,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const properties = jsonObject(schema.properties) ?? {};
     const required = new Set(
       Array.isArray(schema.required)
         ? schema.required.filter((item): item is string => typeof item === "string")
         : [],
     );
     const fields = Object.entries(properties).flatMap(([name, value]) => {
-      const field = jsonObject(value);
-      return field ? [{ name, schema: field }] : [];
+      const schema = jsonObject(value);
+      return schema === undefined ? [] : [{ name, schema }];
     });
-    let index = 0;
-    let draft = "";
-    let error: string | undefined;
-    let confirming = fields.length === 0;
     const values: Record<string, JsonValue> = {};
-    const finish = (action: "accept" | "decline" | "cancel", content?: JsonObject): void => {
-      void this.respondToInteraction(request.interactionId, action, content);
-    };
-    const modal: Overlay = {
-      render: () => {
-        const field = fields[index];
-        const rows = [
-          this.view.palette.accent(request.source),
-          request.message,
-          "",
-          ...fields.map((item, fieldIndex) => {
-            const marker =
-              fieldIndex === index && !confirming
-                ? ">"
-                : Object.hasOwn(values, item.name)
-                  ? "✓"
-                  : " ";
-            const value = values[item.name];
-            return `${marker} ${item.name}${value === undefined ? "" : `: ${JSON.stringify(value)}`}`;
-          }),
-          ...(confirming
-            ? ["", this.view.palette.accent("Submit these values?"), JSON.stringify(values)]
-            : [
-                "",
-                `${field?.name ?? "value"}: ${draft}`,
-                ...(typeof field?.schema.description === "string"
-                  ? [this.view.palette.dim(field.schema.description)]
-                  : []),
-              ]),
-          ...(error ? [this.view.palette.error(`✖ ${error}`)] : []),
-          ...(this.interactionError === undefined
-            ? []
-            : [this.view.palette.error(`✖ ${this.interactionError}`)]),
-        ];
-        return renderDialog({
-          title: "Input required",
-          rows,
-          footer: confirming
-            ? "Enter/Y submit · N edit · Esc cancel"
-            : "Enter next · Ctrl+D decline · Esc cancel",
-          width: this.width,
-          palette: this.view.palette,
+    const submit = async (action: "accept" | "decline", content?: JsonObject): Promise<boolean> => {
+      while (!signal.aborted) {
+        if (await this.respondToInteraction(request.interactionId, action, content)) return true;
+        await dialog.prompt({
+          message: "Could not submit MCP response",
+          options: [
+            {
+              value: "retry",
+              label: "Retry",
+              description: this.interactionError ?? "Try the same response again",
+            },
+          ],
         });
-      },
-      cursor: () => {
-        if (confirming) return undefined;
-        const name = fields[index]?.name ?? "value";
-        return { row: fields.length + 5, column: 2 + visibleWidth(`${name}: ${draft}`) };
-      },
-      handleKey: (data) => {
-        for (let at = 0; at < data.length; ) {
-          const decoded = decodeOneKey(data, at);
-          const key = decoded.key;
-          at = decoded.next;
-          if (key.kind === "escape" || (key.kind === "ctrl" && key.char === "c")) {
-            finish("cancel");
-            return;
-          }
-          if (key.kind === "ctrl" && key.char === "d") {
-            finish("decline");
-            return;
-          }
-          if (confirming) {
-            if (key.kind === "enter" || (key.kind === "char" && key.char.toLowerCase() === "y")) {
-              finish("accept", values);
-              return;
-            }
-            if (key.kind === "char" && key.char.toLowerCase() === "n") {
-              confirming = false;
-              index = Math.max(0, fields.length - 1);
-              draft = "";
-            }
-            continue;
-          }
-          if (key.kind === "backspace") draft = draft.slice(0, -1);
-          else if (key.kind === "char") draft += key.char;
-          else if (key.kind === "enter") {
-            const field = fields[index];
-            if (!field) {
-              confirming = true;
-              continue;
-            }
-            try {
-              const value = formValue(
-                field.name,
-                field.schema,
-                draft.trim(),
-                required.has(field.name),
-              );
-              if (value === undefined) delete values[field.name];
-              else values[field.name] = value;
-              error = undefined;
-              draft = "";
-              index += 1;
-              confirming = index >= fields.length;
-            } catch (caught) {
-              error = caught instanceof Error ? caught.message : "Invalid value";
-            }
-          }
-        }
-      },
+      }
+      return false;
     };
-    this.overlays.replace(modal);
+
+    try {
+      const decision = await dialog.prompt({
+        message: `MCP input request · ${request.source}`,
+        options: [
+          { value: "continue", label: "Continue", description: request.message },
+          { value: "decline", label: "Decline", description: "Do not provide input" },
+        ],
+      });
+      if (decision === "decline") {
+        await submit("decline");
+        return;
+      }
+      if (fields.length === 0) {
+        await submit("accept", values);
+        return;
+      }
+
+      for (const field of fields) {
+        const value = await this.collectInteractionField(
+          dialog,
+          field.name,
+          field.schema,
+          required.has(field.name),
+        );
+        if (value === undefined) delete values[field.name];
+        else values[field.name] = value;
+      }
+
+      while (!signal.aborted) {
+        const action = await dialog.prompt({
+          message: "Review MCP input",
+          options: [
+            {
+              value: "submit",
+              label: "Submit",
+              description: JSON.stringify(values),
+            },
+            { value: "edit", label: "Edit", description: "Change one field" },
+            { value: "decline", label: "Decline", description: "Do not provide input" },
+          ],
+        });
+        if (action === "decline") {
+          if (await submit("decline")) return;
+          continue;
+        }
+        if (action === "submit") {
+          if (await submit("accept", values)) return;
+          continue;
+        }
+        const selected = await dialog.prompt({
+          message: "Choose a field to edit",
+          options: fields.map((field) => ({
+            value: field.name,
+            label: String(field.schema.title ?? field.name),
+            description: Object.hasOwn(values, field.name)
+              ? JSON.stringify(values[field.name])
+              : "Omitted",
+          })),
+        });
+        const field = fields.find((candidate) => candidate.name === selected);
+        if (field === undefined) continue;
+        const value = await this.collectInteractionField(
+          dialog,
+          field.name,
+          field.schema,
+          required.has(field.name),
+          values[field.name],
+        );
+        if (value === undefined) delete values[field.name];
+        else values[field.name] = value;
+      }
+    } catch (error) {
+      if (signal.aborted && this.activeInteractionId === request.interactionId) {
+        await this.respondToInteraction(request.interactionId, "cancel");
+      } else if (!signal.aborted) {
+        this.interactionError = error instanceof Error ? error.message : "interaction failed";
+        this.redraw();
+      }
+    }
+  }
+
+  private async collectInteractionField(
+    dialog: ProviderLoginOverlay,
+    name: string,
+    schema: JsonObject,
+    required: boolean,
+    current?: JsonValue,
+  ): Promise<JsonValue | undefined> {
+    const label = String(schema.title ?? name);
+    const description = typeof schema.description === "string" ? schema.description : undefined;
+    const choices = Array.isArray(schema.enum)
+      ? schema.enum.filter((value): value is string => typeof value === "string")
+      : Array.isArray(schema.oneOf)
+        ? schema.oneOf.flatMap((entry) => {
+            const option = jsonObject(entry);
+            return typeof option?.const === "string"
+              ? [{ value: option.const, label: String(option.title ?? option.const) }]
+              : [];
+          })
+        : undefined;
+
+    if (schema.type === "string" && choices !== undefined) {
+      const options = choices.map((choice, index) =>
+        typeof choice === "string"
+          ? { value: `choice:${index}`, label: choice }
+          : { value: `choice:${index}`, label: choice.label, description: choice.value },
+      );
+      if (schema.default !== undefined)
+        options.push({
+          value: "default",
+          label: "Use default",
+          description: String(schema.default),
+        });
+      if (!required) options.push({ value: "omit", label: "Omit", description: "Leave unset" });
+      const selected = await dialog.prompt({
+        message: label,
+        options,
+      });
+      if (selected === "default") return schema.default;
+      if (selected === "omit") return undefined;
+      const index = Number(selected.slice("choice:".length));
+      const choice = choices[index];
+      return typeof choice === "string" ? choice : choice?.value;
+    }
+
+    if (schema.type === "boolean") {
+      const options = [
+        { value: "true", label: "Yes", ...(description === undefined ? {} : { description }) },
+        { value: "false", label: "No" },
+      ];
+      if (schema.default !== undefined)
+        options.push({
+          value: "default",
+          label: "Use default",
+          description: String(schema.default),
+        });
+      if (!required) options.push({ value: "omit", label: "Omit", description: "Leave unset" });
+      const selected = await dialog.prompt({ message: label, options });
+      if (selected === "default") return schema.default;
+      if (selected === "omit") return undefined;
+      return selected === "true";
+    }
+
+    if (schema.type === "array") {
+      const itemSchema = jsonObject(schema.items);
+      const itemChoices = Array.isArray(itemSchema?.enum)
+        ? itemSchema.enum.filter((value): value is string => typeof value === "string")
+        : Array.isArray(itemSchema?.anyOf)
+          ? itemSchema.anyOf.flatMap((entry) => {
+              const option = jsonObject(entry);
+              return typeof option?.const === "string" ? [option.const] : [];
+            })
+          : [];
+      const selected = new Set(
+        Array.isArray(current)
+          ? current.filter((value): value is string => typeof value === "string")
+          : [],
+      );
+      while (true) {
+        const action = await dialog.prompt({
+          message: label,
+          options: [
+            ...itemChoices.map((choice, index) => ({
+              value: `choice:${index}`,
+              label: `${selected.has(choice) ? "✓" : "○"} ${choice}`,
+            })),
+            { value: "done", label: "Done", description: `${selected.size} selected` },
+            ...(schema.default === undefined
+              ? []
+              : [
+                  {
+                    value: "default",
+                    label: "Use default",
+                    description: JSON.stringify(schema.default),
+                  },
+                ]),
+            ...(required ? [] : [{ value: "omit", label: "Omit", description: "Leave unset" }]),
+          ],
+        });
+        if (action === "default") return schema.default;
+        if (action === "omit") return undefined;
+        if (action === "done") {
+          const values = [...selected];
+          if (typeof schema.minItems === "number" && values.length < schema.minItems)
+            throw new Error(`${name} needs at least ${schema.minItems} choices`);
+          if (typeof schema.maxItems === "number" && values.length > schema.maxItems)
+            throw new Error(`${name} allows at most ${schema.maxItems} choices`);
+          return values;
+        }
+        const choice = itemChoices[Number(action.slice("choice:".length))];
+        if (choice === undefined) continue;
+        if (selected.has(choice)) selected.delete(choice);
+        else selected.add(choice);
+      }
+    }
+
+    let validationError: string | undefined;
+    while (true) {
+      const promptDescription = validationError ?? description;
+      const action = await dialog.prompt({
+        message: label,
+        options: [
+          {
+            value: "enter",
+            label: "Enter value",
+            ...(promptDescription === undefined ? {} : { description: promptDescription }),
+          },
+          ...(schema.default === undefined
+            ? []
+            : [{ value: "default", label: "Use default", description: String(schema.default) }]),
+          ...(required ? [] : [{ value: "omit", label: "Omit", description: "Leave unset" }]),
+        ],
+      });
+      if (action === "default") return schema.default;
+      if (action === "omit") return undefined;
+      const raw = await dialog.prompt({
+        message: label,
+        ...(current === undefined ? {} : { placeholder: `Current: ${String(current)}` }),
+        allowEmpty: !required || schema.default !== undefined,
+      });
+      try {
+        return formValue(name, schema, raw, required);
+      } catch (error) {
+        validationError = error instanceof Error ? error.message : "Invalid value";
+      }
+    }
   }
 
   private async respondToInteraction(
     interactionId: string,
     action: "accept" | "decline" | "cancel",
     content?: JsonObject,
-  ): Promise<void> {
-    if (this.interactionResponding) return;
+  ): Promise<boolean> {
+    if (this.interactionResponding) return false;
     this.interactionResponding = true;
     let resolved = false;
     try {
@@ -4391,6 +4548,7 @@ export class AxlApp {
       }
       this.redraw();
     }
+    return resolved;
   }
 
   private providerById(providerId: string): ProviderInventoryGroup | undefined {
