@@ -34,6 +34,7 @@ The branch now contains the first complete local-session slice:
 - Rich conversation, tool, syntax, diff, workspace-change, responsive, and persistent-layout presentation is implemented.
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
+- The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
 - Provider auth, staged Chat/Code creation, the shared command plane, active-turn delivery modes, attachments, and full protocol capability parity remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
@@ -340,6 +341,8 @@ Do not request a capability before its interaction, error behavior, and security
 ## Conversation and workspace presentation
 
 - [x] Render projected user, assistant, thinking, error, compaction, and interruption records.
+- [x] Classify every canonical event through one exhaustive SDK presentation contract so new event types require an explicit rendering policy.
+- [x] Hide compacted transcript records while retaining canonical history, and expose the retained summary through an expandable shared React renderer.
 - [ ] Render shell, read, edit, search, fetch, MCP, workflow, and bounded generic tool cards. Shell, read, write, edit, fetch, and generic tools are implemented; specialized search, MCP, and workflow treatment remains.
 - [ ] Show complete structured tool inputs and useful result metadata when expanded.
 - [ ] Provide a bounded route to inspect truncated tool output. Truncation metadata and preserved-output location are rendered; browser retrieval remains.

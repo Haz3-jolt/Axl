@@ -15,16 +15,9 @@ import type {
   ThinkingLevel,
   Usage,
 } from "@axl/protocol";
+import type { GenericEvent } from "./presentation.ts";
 
-export interface GenericEvent {
-  readonly id: string;
-  readonly sessionId: string;
-  readonly parentId: string | null;
-  readonly operationId?: string;
-  readonly timestamp: number;
-  readonly type: string;
-  readonly payload: JsonObject;
-}
+export type { GenericEvent } from "./presentation.ts";
 
 export type ConversationRecord =
   | { readonly kind: "event"; readonly event: CanonicalEvent }
@@ -103,6 +96,7 @@ export interface ConversationState {
   readonly sessionId?: SessionId;
   readonly selectedNodeId?: EventId;
   readonly records: readonly ConversationRecord[];
+  readonly compactedEventIds: readonly EventId[];
   readonly tools: readonly ProjectedToolCall[];
   readonly interactions: readonly ProjectedInteraction[];
   readonly operations: readonly ProjectedOperation[];
@@ -131,6 +125,7 @@ export interface ConversationState {
 export type ConversationOverview = Omit<
   ConversationState,
   | "records"
+  | "compactedEventIds"
   | "tools"
   | "interactions"
   | "operations"
@@ -253,6 +248,7 @@ export class ConversationProjector {
     return Object.freeze({
       ...overview,
       records: Object.freeze([...this.records]),
+      compactedEventIds: Object.freeze([...this.compactedEvents]),
       tools: Object.freeze([...this.tools.values()]),
       interactions: Object.freeze([...this.interactions.values()]),
       operations: Object.freeze([...this.operations.values()]),

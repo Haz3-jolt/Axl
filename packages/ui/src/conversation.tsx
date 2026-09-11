@@ -2,17 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo, useState } from "react";
-import type {
-  BlobReference,
-  CanonicalEvent,
-  ConversationState,
-  EventId,
-  JsonObject,
-  ProjectedInterruptDelivery,
-  ProjectedQueueItem,
-  ProjectedToolCall,
-  ThinkingLevel,
-  Usage,
+import {
+  type BlobReference,
+  type CanonicalPresentationItem,
+  type ConversationPresentationItem,
+  type ConversationState,
+  type EventId,
+  type JsonObject,
+  type ProjectedInteraction,
+  type ProjectedInterruptDelivery,
+  type ProjectedQueueItem,
+  type ProjectedToolCall,
+  type ThinkingLevel,
+  type Usage,
+  presentCanonicalEvent,
+  presentUnknownEvent,
 } from "@axl/sdk";
 import { editDiffRows } from "./diff.ts";
 import { highlightLine, languageForPath } from "./syntax.ts";
@@ -171,20 +175,100 @@ function DeliveryState({ label, status, text, reason }: { readonly label: string
   return <div className={`delivery-state ${failed ? "failed" : status}`} role={failed ? "alert" : "status"}><span className="delivery-icon" aria-hidden="true"><svg viewBox="0 0 16 16">{failed ? <path d="m4 4 8 8M12 4l-8 8" /> : status === "delivered" || status === "completed" ? <path d="m3 8 3 3 7-7" /> : status === "paused" ? <path d="M5 4v8M11 4v8" /> : <><circle cx="8" cy="8" r="5.5" /><path d="M8 4.5V8l2.5 1.5" /></>}</svg></span><span><strong>{label}</strong>{text && <small>{text}</small>}{reason && <small>{reason}</small>}</span></div>;
 }
 
-function EventRow({ event, queue, interruption, attribution, resolveBlobUrl, searchQuery, onCopyMessage, onForkMessage }: { readonly event: CanonicalEvent; readonly queue?: ProjectedQueueItem | undefined; readonly interruption?: ProjectedInterruptDelivery | undefined; readonly attribution?: ResponseAttribution | undefined; readonly resolveBlobUrl?: ((blob: BlobReference) => string | undefined) | undefined; readonly searchQuery?: string | undefined; readonly onCopyMessage?: ((text: string) => void) | undefined; readonly onForkMessage?: ((eventId: EventId) => void) | undefined }): React.JSX.Element | null {
-  if (event.type === "user.message") return <article className="message user" id={`message-${event.id}`} data-prompt-id={event.id} data-prompt-text={contentText(event.payload.content)}><span className="avatar">Y</span><div><header><strong>You</strong><time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></header><MessageContent content={event.payload.content} resolveBlobUrl={resolveBlobUrl} searchQuery={searchQuery} /><MessageActions eventId={event.id} text={contentText(event.payload.content)} fork onCopy={onCopyMessage} onFork={onForkMessage} /></div></article>;
-  if (event.type === "assistant.message") return <article className="message assistant" id={`message-${event.id}`}><span className="avatar axl">◆</span><div><header><strong>Axl</strong><time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></header>{event.payload.content.map((item, index) => item.type === "thinking" ? <details className="thinking" key={index}><summary><span className="tool-chevron"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg></span>Thinking</summary><p><HighlightedText text={item.text} query={searchQuery} /></p></details> : item.type === "text" ? <p key={index}><HighlightedText text={item.text} query={searchQuery} /></p> : item.type === "blob" ? <Attachment key={`${item.blob.sha256}:${index}`} blob={item.blob} resolveBlobUrl={resolveBlobUrl} /> : null)}{event.payload.stopReason === "aborted" && <DeliveryState label="Response interrupted" status="aborted" text="" />}{event.payload.stopReason === "length" && <div className="response-warning" role="status"><span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 2.25 14 13H2zM8 6v3.5M8 12v.1" /></svg></span><span><strong>Response incomplete</strong><small>The model reached its output limit. Ask it to continue or increase the output limit.</small></span></div>}{event.payload.errorMessage && <p className="error">{event.payload.errorMessage}</p>}{event.payload.usage && <UsageDetails usage={event.payload.usage} attribution={attribution} endedAt={event.timestamp} />}<MessageActions eventId={event.id} text={contentText(event.payload.content)} fork={false} onCopy={onCopyMessage} /></div></article>;
-  if (event.type === "queue.enqueued" && queue !== undefined) return <DeliveryState label={queue.status === "queued" ? queue.priority === "front" ? "Queued next" : "Queued for later" : queue.status === "running" ? "Sending now" : queue.status === "paused" ? "Delivery paused" : queue.status === "completed" ? "Delivered" : queue.status === "aborted" ? "Delivery canceled" : "Delivery failed"} status={queue.status} text={contentText(queue.content)} />;
-  if (event.type === "interrupt.requested" && interruption !== undefined) return <DeliveryState label={interruption.status === "queued" ? "Interrupt queued" : interruption.status === "interrupting" ? "Stopping current response" : interruption.status === "delivered" ? "Interrupted and delivered" : "Interrupt delivery failed"} status={interruption.status} text={contentText(interruption.content)} reason={interruption.reason} />;
-  if (event.type === "session.error") return <div className="notice error" role="alert">{event.payload.message}</div>;
-  if (event.type === "context.compacted") return <div className="notice">Older context was compacted.</div>;
-  return null;
+function CompactionRecord({ item, searchQuery }: { readonly item: CanonicalPresentationItem<"context.compacted">; readonly searchQuery?: string | undefined }): React.JSX.Element {
+  const count = item.event.payload.replacedEventIds.length;
+  return <details className="compaction-record">
+    <summary><span className="compaction-icon" aria-hidden="true">◇</span><strong>Context compacted</strong><small>{count} earlier record{count === 1 ? "" : "s"} summarized</small><span className="tool-chevron"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg></span></summary>
+    <div><p><HighlightedText text={item.event.payload.summary} query={searchQuery} /></p><small>Original history remains in the canonical session log.</small></div>
+  </details>;
+}
+
+function SystemNotice({ title, detail, tone = "neutral", alert = false }: { readonly title: string; readonly detail?: string | undefined; readonly tone?: "neutral" | "warning" | "error"; readonly alert?: boolean }): React.JSX.Element {
+  return <div className={`notice system-notice ${tone}`} role={alert ? "alert" : "status"}><strong>{title}</strong>{detail && <small>{detail}</small>}</div>;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled conversation presentation item: ${JSON.stringify(value)}`);
+}
+
+function EventRow({ item, tool, queue, interruption, interaction, attribution, resolveBlobUrl, searchQuery, onCopyMessage, onForkMessage }: { readonly item: ConversationPresentationItem; readonly tool?: ProjectedToolCall | undefined; readonly queue?: ProjectedQueueItem | undefined; readonly interruption?: ProjectedInterruptDelivery | undefined; readonly interaction?: ProjectedInteraction | undefined; readonly attribution?: ResponseAttribution | undefined; readonly resolveBlobUrl?: ((blob: BlobReference) => string | undefined) | undefined; readonly searchQuery?: string | undefined; readonly onCopyMessage?: ((text: string) => void) | undefined; readonly onForkMessage?: ((eventId: EventId) => void) | undefined }): React.JSX.Element | null {
+  switch (item.kind) {
+    case "user.message": {
+      const event = item.event;
+      return <article className="message user" id={`message-${event.id}`} data-prompt-id={event.id} data-prompt-text={contentText(event.payload.content)}><span className="avatar">Y</span><div><header><strong>You</strong><time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></header><MessageContent content={event.payload.content} resolveBlobUrl={resolveBlobUrl} searchQuery={searchQuery} /><MessageActions eventId={event.id} text={contentText(event.payload.content)} fork onCopy={onCopyMessage} onFork={onForkMessage} /></div></article>;
+    }
+    case "assistant.message": {
+      const event = item.event;
+      return <article className="message assistant" id={`message-${event.id}`}><span className="avatar axl">◆</span><div><header><strong>Axl</strong><time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></header>{event.payload.content.map((content, index) => content.type === "thinking" ? <details className="thinking" key={index}><summary><span className="tool-chevron"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg></span>Thinking</summary><p><HighlightedText text={content.text} query={searchQuery} /></p></details> : content.type === "text" ? <p key={index}><HighlightedText text={content.text} query={searchQuery} /></p> : <Attachment key={`${content.blob.sha256}:${index}`} blob={content.blob} resolveBlobUrl={resolveBlobUrl} />)}{event.payload.stopReason === "aborted" && <DeliveryState label="Response interrupted" status="aborted" text="" />}{event.payload.stopReason === "length" && <div className="response-warning" role="status"><span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 2.25 14 13H2zM8 6v3.5M8 12v.1" /></svg></span><span><strong>Response incomplete</strong><small>The model reached its output limit. Ask it to continue or increase the output limit.</small></span></div>}{event.payload.errorMessage && <p className="error">{event.payload.errorMessage}</p>}{event.payload.usage && <UsageDetails usage={event.payload.usage} attribution={attribution} endedAt={event.timestamp} />}<MessageActions eventId={event.id} text={contentText(event.payload.content)} fork={false} onCopy={onCopyMessage} /></div></article>;
+    }
+    case "queue.enqueued":
+      return queue === undefined ? null : <DeliveryState label={queue.status === "queued" ? queue.priority === "front" ? "Queued next" : "Queued for later" : queue.status === "running" ? "Sending now" : queue.status === "paused" ? "Delivery paused" : queue.status === "completed" ? "Delivered" : queue.status === "aborted" ? "Delivery canceled" : "Delivery failed"} status={queue.status} text={contentText(queue.content)} />;
+    case "interrupt.requested":
+      return interruption === undefined ? null : <DeliveryState label={interruption.status === "queued" ? "Interrupt queued" : interruption.status === "interrupting" ? "Stopping current response" : interruption.status === "delivered" ? "Interrupted and delivered" : "Interrupt delivery failed"} status={interruption.status} text={contentText(interruption.content)} reason={interruption.reason} />;
+    case "user.shell":
+      return <details className={`shell-record${item.event.payload.isError ? " failed" : ""}`}><summary><strong>{item.event.payload.excluded ? "Local shell" : "Shell context"}</strong><code>{item.event.payload.command}</code></summary><CodeBlock text={contentText(item.event.payload.content) || "No output"} /></details>;
+    case "model.retry_scheduled":
+      return <SystemNotice title={`Retrying model request ${item.event.payload.attempt}/${item.event.payload.maxAttempts}`} detail={`${item.event.payload.code} · ${(item.event.payload.delayMs / 1000).toFixed(item.event.payload.delayMs < 1000 ? 1 : 0)}s`} tone="warning" />;
+    case "tool.call":
+      return tool === undefined ? <SystemNotice title="Tool call unavailable" detail={item.event.payload.name} tone="error" alert /> : <ToolEntry tool={tool} />;
+    case "config.thinking":
+      return item.event.payload.clamped ? <SystemNotice title={`Thinking adjusted to ${item.event.payload.effective}`} detail={`Requested ${item.event.payload.requested}`} /> : null;
+    case "config.dialect":
+      return item.event.payload.reason === "reload" ? <SystemNotice title="Tools reloaded" detail={item.event.payload.dialectId} /> : null;
+    case "permission.requested":
+      return <SystemNotice title={`Permission requested: ${item.event.payload.capability}`} detail={item.event.payload.description} tone="warning" />;
+    case "permission.resolved":
+      return <SystemNotice title={`Permission ${item.event.payload.decision.replaceAll("_", " ")}`} detail={item.event.payload.reason} />;
+    case "interaction.requested": {
+      const resolution = interaction?.resolution;
+      return <SystemNotice title={resolution === undefined ? "Interaction required" : `Interaction ${resolution.payload.action}`} detail={`${item.event.payload.source} · ${item.event.payload.message}`} tone={resolution === undefined ? "warning" : "neutral"} />;
+    }
+    case "sandbox.configured":
+      return item.event.payload.enforced ? null : <SystemNotice title="Sandbox is not enforced" detail="Tools may access the host with your user permissions." tone="warning" alert />;
+    case "sandbox.violation":
+      return <SystemNotice title={`Sandbox denied ${item.event.payload.capability}`} detail={item.event.payload.reason} tone="warning" alert />;
+    case "context.injected":
+      return <SystemNotice title="Context added" detail={item.event.payload.source} />;
+    case "context.compacted":
+      return <CompactionRecord item={item} searchQuery={searchQuery} />;
+    case "session.error":
+      return <SystemNotice title={item.event.payload.message} detail={item.event.payload.retryable ? "Retry the request." : item.event.payload.code} tone="error" alert />;
+    case "session.closed":
+      return <SystemNotice title={`Session ${item.event.payload.reason}`} />;
+    case "child.result":
+      return <SystemNotice title={`Child session ${item.event.payload.status}`} detail={item.event.payload.childSessionId} tone={item.event.payload.status === "failed" ? "error" : "neutral"} />;
+    case "unknown_event":
+      return <SystemNotice title="Unsupported session event" detail={item.event.type} tone="warning" />;
+    case "session.created":
+    case "session.resumed":
+    case "queue.requeued":
+    case "queue.started":
+    case "queue.paused":
+    case "interrupt.updated":
+    case "tool.result":
+    case "config.request":
+    case "model.request_configured":
+    case "config.model":
+    case "config.provider":
+    case "config.entitlement":
+    case "config.profile":
+    case "config.tools":
+    case "prompt.section":
+    case "tool.schema":
+    case "context.extension":
+    case "interaction.resolved":
+      return null;
+    default:
+      return assertNever(item);
+  }
 }
 
 export function Conversation({ conversation, resolveBlobUrl, searchQuery, onCopyMessage, onForkMessage }: { readonly conversation: ConversationState; readonly resolveBlobUrl?: ((blob: BlobReference) => string | undefined) | undefined; readonly searchQuery?: string | undefined; readonly onCopyMessage?: ((text: string) => void) | undefined; readonly onForkMessage?: ((eventId: EventId) => void) | undefined }): React.JSX.Element {
+  const compacted = useMemo(() => new Set(conversation.compactedEventIds), [conversation.compactedEventIds]);
   const tools = useMemo(() => new Map(conversation.tools.map((tool) => [tool.callEventId, tool])), [conversation.tools]);
-  const queue = useMemo(() => new Map(conversation.queue.map((item) => [item.queueItemId, item])), [conversation.queue]);
-  const interruptions = useMemo(() => new Map(conversation.interruptDeliveries.map((item) => [item.requestEventId, item])), [conversation.interruptDeliveries]);
+  const queue = useMemo(() => new Map(conversation.queue.map((entry) => [entry.queueItemId, entry])), [conversation.queue]);
+  const interruptions = useMemo(() => new Map(conversation.interruptDeliveries.map((entry) => [entry.requestEventId, entry])), [conversation.interruptDeliveries]);
+  const interactions = useMemo(() => new Map(conversation.interactions.map((entry) => [entry.request.id, entry])), [conversation.interactions]);
   const attributions = useMemo(() => {
     const result = new Map<string, ResponseAttribution>();
     let provider: string | undefined;
@@ -205,12 +289,8 @@ export function Conversation({ conversation, resolveBlobUrl, searchQuery, onCopy
     return result;
   }, [conversation.records]);
   return <>{conversation.records.map((record) => {
-    if (record.kind !== "event") return null;
-    if (record.event.type === "tool.result") return null;
-    if (record.event.type === "tool.call") {
-      const tool = tools.get(record.event.id);
-      return tool === undefined ? null : <ToolEntry key={record.event.id} tool={tool} />;
-    }
-    return <EventRow key={record.event.id} event={record.event} queue={queue.get(record.event.id)} interruption={interruptions.get(record.event.id)} attribution={attributions.get(record.event.id)} resolveBlobUrl={resolveBlobUrl} searchQuery={searchQuery} onCopyMessage={onCopyMessage} onForkMessage={onForkMessage} />;
+    if (record.kind === "unknown_event") return <EventRow key={record.event.id} item={presentUnknownEvent(record.event)} />;
+    if (compacted.has(record.event.id)) return null;
+    return <EventRow key={record.event.id} item={presentCanonicalEvent(record.event)} tool={record.event.type === "tool.call" ? tools.get(record.event.id) : undefined} queue={queue.get(record.event.id)} interruption={interruptions.get(record.event.id)} interaction={interactions.get(record.event.id)} attribution={attributions.get(record.event.id)} resolveBlobUrl={resolveBlobUrl} searchQuery={searchQuery} onCopyMessage={onCopyMessage} onForkMessage={onForkMessage} />;
   })}</>;
 }

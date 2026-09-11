@@ -15,8 +15,11 @@ function messageText(
 export function transcriptPromptBreakpoints(
   conversation: ConversationState,
 ): readonly { readonly id: string; readonly text: string }[] {
+  const compacted = new Set(conversation.compactedEventIds);
   return conversation.records.flatMap((record) =>
-    record.kind === "event" && record.event.type === "user.message"
+    record.kind === "event" &&
+    !compacted.has(record.event.id) &&
+    record.event.type === "user.message"
       ? [
           {
             id: record.event.id,
@@ -33,8 +36,10 @@ export function transcriptMessageMatches(
 ): readonly string[] {
   const needle = query.trim().toLocaleLowerCase();
   if (!needle) return [];
+  const compacted = new Set(conversation.compactedEventIds);
   return conversation.records.flatMap((record) =>
     record.kind === "event" &&
+    !compacted.has(record.event.id) &&
     (record.event.type === "user.message" || record.event.type === "assistant.message") &&
     messageText(record.event.payload.content).toLocaleLowerCase().includes(needle)
       ? [record.event.id]

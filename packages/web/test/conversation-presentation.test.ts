@@ -9,6 +9,7 @@ import type { ConversationState } from "@axl/sdk";
 import { Conversation } from "@axl/ui/react";
 
 const conversation = {
+  compactedEventIds: [],
   records: [
     {
       kind: "event",
@@ -119,6 +120,7 @@ const conversation = {
       },
     },
   ],
+  interactions: [],
   tools: [
     {
       callEventId: "tool",
@@ -174,4 +176,64 @@ test("renders message actions, attachments, delivery, truncation, and usage stat
   assert.match(html, /tok\/s/);
   assert.match(html, /Copy message/);
   assert.match(html, /Fork from this message/);
+});
+
+test("hides compacted records and renders the retained summary", () => {
+  const compacted = {
+    compactedEventIds: ["old-message"],
+    records: [
+      {
+        kind: "event",
+        event: {
+          id: "old-message",
+          timestamp: 1000,
+          type: "user.message",
+          payload: { content: [{ type: "text", text: "obsolete transcript text" }] },
+        },
+      },
+      {
+        kind: "event",
+        event: {
+          id: "compaction",
+          timestamp: 2000,
+          type: "context.compacted",
+          payload: {
+            summary: "## Retained context\n\nKeep the sandbox active.",
+            replacedEventIds: ["old-message"],
+          },
+        },
+      },
+      {
+        kind: "event",
+        event: {
+          id: "unsafe",
+          timestamp: 3000,
+          type: "sandbox.configured",
+          payload: { provider: "none", enforced: false, controls: [] },
+        },
+      },
+    ],
+    tools: [],
+    interactions: [],
+    operations: [],
+    uncertainShellOperations: [],
+    queue: [],
+    interruptDeliveries: [],
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+      costUsd: 0,
+    },
+    closed: false,
+  } as unknown as ConversationState;
+
+  const html = renderToStaticMarkup(createElement(Conversation, { conversation: compacted }));
+  assert.doesNotMatch(html, /obsolete transcript text/);
+  assert.match(html, /Context compacted/);
+  assert.match(html, /Retained context/);
+  assert.match(html, /Original history remains in the canonical session log/);
+  assert.match(html, /Sandbox is not enforced/);
 });

@@ -6,7 +6,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { BlobReference, CanonicalEvent } from "@axl/protocol";
-import { type ClientModelInfo, ConversationProjector } from "@axl/sdk";
+import {
+  type CanonicalPresentationItem,
+  type ClientModelInfo,
+  ConversationProjector,
+  presentCanonicalEvent,
+} from "@axl/sdk";
 
 import { renderMarkdown } from "./markdown.ts";
 import { sanitizeTerminalText, truncateToWidth, visibleWidth, wrapLine } from "./render.ts";
@@ -63,6 +68,10 @@ export const PLAIN_PALETTE: Palette = {
 };
 
 const EMPTY_ROWS: readonly string[] = Object.freeze([]);
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled presentation item: ${JSON.stringify(value)}`);
+}
 
 export const ANSI_PALETTE: Palette = {
   dim: (text) => `\x1b[2m${text}\x1b[22m`,
@@ -245,11 +254,12 @@ export class SessionView {
 
   apply(event: CanonicalEvent): readonly string[] {
     if (!this.projection.applyEvent(event)) return EMPTY_ROWS;
-    return this.present(event);
+    return this.present(presentCanonicalEvent(event));
   }
 
   /** Renders an event already reduced by the shared SDK subscription projector. */
-  present(event: CanonicalEvent): readonly string[] {
+  present(item: CanonicalPresentationItem): readonly string[] {
+    const event = item.event;
     const previousProvider = this.provider;
     const previousModel = this.model;
     const previousThinking = this.thinking;
@@ -276,6 +286,19 @@ export class SessionView {
     switch (event.type) {
       case "session.created":
       case "session.resumed":
+      case "interrupt.requested":
+      case "interrupt.updated":
+      case "config.request":
+      case "model.request_configured":
+      case "config.entitlement":
+      case "config.profile":
+      case "config.tools":
+      case "prompt.section":
+      case "tool.schema":
+      case "context.extension":
+      case "interaction.requested":
+      case "interaction.resolved":
+      case "child.result":
         return EMPTY_ROWS;
       case "user.message":
         return [
@@ -455,7 +478,7 @@ export class SessionView {
       case "session.closed":
         return this.wrap(dim(`· session ${event.payload.reason}`));
       default:
-        return EMPTY_ROWS;
+        return assertNever(event);
     }
   }
 

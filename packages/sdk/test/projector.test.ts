@@ -311,6 +311,7 @@ test("overview reads remain history-free for a 100,000-event session", () => {
   const full = projector.state;
   const {
     records,
+    compactedEventIds: _compactedEventIds,
     tools: _tools,
     interactions: _interactions,
     operations: _operations,
@@ -352,6 +353,7 @@ test("projects compacted membership across repeated summaries without deleting r
   for (const item of [old, first, recent, second]) projector.applyEvent(item);
   for (const item of [old, first, recent]) assert.equal(projector.isEventCompacted(item.id), true);
   assert.equal(projector.isEventCompacted(second.id), false);
+  assert.deepEqual(projector.state.compactedEventIds, [old.id, first.id, recent.id]);
   assert.equal(projector.state.records.length, 4);
   projector.replace([old]);
   assert.equal(projector.isEventCompacted(old.id), false);

@@ -34,6 +34,7 @@ test("session presentation handles fallbacks, Unicode search, and failed drafts"
 
 test("transcript navigation uses user prompts and searches messages", () => {
   const conversation = {
+    compactedEventIds: ["prompt-1"],
     records: [
       {
         kind: "event",
@@ -63,10 +64,10 @@ test("transcript navigation uses user prompts and searches messages", () => {
   } as unknown as ConversationState;
 
   assert.deepEqual(transcriptPromptBreakpoints(conversation), [
-    { id: "prompt-1", text: "First prompt" },
     { id: "prompt-2", text: "Attachment" },
   ]);
   assert.deepEqual(transcriptMessageMatches(conversation, "ANSWER"), ["answer-1"]);
+  assert.deepEqual(transcriptMessageMatches(conversation, "FIRST"), []);
 });
 
 test("session usage derives cache rate, throughput, and missing cost", () => {
