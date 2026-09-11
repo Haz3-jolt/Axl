@@ -183,9 +183,11 @@ If storage fails, live delivery continues and the subscription reports cursor pe
 - compaction and session errors
 - current transient activity
 
-`isEventCompacted(eventId)` identifies retained events replaced by a compaction summary without deleting records or losing usage totals. `orderPendingTurnInputs()` orders a client's pending input previews according to the daemon's steering-first contract. It does not own a queue or include pending inputs from other clients.
+`isEventCompacted(eventId)` identifies retained events replaced by a compaction summary without deleting records or losing usage totals. The same membership is exposed as `ConversationState.compactedEventIds` for renderers that consume immutable snapshots. `orderPendingTurnInputs()` orders a client's pending input previews according to the daemon's steering-first contract. It does not own a queue or include pending inputs from other clients.
 
-Clients may format that state for their platform. They must not maintain a second canonical reducer or manufacture canonical events.
+`EVENT_PRESENTATION_SURFACES` exhaustively classifies every canonical event as transcript, interaction, status, state, internal, or paired presentation data. `presentCanonicalEvent()` and `presentUnknownEvent()` provide the common presentation item boundary used by first-party renderers. Adding a protocol event therefore requires an explicit presentation classification before the SDK builds.
+
+Clients may format those items for their platform. They must not maintain a second canonical reducer or manufacture canonical events.
 
 ## Authentication
 

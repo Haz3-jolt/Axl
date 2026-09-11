@@ -109,6 +109,26 @@
 .response-warning strong { color:#c7b57f; font-size:12px; font-weight:550; }
 .response-warning small { margin-top:3px; color:#8f8772; font-size:11px; line-height:1.45; }
 .notice { margin:16px 0 0 44px; padding:10px 12px; border:1px solid var(--line-soft); border-radius:7px; color:var(--muted); font-size:12px; }
+.system-notice strong,.system-notice small { display:block; }
+.system-notice strong { color:var(--text-soft); font-weight:550; }
+.system-notice small { margin-top:3px; color:var(--subtle); line-height:1.45; }
+.system-notice.warning { border-color:rgba(177,155,99,.3); }
+.system-notice.warning strong { color:#c7b57f; }
+.system-notice.error { border-color:rgba(217,130,137,.3); }
+.shell-record,.compaction-record { width:calc(100% - 44px); max-width:720px; margin:14px 0 0 44px; border-top:1px solid var(--line-soft); color:var(--muted); font-size:12px; }
+.shell-record > summary,.compaction-record > summary { display:flex; min-height:38px; align-items:center; gap:8px; padding:4px 2px; list-style:none; cursor:pointer; }
+.shell-record > summary::-webkit-details-marker,.compaction-record > summary::-webkit-details-marker { display:none; }
+.shell-record > summary strong,.compaction-record > summary strong { color:#b9b9bf; font-weight:550; }
+.shell-record > summary code { min-width:0; overflow:hidden; color:#85858c; font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; text-overflow:ellipsis; white-space:nowrap; }
+.shell-record > .code-block { margin:2px 0 10px 26px; }
+.shell-record.failed > summary strong { color:#dca0a5; }
+.compaction-record > summary small { min-width:0; overflow:hidden; color:var(--subtle); text-overflow:ellipsis; white-space:nowrap; }
+.compaction-record > summary .tool-chevron { margin-left:auto; }
+.compaction-record[open] > summary .tool-chevron { transform:rotate(90deg); }
+.compaction-icon { color:#9295e7; font-size:15px; }
+.compaction-record > div { padding:2px 26px 12px; }
+.compaction-record > div p { margin:0; color:#b9b9bf; font-size:12px; line-height:1.6; white-space:pre-wrap; }
+.compaction-record > div small { display:block; margin-top:8px; color:var(--subtle); }
 .delivery-state { display:grid; grid-template-columns:20px minmax(0,1fr); align-items:start; gap:8px; margin:14px 0 2px 44px; color:var(--muted); }
 .delivery-icon { display:grid; width:20px; height:20px; place-items:center; color:#77777f; }
 .delivery-icon svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.4; }

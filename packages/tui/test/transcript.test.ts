@@ -17,7 +17,7 @@ import {
   parseEventId,
   parseSessionId,
 } from "@axl/protocol";
-import { ConversationProjector } from "@axl/sdk";
+import { ConversationProjector, presentCanonicalEvent } from "@axl/sdk";
 
 import { PLAIN_PALETTE, SessionView } from "../src/index.ts";
 
@@ -299,7 +299,7 @@ test("presents the language-neutral corpus from the shared SDK projection", () =
   const rows: string[] = [];
   for (const canonicalEvent of conformanceEvents) {
     assert.equal(projector.applyEvent(canonicalEvent), true);
-    rows.push(...view.present(canonicalEvent));
+    rows.push(...view.present(presentCanonicalEvent(canonicalEvent)));
   }
 
   assert.equal(projector.state.records.length, conformanceEvents.length);
