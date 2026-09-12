@@ -380,7 +380,7 @@ export async function startLocalDaemon(options: LocalDaemonOptions): Promise<Axl
         },
       });
       const tools = new kernel.ToolRegistry();
-      const overflowDirectory = join(stateDirectory, "tool-output");
+      const overflowDirectory = join(stateDirectory, "tool-output", sessionId);
       if (profile !== "chat") {
         tools.register(sandbox.makeShellTool({ cwd, overflowDirectory, policy }));
       }

@@ -24,6 +24,7 @@ import type {
   SessionId,
 } from "@axl/protocol";
 import { encodeCanonicalEvent, parseEvent, parseSessionId } from "@axl/protocol";
+import { eventBlobReferences } from "./event-blobs.ts";
 
 const MAX_ARTIFACT_BLOB_BYTES = 20 * 1024 * 1024;
 
@@ -59,18 +60,8 @@ async function syncFile(path: string): Promise<void> {
 function blobReferences(events: readonly CanonicalEvent[]): readonly BlobReference[] {
   const references = new Map<string, BlobReference>();
   for (const event of events) {
-    if (
-      event.type !== "user.message" &&
-      event.type !== "assistant.message" &&
-      event.type !== "queue.enqueued" &&
-      event.type !== "interrupt.requested" &&
-      event.type !== "user.shell" &&
-      event.type !== "tool.result"
-    ) {
-      continue;
-    }
-    for (const item of event.payload.content) {
-      if (item.type === "blob") references.set(item.blob.sha256, item.blob);
+    for (const reference of eventBlobReferences(event)) {
+      references.set(reference.sha256, reference);
     }
   }
   return [...references.values()].sort((left, right) => left.sha256.localeCompare(right.sha256));

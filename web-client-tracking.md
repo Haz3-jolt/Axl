@@ -35,7 +35,7 @@ The branch now contains the first complete local-session slice:
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
 - The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
-- Provider auth, staged Chat/Code creation, the shared command plane, active-turn delivery modes, attachments, and full protocol capability parity remain.
+- Provider auth, staged Chat/Code creation, the shared command plane, active-turn delivery modes, attachment upload, and full protocol capability parity remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
 
@@ -46,9 +46,23 @@ The visual foundation and ordinary local conversation path are mostly complete. 
 1. Finish and verify the current UI wave, including browser smoke, installed-package smoke, mobile review, and licensing checks.
 2. Implement the shared human-command plane and migrate `/reload`, `/model`, `/thinking`, and the remaining commands.
 3. Add staged Chat/Code creation and complete provider configuration and authentication flows.
-4. Add steer, follow-up, queue, interrupt-and-deliver, and interaction response flows.
-5. Add attachments, remaining session lifecycle operations, import/export, shell, workspace browsing, and checkpoints.
-6. Finish transcript search/actions, cost and truncation states, accessibility focus behavior, and parity tests.
+4. Add steer, follow-up, queue, and interrupt-and-deliver flows.
+5. Add attachment upload, remaining session lifecycle operations, import/export, shell, workspace browsing, and checkpoints.
+6. Finish accessibility focus behavior and parity tests.
+
+## Active rendering completion scratchpad
+
+Work in small vertical slices. Mark an item complete only after focused tests and the relevant package checks pass.
+
+1. [x] Render assistant Markdown safely in the shared React conversation renderer. Raw HTML is displayed as text and unsafe links are not activated.
+2. [x] Add specialized search, MCP, and workflow tool-card bodies while retaining the bounded generic fallback.
+3. [x] Show complete structured tool input and useful result metadata in expanded tool cards.
+4. [x] Add bounded SDK blob reads and production browser object URLs for message attachments.
+5. [x] Retrieve preserved truncated output through daemon-owned blobs rather than exposing new host paths to browser code.
+6. [x] Render actionable MCP interaction forms and approval prompts, with retryable typed `session.interaction.respond` submission.
+7. [x] Keep permission history visible, but do not add response controls without a daemon permission-response contract.
+8. [x] Keep paired queue, tool, and interaction events folded; expose bounded configuration and lifecycle history in the session usage panel.
+9. [x] Run focused unit/browser checks, production build and asset verification, the Impeccable detector, then `pnpm check`.
 
 ## CLI contract
 
@@ -300,7 +314,7 @@ The browser should support every capability granted to its connection.
 - [ ] `session.shell`
 - [ ] `session.reload`
 - [x] `session.configure`
-- [ ] `session.interaction.respond` for explicit MCP and `ask_user_question` interactions, not routine sandboxed tool approval
+- [x] `session.interaction.respond` for explicit MCP interactions, not routine sandboxed tool approval
 - [x] `session.subscribe`
 - [x] `session.activity`
 - [ ] `session.presence`
@@ -311,7 +325,7 @@ The browser should support every capability granted to its connection.
 - [ ] `session.blob.chunk`
 - [ ] `session.blob.commit`
 - [ ] `session.blob.abort`
-- [ ] `session.blob.read`
+- [x] `session.blob.read`
 - [ ] `session.workspace.list`
 - [ ] `session.workspace.read`
 - [x] `session.workspace.status`
@@ -343,10 +357,10 @@ Do not request a capability before its interaction, error behavior, and security
 - [x] Render projected user, assistant, thinking, error, compaction, and interruption records.
 - [x] Classify every canonical event through one exhaustive SDK presentation contract so new event types require an explicit rendering policy.
 - [x] Hide compacted transcript records while retaining canonical history, and expose the retained summary through an expandable shared React renderer.
-- [ ] Render shell, read, edit, search, fetch, MCP, workflow, and bounded generic tool cards. Shell, read, write, edit, fetch, and generic tools are implemented; specialized search, MCP, and workflow treatment remains.
-- [ ] Show complete structured tool inputs and useful result metadata when expanded.
-- [ ] Provide a bounded route to inspect truncated tool output. Truncation metadata and preserved-output location are rendered; browser retrieval remains.
-- [ ] Render image attachments as media rather than metadata text. Shared image and file presentation is implemented; production blob retrieval and upload remain.
+- [x] Render shell, read, edit, search, fetch, MCP, workflow, and bounded generic tool cards.
+- [x] Show complete structured tool inputs and useful result metadata when expanded.
+- [x] Provide a bounded route to inspect truncated tool output stored as a session-owned blob.
+- [ ] Render image attachments as media rather than metadata text. Shared rendering and production blob retrieval are implemented; browser upload remains.
 - [x] Show a clear incomplete-response warning for `stopReason: "length"`.
 - [x] Attribute cost to the provider, model, and thinking level that produced each usage record.
 - [x] Distinguish unknown cost from zero cost.

@@ -4,9 +4,13 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   type AxlClient,
+  type BlobReference,
   type ConnectionState,
   type ConversationState,
   type EventId,
+  type InteractionAction,
+  type JsonObject,
+  type ProjectedToolCall,
   type ProviderInventoryGroup,
   type SessionId,
   type SessionOpenResult,
@@ -67,6 +71,39 @@ const EMPTY_STATE: ConversationState = {
   closed: false,
 };
 
+function messageBlobs(conversation: ConversationState): readonly BlobReference[] {
+  const blobs = new Map<string, BlobReference>();
+  for (const record of conversation.records) {
+    if (record.kind !== "event" || (record.event.type !== "user.message" && record.event.type !== "assistant.message")) continue;
+    for (const item of record.event.payload.content) {
+      if (item.type === "blob") blobs.set(item.blob.sha256, item.blob);
+    }
+  }
+  return [...blobs.values()];
+}
+
+function sessionStateHistory(conversation: ConversationState): readonly { readonly id: string; readonly label: string; readonly detail: string; readonly timestamp: number }[] {
+  const history: Array<{ readonly id: string; readonly label: string; readonly detail: string; readonly timestamp: number }> = [];
+  for (const record of conversation.records) {
+    if (record.kind !== "event") continue;
+    const event = record.event;
+    switch (event.type) {
+      case "session.created": history.push({ id: event.id, label: "Session created", detail: event.payload.profile ?? "legacy", timestamp: event.timestamp }); break;
+      case "session.resumed": history.push({ id: event.id, label: "Session resumed", detail: "Runtime restored", timestamp: event.timestamp }); break;
+      case "session.closed": history.push({ id: event.id, label: "Session closed", detail: event.payload.reason, timestamp: event.timestamp }); break;
+      case "config.provider": history.push({ id: event.id, label: "Provider", detail: event.payload.providerId, timestamp: event.timestamp }); break;
+      case "config.model": history.push({ id: event.id, label: "Model", detail: event.payload.modelId, timestamp: event.timestamp }); break;
+      case "config.profile": history.push({ id: event.id, label: "Profile", detail: event.payload.profile, timestamp: event.timestamp }); break;
+      case "config.thinking": history.push({ id: event.id, label: "Thinking", detail: event.payload.clamped ? `${event.payload.requested} → ${event.payload.effective}` : event.payload.effective, timestamp: event.timestamp }); break;
+      case "config.dialect": history.push({ id: event.id, label: "Tool dialect", detail: `${event.payload.dialectId} · ${event.payload.reason.replaceAll("_", " ")}`, timestamp: event.timestamp }); break;
+      case "config.tools": history.push({ id: event.id, label: "Web tools", detail: `search ${event.payload.webSearch ? "on" : "off"} · fetch ${event.payload.webFetch ? "on" : "off"}`, timestamp: event.timestamp }); break;
+      case "sandbox.configured": history.push({ id: event.id, label: "Sandbox", detail: event.payload.enforced ? `${event.payload.provider} enforced` : "not enforced", timestamp: event.timestamp }); break;
+      default: break;
+    }
+  }
+  return history.slice(-20).reverse();
+}
+
 export interface WebPreview {
   readonly sessions: readonly SessionSummary[];
   readonly opened: SessionOpenResult;
@@ -74,6 +111,7 @@ export interface WebPreview {
   readonly modelCatalog?: readonly ModelChoice[];
   readonly providers?: readonly ProviderInventoryGroup[];
   readonly resolveBlobUrl?: (sha256: string) => string | undefined;
+  readonly readBlob?: (sha256: string) => Promise<Uint8Array>;
   readonly workspace?: WorkspaceReview;
 }
 
@@ -111,7 +149,10 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const [connection, setConnection] = useState<ConnectionState>(preview ? "connected" : "connecting");
   const [error, setError] = useState<string>();
   const [actionNotice, setActionNotice] = useState<string>();
+  const [blobUrls, setBlobUrls] = useState<ReadonlyMap<string, string>>(new Map());
   const subscription = useRef<SessionSubscription | undefined>(undefined);
+  const blobUrlCache = useRef(new Map<string, string>());
+  const blobUrlSession = useRef<string | undefined>(undefined);
   const selectionGeneration = useRef(0);
   const workspaceGeneration = useRef(0);
   const transcript = useRef<HTMLDivElement>(null);
@@ -233,6 +274,43 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     };
   }, [preview]);
 
+  useEffect(() => {
+    const sessionId = opened?.sessionId;
+    if (blobUrlSession.current !== sessionId) {
+      for (const url of blobUrlCache.current.values()) URL.revokeObjectURL(url);
+      blobUrlCache.current.clear();
+      blobUrlSession.current = sessionId;
+      setBlobUrls(new Map());
+    }
+    if (preview !== undefined || client === undefined || sessionId === undefined || !client.connection.grantedCapabilities.includes("session.blob.read")) return;
+    const activeSessionId = sessionId;
+    let cancelled = false;
+    const controller = new AbortController();
+    for (const reference of messageBlobs(conversation)) {
+      if (blobUrlCache.current.has(reference.sha256)) continue;
+      void client.readBlob(activeSessionId, reference, { signal: controller.signal }).then((bytes) => {
+        const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: reference.mediaType }));
+        if (cancelled || blobUrlSession.current !== activeSessionId) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        blobUrlCache.current.set(reference.sha256, url);
+        setBlobUrls(new Map(blobUrlCache.current));
+      }).catch((cause: unknown) => {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not load an attachment");
+      });
+    }
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [client, conversation.records, opened?.sessionId, preview]);
+
+  useEffect(() => () => {
+    for (const url of blobUrlCache.current.values()) URL.revokeObjectURL(url);
+    blobUrlCache.current.clear();
+  }, []);
+
   useEffect(() => { transcript.current?.scrollTo({ top: transcript.current.scrollHeight }); }, [conversation.records.length, conversation.activity?.sequence]);
   useEffect(() => setTranscriptMatch(-1), [transcriptQuery]);
   useEffect(() => {
@@ -323,6 +401,32 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       showActionNotice("Message copied");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not copy message");
+    }
+  };
+
+  const respondInteraction = async (interactionId: string, action: InteractionAction, content?: JsonObject): Promise<void> => {
+    if (preview !== undefined) {
+      showActionNotice(`Interaction ${action}`);
+      return;
+    }
+    if (!client || !opened) throw new Error("The session is not connected");
+    await client.request("session.interaction.respond", {
+      sessionId: opened.sessionId,
+      interactionId,
+      action,
+      ...(content === undefined ? {} : { content }),
+    });
+  };
+
+  const loadFullToolOutput = async (_tool: ProjectedToolCall, blob: BlobReference): Promise<string> => {
+    const bytes = preview?.readBlob === undefined
+      ? client && opened ? await client.readBlob(opened.sessionId, blob) : undefined
+      : await preview.readBlob(blob.sha256);
+    if (bytes === undefined) throw new Error("Complete output is unavailable");
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (cause) {
+      throw new Error("Complete output is not valid UTF-8 text", { cause });
     }
   };
 
@@ -529,6 +633,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const promptBreakpoints = useMemo(() => transcriptPromptBreakpoints(conversation), [conversation]);
   const transcriptMatches = useMemo(() => transcriptMessageMatches(conversation, transcriptQuery), [conversation, transcriptQuery]);
   const usageStats = useMemo(() => sessionUsageStats(conversation), [conversation]);
+  const stateHistory = useMemo(() => sessionStateHistory(conversation), [conversation]);
   const connected = connection === "connected";
   const canConfigure = preview !== undefined || client?.connection.grantedCapabilities.includes("session.configure") === true;
 
@@ -575,10 +680,10 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     <section className="workspace">
       <header className="topbar"><div><span className="crumb">Sessions</span><span className="separator">›</span><strong>{opened ? currentTitle : "Select a session"}</strong></div><div className="top-actions"><button className={controlCenter === "settings" ? "settings-toggle active" : "settings-toggle"} aria-label="Web settings" aria-expanded={controlCenter !== undefined} onClick={() => { setUsageOpen(false); setTranscriptSearchOpen(false); setControlCenter("settings"); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.25" /><path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.6 3.6l1.05 1.05M11.35 11.35l1.05 1.05M12.4 3.6l-1.05 1.05M4.65 11.35 3.6 12.4" /></svg></button>{opened && <button className={usageOpen ? "usage-toggle active" : "usage-toggle"} aria-label="Show session usage" aria-expanded={usageOpen} onClick={() => { setControlCenter(undefined); setTranscriptSearchOpen(false); setUsageOpen((open) => !open); }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 12V8M8 12V4M13 12V6" /></svg><span>Usage</span></button>}{opened && <button className={transcriptSearchOpen ? "transcript-search-toggle active" : "transcript-search-toggle"} aria-label="Search transcript" aria-expanded={transcriptSearchOpen} onClick={() => { setControlCenter(undefined); setUsageOpen(false); setTranscriptSearchOpen((open) => !open); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" /></svg></button>}{workspaceAvailable && opened && <button className={changesOpen ? "changes-toggle active" : "changes-toggle"} onClick={toggleChanges} aria-expanded={changesOpen}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10M3 8h10M3 12.5h10M5 2v3M11 6.5v3M7 11v3" /></svg><span>Changes</span>{workspaceReview && <b>{workspaceReview.status.entries.length}</b>}</button>}</div></header>
       {opened && conversation.sandbox?.enforced === false && <div className="unsafe-banner" role="alert"><strong>Unsafe session</strong><span>Sandbox enforcement is disabled. Tools run with your host permissions.</span></div>}
-      {usageOpen && <section className="session-usage" aria-label="Session usage"><header><strong>Session usage</strong><button type="button" aria-label="Close session usage" onClick={() => setUsageOpen(false)}>×</button></header><p>{conversation.provider && conversation.model ? `${conversation.provider} / ${conversation.model}` : conversation.model ?? "No model selected"}{conversation.thinking ? ` · ${conversation.thinking}` : ""}</p><dl><div><dt>Input</dt><dd>{compactNumber(conversation.usage.inputTokens)}</dd></div><div><dt>Output</dt><dd>{compactNumber(conversation.usage.outputTokens)}</dd></div><div><dt>Cache read</dt><dd>{compactNumber(conversation.usage.cacheReadTokens)}</dd></div><div><dt>Cache hit</dt><dd>{usageStats.cacheHitPercent.toFixed(1)}%</dd></div><div><dt>Reasoning</dt><dd>{compactNumber(conversation.usage.reasoningTokens)}</dd></div><div><dt>Throughput</dt><dd>{usageStats.tokensPerSecond === undefined ? "Unknown" : `${usageStats.tokensPerSecond.toFixed(1)} tok/s`}</dd></div><div><dt>Recorded cost</dt><dd>${conversation.usage.costUsd.toFixed(4)}</dd></div></dl>{usageStats.unknownCostResponses > 0 && <small>{usageStats.unknownCostResponses} response{usageStats.unknownCostResponses === 1 ? " has" : "s have"} no cost data.</small>}</section>}
+      {usageOpen && <section className="session-usage" aria-label="Session usage"><header><strong>Session usage</strong><button type="button" aria-label="Close session usage" onClick={() => setUsageOpen(false)}>×</button></header><p>{conversation.provider && conversation.model ? `${conversation.provider} / ${conversation.model}` : conversation.model ?? "No model selected"}{conversation.thinking ? ` · ${conversation.thinking}` : ""}</p><dl><div><dt>Input</dt><dd>{compactNumber(conversation.usage.inputTokens)}</dd></div><div><dt>Output</dt><dd>{compactNumber(conversation.usage.outputTokens)}</dd></div><div><dt>Cache read</dt><dd>{compactNumber(conversation.usage.cacheReadTokens)}</dd></div><div><dt>Cache hit</dt><dd>{usageStats.cacheHitPercent.toFixed(1)}%</dd></div><div><dt>Reasoning</dt><dd>{compactNumber(conversation.usage.reasoningTokens)}</dd></div><div><dt>Throughput</dt><dd>{usageStats.tokensPerSecond === undefined ? "Unknown" : `${usageStats.tokensPerSecond.toFixed(1)} tok/s`}</dd></div><div><dt>Recorded cost</dt><dd>${conversation.usage.costUsd.toFixed(4)}</dd></div></dl>{usageStats.unknownCostResponses > 0 && <small>{usageStats.unknownCostResponses} response{usageStats.unknownCostResponses === 1 ? " has" : "s have"} no cost data.</small>}{stateHistory.length > 0 && <details className="state-history"><summary>Configuration history</summary><ol>{stateHistory.map((entry) => <li key={entry.id}><span><strong>{entry.label}</strong><small>{entry.detail}</small></span><time>{new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></li>)}</ol></details>}</section>}
       {transcriptSearchOpen && <div className="transcript-search" role="search"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" /></svg><input autoFocus type="search" aria-label="Search transcript" placeholder="Search transcript" value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); moveTranscriptMatch(event.shiftKey ? -1 : 1); } }} /><span>{transcriptQuery.trim() ? `${transcriptMatches.length === 0 ? 0 : Math.max(0, transcriptMatch + 1)} / ${transcriptMatches.length}` : ""}</span><button type="button" aria-label="Previous result" disabled={transcriptMatches.length === 0} onClick={() => moveTranscriptMatch(-1)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4" /></svg></button><button type="button" aria-label="Next result" disabled={transcriptMatches.length === 0} onClick={() => moveTranscriptMatch(1)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></button><button type="button" aria-label="Close transcript search" onClick={() => { setTranscriptSearchOpen(false); setTranscriptQuery(""); }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg></button></div>}
       <div className="thread" ref={transcript} onScroll={trackTranscriptScroll}>
-        {opened ? <div className="thread-inner"><div className="thread-title"><h1>{currentTitle}</h1><p>{opened.cwd}</p></div><Suspense fallback={null}><Conversation conversation={conversation} searchQuery={transcriptQuery} resolveBlobUrl={preview?.resolveBlobUrl === undefined ? undefined : (blob) => preview.resolveBlobUrl?.(blob.sha256)} onCopyMessage={(text) => void copyMessage(text)} onForkMessage={preview !== undefined || client?.connection.grantedCapabilities.includes("session.fork") === true ? (eventId) => void forkMessage(eventId) : undefined} /></Suspense>{conversation.activity && <article className="message assistant live"><span className="avatar axl">◆</span><div><header><strong>Axl</strong><time>working</time></header>{conversation.activity.thinking && <details><summary>Thinking</summary><p>{conversation.activity.thinking}</p></details>}<p className="waiting-response">{conversation.activity.text || "Waiting for response"}<span className="waiting-dots" aria-hidden="true"><i></i><i></i><i></i></span></p></div></article>}</div> : <div className="empty"><span className="brand-mark large">◆</span><h1>No session selected</h1><p>Resume a durable session or start one in this workspace.</p><button onClick={() => void createSession()}>New session</button></div>}
+        {opened ? <div className="thread-inner"><div className="thread-title"><h1>{currentTitle}</h1><p>{opened.cwd}</p></div><Suspense fallback={null}><Conversation conversation={conversation} searchQuery={transcriptQuery} resolveBlobUrl={(blob) => preview?.resolveBlobUrl?.(blob.sha256) ?? blobUrls.get(blob.sha256)} loadFullToolOutput={preview?.readBlob !== undefined || client?.connection.grantedCapabilities.includes("session.blob.read") === true ? loadFullToolOutput : undefined} onRespondInteraction={preview !== undefined || client?.connection.grantedCapabilities.includes("session.interaction.respond") === true ? respondInteraction : undefined} onCopyMessage={(text) => void copyMessage(text)} onForkMessage={preview !== undefined || client?.connection.grantedCapabilities.includes("session.fork") === true ? (eventId) => void forkMessage(eventId) : undefined} /></Suspense>{conversation.activity && <article className="message assistant live"><span className="avatar axl">◆</span><div><header><strong>Axl</strong><time>working</time></header>{conversation.activity.thinking && <details><summary>Thinking</summary><p>{conversation.activity.thinking}</p></details>}<p className="waiting-response">{conversation.activity.text || "Waiting for response"}<span className="waiting-dots" aria-hidden="true"><i></i><i></i><i></i></span></p></div></article>}</div> : <div className="empty"><span className="brand-mark large">◆</span><h1>No session selected</h1><p>Resume a durable session or start one in this workspace.</p><button onClick={() => void createSession()}>New session</button></div>}
       </div>
       {promptBreakpoints.length > 1 && <nav className={`prompt-breakpoints${transcriptNavigationVisible || transcriptSearchOpen ? " visible" : ""}`} aria-label="Conversation prompts" onMouseEnter={() => { if (transcriptNavigationTimer.current !== undefined) clearTimeout(transcriptNavigationTimer.current); setTranscriptNavigationVisible(true); }} onMouseLeave={() => setTranscriptNavigationVisible(false)}>{promptBreakpoints.map((point) => <button type="button" key={point.id} className={point.id === activePromptId ? "active" : ""} title={point.text} onClick={() => jumpToMessage(point.id)}><span>{point.text}</span></button>)}</nav>}
       {!connected && <div className="connection-banner" role="status" aria-live="polite"><span>{connection === "disconnected" ? "Connection to the daemon was lost." : connection === "incompatible" ? "The browser and daemon versions are incompatible." : "Connecting to the daemon…"}</span>{connection === "disconnected" && client !== undefined && <button onClick={() => void reconnect()}>Reconnect</button>}</div>}

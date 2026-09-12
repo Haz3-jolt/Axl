@@ -21,6 +21,8 @@ import { redactEventForStorage } from "./redaction.ts";
 export interface EventLogOptions {
   /** Read at each append so rotating credentials are redacted before persistence. */
   readonly secretValues?: readonly string[] | (() => readonly string[]);
+  /** Daemon-owned transformation applied before canonical encoding and persistence. */
+  readonly prepareEvent?: (event: CanonicalEvent) => CanonicalEvent | Promise<CanonicalEvent>;
   /** Daemon-owned transformation available only when canonical encoding exceeds the limit. */
   readonly prepareOversizedEvent?: (
     event: CanonicalEvent,
@@ -225,6 +227,9 @@ export class JsonlEventLog {
   readonly path: string;
   readonly sessionId: SessionId;
   private readonly secretValues: () => readonly string[];
+  private readonly prepareEvent:
+    | ((event: CanonicalEvent) => CanonicalEvent | Promise<CanonicalEvent>)
+    | undefined;
   private readonly prepareOversizedEvent:
     | ((event: CanonicalEvent) => CanonicalEvent | Promise<CanonicalEvent>)
     | undefined;
@@ -236,6 +241,7 @@ export class JsonlEventLog {
     const secretValues = options.secretValues;
     this.secretValues =
       typeof secretValues === "function" ? secretValues : () => secretValues ?? [];
+    this.prepareEvent = options.prepareEvent;
     this.prepareOversizedEvent = options.prepareOversizedEvent;
   }
 
@@ -267,7 +273,14 @@ export class JsonlEventLog {
     }
 
     return this.enqueue(async () => {
-      let event = redacted;
+      let event =
+        this.prepareEvent === undefined ? redacted : parseEvent(await this.prepareEvent(redacted));
+      if (event.sessionId !== this.sessionId) {
+        throw new ProtocolValidationError(
+          "event.sessionId",
+          `must match log session ${this.sessionId}`,
+        );
+      }
       let encoded: Uint8Array;
       try {
         encoded = encodeCanonicalEvent(event);

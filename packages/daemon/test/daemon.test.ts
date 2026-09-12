@@ -29,6 +29,7 @@ import { promisify } from "node:util";
 
 import { JsonlEventLog, type ModelPort, type ModelRetryOptions, ToolRegistry } from "@axl/kernel";
 import type {
+  BlobReference,
   CanonicalEvent,
   ModelStreamEvent,
   SessionActivityFrame,
@@ -142,31 +143,32 @@ async function startDaemon(
   deliveryOptions: {
     readonly cursorLifetimeMs?: number;
     readonly retry?: ModelRetryOptions | false;
-    readonly tools?: () => ToolRegistry;
+    readonly tools?: (sessionId: SessionId, dataDirectory: string) => ToolRegistry;
   } = {},
 ): Promise<{ daemon: AxlDaemon; socketPath: string; dataDirectory: string; cwd: string }> {
   const directory = await mkdtemp(join(tmpdir(), "axl-daemon-"));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const cwd = await realpath(directory);
   const socketPath = join(directory, "axl.sock");
+  const dataDirectory = join(directory, "data");
   const { retry, tools, ...daemonOptions } = deliveryOptions;
   const daemon = new AxlDaemon({
     socketPath,
-    dataDirectory: join(directory, "data"),
+    dataDirectory,
     securityMode,
     ...(sandboxProvider === undefined ? {} : { sandboxProvider }),
     ...(sandboxImage === undefined ? {} : { sandboxImage }),
     ...daemonOptions,
-    runtime: () => ({
+    runtime: ({ sessionId }) => ({
       model: port,
-      tools: tools?.() ?? new ToolRegistry(),
+      tools: tools?.(sessionId, dataDirectory) ?? new ToolRegistry(),
       system: "You are Axl.",
       ...(retry === undefined ? {} : { retry }),
     }),
   });
   await daemon.start();
   context.after(() => daemon.stop());
-  return { daemon, socketPath, dataDirectory: join(directory, "data"), cwd };
+  return { daemon, socketPath, dataDirectory, cwd };
 }
 
 function types(events: readonly CanonicalEvent[]): readonly string[] {
@@ -3606,6 +3608,83 @@ test("routes runtime interaction requests to an attached client", async (context
       (event) => event.type === "interaction.resolved" && event.operationId === responseKey,
     ).length,
     1,
+  );
+});
+
+test("stores truncated tool output as a session-owned blob", async (context) => {
+  let calls = 0;
+  const model: ModelPort = {
+    stream() {
+      calls += 1;
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        if (calls === 1) {
+          yield { type: "tool_call", callId: "overflow-1", name: "overflow", input: {} };
+          yield { type: "completed", stopReason: "tool_use", usage };
+        } else {
+          yield { type: "text_delta", text: "done" };
+          yield { type: "completed", stopReason: "stop", usage };
+        }
+      })();
+    },
+  };
+  const { socketPath, dataDirectory, cwd } = await startDaemon(
+    context,
+    model,
+    "sandboxed",
+    undefined,
+    undefined,
+    {
+      tools: (sessionId, stateDirectory) => {
+        const tools = new ToolRegistry();
+        tools.register({
+          name: "overflow",
+          description: "Return preserved output",
+          inputSchema: { type: "object" },
+          async execute() {
+            const directory = join(stateDirectory, "tool-output", sessionId);
+            const path = join(directory, "output.log");
+            await mkdir(directory, { recursive: true });
+            await writeFile(path, "complete output");
+            return {
+              content: [{ type: "text", text: `truncated; complete output preserved at ${path}` }],
+              isError: false,
+              details: { truncated: true, outputBytes: 15, overflowPath: path },
+            };
+          },
+        });
+        return tools;
+      },
+    },
+  );
+  const client = await connectUnixClient(socketPath);
+  context.after(() => client.close());
+  const created = await client.request("session.create", { cwd });
+  await client.request("session.send", {
+    sessionId: created.sessionId,
+    delivery: "prompt",
+    content: [{ type: "text", text: "run" }],
+  });
+  const { events } = await subscribeAll(client, created.sessionId);
+  const result = events.find((event) => event.type === "tool.result");
+  assert.equal(result?.type, "tool.result");
+  if (result?.type !== "tool.result") return;
+  const details = result.payload.details as { overflowBlob?: BlobReference; overflowPath?: string };
+  assert.equal(details.overflowPath, undefined);
+  assert.ok(details.overflowBlob);
+  assert.equal(
+    result.payload.content[0]?.type === "text"
+      ? result.payload.content[0].text.includes(dataDirectory)
+      : true,
+    false,
+  );
+  assert.equal(
+    new TextDecoder().decode(await client.readBlob(created.sessionId, details.overflowBlob)),
+    "complete output",
+  );
+  const cloned = await client.request("session.clone", { sessionId: created.sessionId });
+  assert.equal(
+    new TextDecoder().decode(await client.readBlob(cloned.sessionId, details.overflowBlob)),
+    "complete output",
   );
 });
 

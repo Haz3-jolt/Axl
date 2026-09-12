@@ -101,6 +101,7 @@ export function checkWorkspace(root: string): string[] {
     sdkName,
     "@fontsource-variable/inter",
     "highlight.js",
+    "marked",
     "react",
   ]);
   const tuiRuntimeAllowed = new Set([
