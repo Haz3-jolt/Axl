@@ -135,6 +135,15 @@ h1 { margin:0; font-size:23px; line-height:1.25; letter-spacing:-.025em; }
 .slash-commands button:disabled { opacity:.45; cursor:not-allowed; }
 .slash-commands strong { min-width:92px; color:var(--text); font:500 12px/1.4 var(--font-mono); }
 .slash-commands span { color:var(--muted); font-size:11px; }
+.attachment-input { display:none; }
+.composer-attachments { display:flex; max-height:120px; margin:-4px 0 10px; flex-wrap:wrap; gap:6px; overflow:auto; }
+.composer-attachment { display:grid; min-width:180px; max-width:280px; grid-template-columns:20px minmax(0,1fr) auto; align-items:center; gap:7px; padding:7px 8px; border:1px solid var(--line-soft); border-radius:7px; background:var(--raised); }
+.composer-attachment.failed { border-color:#724444; }
+.attachment-glyph { color:#9699e8; font-size:16px; }
+.attachment-copy { display:flex; min-width:0; flex-direction:column; gap:1px; }
+.attachment-copy strong { overflow:hidden; color:var(--text-soft); font-size:11px; font-weight:550; text-overflow:ellipsis; white-space:nowrap; }
+.attachment-copy small { overflow:hidden; color:var(--subtle); font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
+.composer-attachment button { padding:2px 5px; border:0; background:transparent; color:var(--muted); font-size:11px; cursor:pointer; }
 .pending-inputs { display:flex; max-height:88px; margin:-4px 0 10px; flex-direction:column; gap:5px; overflow:auto; }
 .pending-inputs div { display:flex; min-width:0; gap:8px; padding:6px 8px; border-radius:6px; background:var(--raised); font-size:11px; }
 .pending-inputs strong { flex:0 0 auto; color:#989bea; font-weight:550; }
@@ -142,6 +151,10 @@ h1 { margin:0; font-size:23px; line-height:1.25; letter-spacing:-.025em; }
 .composer textarea { display:block; width:100%; min-height:64px; resize:none; border:0; outline:0; background:transparent; color:var(--text); font-size:14px; line-height:1.5; }
 .composer textarea::placeholder { color:var(--muted); }
 .composer-footer { position:relative; display:flex; align-items:center; gap:10px; padding-top:12px; border-top:1px solid var(--line-soft); color:var(--muted); font-size:11px; }
+.attach-button { display:grid; width:26px; height:26px; flex:0 0 26px; place-items:center; padding:0; border:0; border-radius:5px; background:transparent; color:var(--muted); cursor:pointer; }
+.attach-button:hover:not(:disabled),.attach-button:focus-visible { background:var(--selected); color:var(--text); outline:0; }
+.attach-button:disabled { opacity:.38; cursor:not-allowed; }
+.attach-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.4; }
 .delivery-hint { overflow:hidden; color:var(--subtle); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
 .delivery-status { color:var(--subtle); font-size:10px; }
 .model-picker summary { display:flex; align-items:center; gap:6px; min-width:0; padding:5px 2px; color:var(--muted); font-size:12px; cursor:pointer; list-style:none; }
