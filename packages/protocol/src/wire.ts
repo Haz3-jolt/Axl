@@ -627,6 +627,7 @@ export type CapabilityId = string;
 export type ClientKind = string;
 
 export const WIRE_CAPABILITIES = [
+  "command.list",
   "session.create",
   "session.list",
   "session.resume",
@@ -702,6 +703,34 @@ export interface RequestCancelResult {
   readonly cancellationRequested: boolean;
 }
 
+export type CommandContext = "global" | "session" | "either";
+
+export interface CommandDescriptor {
+  readonly id: string;
+  readonly name: string;
+  readonly aliases: readonly string[];
+  readonly description: string;
+  readonly context: CommandContext;
+  readonly argument: {
+    readonly required: boolean;
+    readonly hint?: string;
+  };
+  readonly requiredCapabilities: readonly CapabilityId[];
+  readonly availability:
+    | { readonly state: "available" }
+    | { readonly state: "unavailable"; readonly reason: string };
+  readonly extensionId?: string;
+}
+
+export interface CommandListParams {
+  readonly sessionId?: SessionId;
+}
+
+export interface CommandListResult {
+  readonly generation: string;
+  readonly commands: readonly CommandDescriptor[];
+}
+
 export interface RpcMethodMap {
   readonly "daemon.info": {
     readonly params: Record<string, never>;
@@ -718,6 +747,10 @@ export interface RpcMethodMap {
   readonly "request.cancel": {
     readonly params: RequestCancelParams;
     readonly result: RequestCancelResult;
+  };
+  readonly "command.list": {
+    readonly params: CommandListParams;
+    readonly result: CommandListResult;
   };
   readonly "provider.list": {
     readonly params: ProviderListParams;
@@ -1522,6 +1555,17 @@ export function parseWireRequest(value: unknown): WireRequest {
       params: { requestId: nonNegativeInteger(params.requestId, "request.params.requestId") },
     };
   }
+  if (method === "command.list") {
+    exact(params, "request.params", ["sessionId"]);
+    return {
+      ...base,
+      method,
+      params:
+        params.sessionId === undefined
+          ? {}
+          : { sessionId: parseSessionId(params.sessionId, "request.params.sessionId") },
+    };
+  }
   if (
     method === "provider.list" ||
     method === "provider.catalog.refresh" ||
@@ -2240,6 +2284,121 @@ function parseJsonObject(value: unknown, path: string): JsonObject {
   return result as JsonObject;
 }
 
+function commandName(value: unknown, path: string): string {
+  const name = boundedString(value, path, 64);
+  if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name)) {
+    throw new ProtocolValidationError(path, "must be a lowercase command name");
+  }
+  return name;
+}
+
+export function parseCommandListResult(value: unknown, path = "commandList"): CommandListResult {
+  const result = object(value, path);
+  exact(result, path, ["generation", "commands"]);
+  if (!Array.isArray(result.commands) || result.commands.length > 128) {
+    throw new ProtocolValidationError(`${path}.commands`, "must contain at most 128 commands");
+  }
+  const ids = new Set<string>();
+  const reserved = new Set<string>();
+  const commands = result.commands.map((value, index): CommandDescriptor => {
+    const itemPath = `${path}.commands[${index}]`;
+    const command = object(value, itemPath);
+    exact(command, itemPath, [
+      "id",
+      "name",
+      "aliases",
+      "description",
+      "context",
+      "argument",
+      "requiredCapabilities",
+      "availability",
+      "extensionId",
+    ]);
+    const id = boundedString(command.id, `${itemPath}.id`, 128);
+    if (ids.has(id)) throw new ProtocolValidationError(`${itemPath}.id`, "must be unique");
+    ids.add(id);
+    const name = commandName(command.name, `${itemPath}.name`);
+    const aliases = stringArray(command.aliases, `${itemPath}.aliases`, 8).map(
+      (alias, aliasIndex) => commandName(alias, `${itemPath}.aliases[${aliasIndex}]`),
+    );
+    for (const candidate of [name, ...aliases]) {
+      if (reserved.has(candidate)) {
+        throw new ProtocolValidationError(
+          `${itemPath}.name`,
+          `duplicates command name or alias ${candidate}`,
+        );
+      }
+      reserved.add(candidate);
+    }
+    if (
+      command.context !== "global" &&
+      command.context !== "session" &&
+      command.context !== "either"
+    ) {
+      throw new ProtocolValidationError(
+        `${itemPath}.context`,
+        "must be global, session, or either",
+      );
+    }
+    const argument = object(command.argument, `${itemPath}.argument`);
+    exact(argument, `${itemPath}.argument`, ["required", "hint"]);
+    if (typeof argument.required !== "boolean") {
+      throw new ProtocolValidationError(`${itemPath}.argument.required`, "must be a boolean");
+    }
+    const availability = object(command.availability, `${itemPath}.availability`);
+    exact(availability, `${itemPath}.availability`, ["state", "reason"]);
+    if (availability.state !== "available" && availability.state !== "unavailable") {
+      throw new ProtocolValidationError(
+        `${itemPath}.availability.state`,
+        "must be available or unavailable",
+      );
+    }
+    if (availability.state === "available" && availability.reason !== undefined) {
+      throw new ProtocolValidationError(
+        `${itemPath}.availability.reason`,
+        "is not allowed when available",
+      );
+    }
+    if (availability.state === "unavailable" && availability.reason === undefined) {
+      throw new ProtocolValidationError(
+        `${itemPath}.availability.reason`,
+        "is required when unavailable",
+      );
+    }
+    return {
+      id,
+      name,
+      aliases,
+      description: boundedString(command.description, `${itemPath}.description`, 512),
+      context: command.context,
+      argument: {
+        required: argument.required,
+        ...(argument.hint === undefined
+          ? {}
+          : { hint: boundedString(argument.hint, `${itemPath}.argument.hint`, 128) }),
+      },
+      requiredCapabilities: capabilityArray(
+        command.requiredCapabilities,
+        `${itemPath}.requiredCapabilities`,
+      ),
+      availability:
+        availability.state === "available"
+          ? { state: "available" }
+          : {
+              state: "unavailable",
+              reason: boundedString(availability.reason, `${itemPath}.availability.reason`, 512),
+            },
+      ...(command.extensionId === undefined
+        ? {}
+        : { extensionId: boundedString(command.extensionId, `${itemPath}.extensionId`, 128) }),
+    };
+  });
+  return {
+    generation: boundedString(result.generation, `${path}.generation`, 128),
+    commands,
+  };
+}
+
 export function parseRpcResult<Method extends RpcMethod>(
   method: Method,
   value: unknown,
@@ -2305,6 +2464,8 @@ export function parseRpcResult<Method extends RpcMethod>(
     parsed = {};
   } else if (method === "request.cancel") {
     parsed = parseBooleanResult(value, path, "cancellationRequested");
+  } else if (method === "command.list") {
+    parsed = parseCommandListResult(value, path);
   } else if (method === "provider.list") {
     parsed = parseProviderListResult(value);
   } else if (method === "provider.catalog.refresh") {
@@ -2648,6 +2809,7 @@ export const RPC_METHODS = [
   "connection.initialize",
   "connection.ping",
   "request.cancel",
+  "command.list",
   "provider.list",
   "provider.catalog.refresh",
   "provider.auth.status",
@@ -2738,6 +2900,7 @@ export const RPC_METHOD_ERROR_CODES = {
   ],
   "connection.ping": [],
   "request.cancel": [],
+  "command.list": [],
   "provider.list": ["provider_not_found", "provider_disabled", "catalog_refresh_failed"],
   "provider.catalog.refresh": [
     "provider_not_found",

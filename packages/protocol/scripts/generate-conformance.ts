@@ -180,6 +180,7 @@ const params = {
   },
   "connection.ping": {},
   "request.cancel": { requestId: 7 },
+  "command.list": { sessionId },
   "provider.list": {},
   "provider.catalog.refresh": { providerId: "provider-1" },
   "provider.auth.status": { providerId: "provider-1" },
@@ -277,6 +278,21 @@ const results = {
   },
   "connection.ping": {},
   "request.cancel": { cancellationRequested: true },
+  "command.list": {
+    generation: "builtin-1",
+    commands: [
+      {
+        id: "core.reload",
+        name: "reload",
+        aliases: [],
+        description: "Reload project instructions, prompt, and tools",
+        context: "session",
+        argument: { required: false },
+        requiredCapabilities: ["session.reload"],
+        availability: { state: "available" },
+      },
+    ],
+  },
   "provider.list": {
     providers: [
       {

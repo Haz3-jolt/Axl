@@ -50,6 +50,7 @@ import {
   type WireRequest,
 } from "@axl/protocol";
 
+import { commandCatalog } from "./command-catalog.ts";
 import { type CommandAcceptance, CommandJournal, CommandJournalError } from "./command-journal.ts";
 import { DataDirectoryLock } from "./data-directory-lock.ts";
 import type { ProviderManagementService } from "./provider-management.ts";
@@ -1015,6 +1016,8 @@ export class AxlDaemon {
         controller?.abort();
         return { cancellationRequested: controller !== undefined };
       }
+      case "command.list":
+        return commandCatalog(state.grantedCapabilities, request.params.sessionId);
       case "provider.list":
         return this.providers().list(request.params, signal);
       case "provider.catalog.refresh":

@@ -70,11 +70,11 @@ The normal local chat path is available. These items close the remaining gap bet
 
 ### Shared command discovery
 
-1. [ ] Implement issue #389's daemon-owned command catalog without adding a generic built-in `command.invoke` path.
-2. [ ] Add the reusable SDK command controller that maps catalog entries to existing typed RPCs and focused workflows.
-3. [ ] Replace the TUI static shared-command table with the SDK controller while keeping terminal-only presentation commands local.
-4. [ ] Add the web command palette and slash discovery UI. It must search the effective directory, explain unavailable commands, collect bounded arguments, and open focused interfaces without duplicating command business logic.
-5. [ ] Refresh the command directory after reconnect, session replacement, reload, configuration changes, and catalog invalidation. Reject stale invocation safely.
+1. [x] Implement issue #389's capability-filtered daemon command catalog without adding a generic built-in `command.invoke` path.
+2. [x] Add the reusable SDK command controller that validates, merges, searches, and maps catalog entries to existing typed RPCs or focused workflows.
+3. [ ] Finish replacing the TUI static shared-command dispatcher with the SDK controller. Daemon-backed shared metadata and refresh are implemented; trusted-host and remaining workflow commands still need migration.
+4. [x] Add the web command palette and slash discovery UI. It searches the effective daemon directory, explains unavailable commands, collects bounded arguments, and opens focused interfaces without duplicating command metadata.
+5. [ ] Add dynamic catalog invalidation when daemon extension registration exists. Connection, reconnection, session replacement, explicit palette opening, and configuration changes already refresh the current static catalog.
 
 ### Prompt delivery
 

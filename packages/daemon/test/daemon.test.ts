@@ -735,6 +735,26 @@ test("expires an initialized attachment that stops sending heartbeats", async (c
   await waitFor(() => snapshots.at(-1) === 1, "stale attachment expiry");
 });
 
+test("publishes a capability-filtered command catalog", async (context) => {
+  const fixture = await startDaemon(context);
+  const client = await connectUnixClient(fixture.socketPath, {
+    identity: { kind: "web", version: "1.0.0", instanceId: "command-client" },
+    requestedCapabilities: ["command.list", "session.create", "session.reload"],
+  });
+  context.after(() => client.close());
+
+  const global = await client.listCommands();
+  assert.deepEqual(
+    global.commands.map((command) => command.name),
+    ["reload"],
+  );
+  assert.equal(global.commands[0]?.availability.state, "unavailable");
+
+  const opened = await client.request("session.create", { cwd: fixture.cwd });
+  const session = await client.listCommands({ sessionId: opened.sessionId });
+  assert.equal(session.commands[0]?.availability.state, "available");
+});
+
 test("reports the daemon security mode", async (context) => {
   const sandboxed = await startDaemon(context);
   const sandboxedClient = await connectUnixClient(sandboxed.socketPath, {

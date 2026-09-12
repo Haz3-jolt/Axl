@@ -11,6 +11,7 @@ import {
   encodeWireMessage,
   isRetryableMutationMethod,
   ProtocolValidationError,
+  parseCommandListResult,
   parseProviderListResult,
   parseServerMessage,
   parseSnapshotPage,
@@ -24,6 +25,31 @@ import {
 } from "../src/index.ts";
 
 const sessionId = "123e4567-e89b-42d3-a456-426614174000";
+
+test("validates bounded command catalogs and rejects collisions", () => {
+  const command = {
+    id: "core.reload",
+    name: "reload",
+    aliases: ["refresh-session"],
+    description: "Reload project instructions, prompt, and tools",
+    context: "session",
+    argument: { required: false },
+    requiredCapabilities: ["session.reload"],
+    availability: { state: "available" },
+  } as const;
+  assert.deepEqual(parseCommandListResult({ generation: "builtin-1", commands: [command] }), {
+    generation: "builtin-1",
+    commands: [command],
+  });
+  assert.throws(
+    () =>
+      parseCommandListResult({
+        generation: "builtin-1",
+        commands: [command, { ...command, id: "extension.reload", name: "other" }],
+      }),
+    ProtocolValidationError,
+  );
+});
 
 test("rejects secret-bearing provider inventory fields", () => {
   assert.throws(
@@ -73,6 +99,7 @@ test("rejects secret-bearing provider error details", () => {
 test("maps feature methods to negotiated capabilities", () => {
   assert.equal(requiredCapability("daemon.info"), undefined);
   assert.equal(requiredCapability("request.cancel"), undefined);
+  assert.equal(requiredCapability("command.list"), "command.list");
   assert.equal(requiredCapability("session.history"), undefined);
   assert.equal(requiredCapability("session.send"), "session.send.prompt");
   assert.equal(requiredCapability("session.interruptAndDeliver"), "session.interrupt_deliver");
@@ -94,6 +121,7 @@ test("validates every request shape", () => {
     },
     { kind: "request", id: 23, method: "connection.ping", params: {} },
     { kind: "request", id: 24, method: "request.cancel", params: { requestId: 7 } },
+    { kind: "request", id: 30, method: "command.list", params: { sessionId } },
     { kind: "request", id: 25, method: "provider.list", params: {} },
     {
       kind: "request",

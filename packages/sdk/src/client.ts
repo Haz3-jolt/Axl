@@ -252,6 +252,13 @@ export class AxlClient {
     });
   }
 
+  listCommands(
+    params: RpcParams<"command.list"> = {},
+    options: Omit<RequestOptions, "idempotencyKey"> = {},
+  ): Promise<RpcResult<"command.list">> {
+    return this.request("command.list", params, options);
+  }
+
   listProviders(
     params: RpcParams<"provider.list"> = {},
     options: Omit<RequestOptions, "idempotencyKey"> = {},

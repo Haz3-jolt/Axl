@@ -24,6 +24,7 @@ The SDK owns:
 - transient activity reconciliation
 - deterministic conversation projection
 - provider-neutral model metadata for presentation
+- validated command discovery, collision checks, search, and typed command workflows
 
 The SDK does not own:
 
@@ -105,6 +106,10 @@ incompatible
 `reconnect()` is coalesced. Concurrent callers share one reconnect attempt. Successful reconnect validates that previously granted capabilities remain available, then invokes registered view-restoration callbacks.
 
 A platform adapter may establish Unix sockets, WebSockets, or native IPC. It owns framing and connection establishment only. It must not implement session behavior.
+
+## Command discovery
+
+`CommandController` loads the daemon's capability-filtered `command.list` catalog, merges presentation-only descriptors with collision checks, and gives clients one searchable command directory. Supported shared command invocation maps back to existing typed RPCs or returns a focused surface for the client to render. It does not use a generic command execution RPC.
 
 ## Requests and capabilities
 

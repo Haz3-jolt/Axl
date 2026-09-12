@@ -3,7 +3,9 @@
 
 # Human command plane
 
-Status: architecture proposal for [issue #389](https://github.com/Observal/Axl/issues/389)
+Status: implementation in progress for [issue #389](https://github.com/Observal/Axl/issues/389)
+
+The wire-version 14 baseline implements a capability-filtered daemon catalog, strict protocol validation, an SDK command controller, daemon-backed TUI discovery, and web command-palette and slash discovery. TUI dispatch migration, dynamic catalog invalidation, staged new-session commands, and extension registration remain pending.
 
 ## Purpose
 
