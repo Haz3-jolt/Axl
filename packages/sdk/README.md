@@ -26,6 +26,7 @@ The SDK owns:
 - provider-neutral model metadata for presentation
 - validated command discovery, collision checks, search, and typed command workflows
 - explicit prompt delivery outcomes across send, steer, follow-up, queue, and interrupt workflows
+- bounded, content-verified blob uploads with progress and cancellation
 
 The SDK does not own:
 

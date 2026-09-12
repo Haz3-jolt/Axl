@@ -5,13 +5,8 @@
 
 import { createHash } from "node:crypto";
 
-import type { AxlClient } from "@axl/sdk";
-import {
-  type BlobReference,
-  parseBlobReadResult,
-  parseBlobReference,
-  type SessionId,
-} from "@axl/protocol";
+import { type AxlClient, uploadBlob as uploadSessionBlob } from "@axl/sdk";
+import { type BlobReference, parseBlobReadResult, type SessionId } from "@axl/protocol";
 
 import type { Component } from "./render.ts";
 import { sanitizeTerminalText, truncateToWidth, wrapLine } from "./render.ts";
@@ -31,7 +26,6 @@ export interface ImageDimensions {
 
 const MAX_RENDER_BYTES = 2 * 1024 * 1024;
 const READ_CHUNK_BYTES = 384 * 1024;
-const UPLOAD_CHUNK_BYTES = 384 * 1024;
 const MAX_CACHE_BYTES = 32 * 1024 * 1024;
 
 export function detectTerminalMedia(
@@ -205,59 +199,17 @@ export function renderInlineImage(
   return [...blank, `${rows > 1 ? `\x1b[${rows - 1}A` : ""}${sequence}`];
 }
 
-export async function uploadBlob(
+export function uploadBlob(
   client: AxlClient,
   sessionId: SessionId,
   bytes: Uint8Array,
   mediaType: string,
   name?: string,
 ): Promise<BlobReference> {
-  const started = await client.request("session.blob.start", {
-    sessionId,
+  return uploadSessionBlob(client, sessionId, bytes, {
     mediaType,
-    sizeBytes: bytes.byteLength,
     ...(name === undefined ? {} : { name }),
   });
-  const chunkBytes = Math.min(UPLOAD_CHUNK_BYTES, started.chunkBytes);
-  if (!started.uploadId || !Number.isSafeInteger(chunkBytes) || chunkBytes <= 0) {
-    throw new Error("Daemon returned an invalid blob upload contract");
-  }
-  try {
-    for (let offset = 0; offset < bytes.byteLength; offset += chunkBytes) {
-      const chunk = bytes.subarray(offset, Math.min(bytes.byteLength, offset + chunkBytes));
-      const response = await client.request("session.blob.chunk", {
-        sessionId,
-        uploadId: started.uploadId,
-        offset,
-        data: Buffer.from(chunk).toString("base64"),
-      });
-      if (response.nextOffset !== offset + chunk.byteLength) {
-        throw new Error("Daemon returned an invalid blob upload offset");
-      }
-    }
-    const reference = parseBlobReference(
-      await client.request("session.blob.commit", {
-        sessionId,
-        uploadId: started.uploadId,
-      }),
-    );
-    const digest = createHash("sha256").update(bytes).digest("hex");
-    if (
-      reference.sha256 !== digest ||
-      reference.sizeBytes !== bytes.byteLength ||
-      reference.mediaType !== mediaType
-    ) {
-      throw new Error("Daemon returned a blob reference that does not match the upload");
-    }
-    return reference;
-  } catch (error) {
-    try {
-      await client.request("session.blob.abort", { sessionId, uploadId: started.uploadId });
-    } catch (cleanupError) {
-      throw new AggregateError([error, cleanupError], "Blob upload and cleanup failed");
-    }
-    throw error;
-  }
 }
 
 export class AttachmentBarComponent implements Component {

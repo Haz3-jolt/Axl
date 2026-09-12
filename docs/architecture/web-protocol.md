@@ -527,7 +527,7 @@ interface ActivityDelivery {
 
 The SDK follows the reset and replacement rules in [web-delivery.md](web-delivery.md): transport loss and replacement snapshots clear client activity, only the new subscription may restore an activity snapshot, operation changes replace prior transient state, and matching canonical events win. Activity is not acknowledged with canonical event cursors.
 
-The method map includes the merged `session.blob.start`, `session.blob.chunk`, `session.blob.commit`, `session.blob.abort`, and `session.blob.read` contracts. Blob transfer remains session-bound, bounded, content-addressed, and runtime-validated. The SDK reads blobs in bounded chunks. The web client creates revocable object URLs for canonical attachments but does not yet expose upload controls.
+The method map includes the merged `session.blob.start`, `session.blob.chunk`, `session.blob.commit`, `session.blob.abort`, and `session.blob.read` contracts. Blob transfer remains session-bound, bounded, content-addressed, and runtime-validated. The SDK reads and uploads blobs in bounded chunks. The web composer supports selection, progress, cancellation, retry, and attachment-only prompts. Failed delivery restores committed references without retaining bytes or object URLs in durable browser storage.
 
 When canonical shell output is truncated, the daemon moves the complete output into its session-owned blob store before persistence and records the reference as `tool.result.payload.details.overflowBlob`. Browser clients retrieve that blob on demand. New canonical events never expose the daemon host path. Legacy records containing `overflowPath` remain visible as unavailable historical metadata.
 
