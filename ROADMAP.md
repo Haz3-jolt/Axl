@@ -7,11 +7,13 @@
 
 # Axl roadmap
 
-Status: authoritative product vision and technical implementation sequence.
+Status: living product plan and delivery snapshot.
 
-Updated: 2026-09-02
+Updated: 2026-09-12
 
-This document combines Axl's product contract with its ordered implementation roadmap. [CODE_STRUCTURE.md](CODE_STRUCTURE.md) defines repository boundaries, and [OPEN_SOURCE.md](OPEN_SOURCE.md) defines project policy. If these documents conflict, stop and resolve the conflict before implementation.
+This document records product intent, candidate designs, and a proposed implementation sequence. It is not normative agent instructions or the sole source of truth. Future features, ordering, languages, frameworks, and technology choices remain plans until adopted by current code or a focused architecture or policy document.
+
+[CODE_STRUCTURE.md](CODE_STRUCTURE.md) describes current repository boundaries, and [OPEN_SOURCE.md](OPEN_SOURCE.md) defines project policy. Use the repository's present implementation, tests, focused architecture documents, and the user's request to decide current work. Surface conflicts only when they materially affect the requested change.
 
 ## Product vision
 
@@ -1283,7 +1285,7 @@ The daemon owns behavior, so client SDKs stay small. They provide:
 - **Capability negotiation**: client and daemon exchange protocol version and feature sets on connect, and mismatches degrade loudly (open decision 5 covers the versioning scheme).
 - **Presence**: who else is attached to the session, so simultaneous terminal, web, and mobile clients can indicate each other.
 
-The current TypeScript event and wire definitions remain authoritative while every client uses TypeScript. Axl will choose a schema language and generator when the first non-TypeScript client creates a real need. Swift and Kotlin clients will then be generated from that shared schema rather than maintained by hand.
+The current implementation uses TypeScript event and wire definitions. A future non-TypeScript client may create a concrete need for a schema language and generator. Choose that approach when the client exists instead of treating the current roadmap examples as a language mandate.
 
 Local clients use a Unix socket, while remote clients use WebSocket through the relay. MCP remains the external tool protocol and does not replace Axl's client protocol.
 
@@ -1357,7 +1359,7 @@ Requirements:
 - Read-only observer mode for watching a session without steering rights
 - Notification payloads exclude secrets and full file contents
 
-The mobile apps use SwiftUI on iOS and Jetpack Compose on Android. Thin clients gain little from a cross-platform UI framework, while native code supports Live Activities, Android foreground services, notification actions, widgets, share sheets, and efficient streaming text. Generated SDKs share protocol, event sync, reconnection, and authentication logic.
+The current mobile plan favors SwiftUI on iOS and Jetpack Compose on Android because native code supports Live Activities, Android foreground services, notification actions, widgets, share sheets, and efficient streaming text. This is not a binding stack decision. Choose the implementation when mobile work begins and its requirements are concrete.
 
 #### 16.4 Headless and automation
 
@@ -1555,7 +1557,7 @@ No. Features have useful defaults, introduce themselves gradually, and can be di
 
 ## Technical implementation roadmap
 
-This section is the source of truth for delivery order and completion status. Build the smallest complete vertical slice, satisfy each exit gate, and do not scaffold later phases without a current consumer.
+This section records the current proposed delivery order and reported completion status. It is a planning aid, not a sole source of truth or an instruction to implement unrelated work. Reconcile it with the current repository and active task before using it. Build the smallest complete vertical slice and do not scaffold later phases without a current consumer.
 
 Phases 0 through 4 are complete. Selected TUI, web-tool, Agent Skills, and MCP work was brought forward. The immediate next slice at the end of this section takes priority over remaining Phase 5 work.
 
@@ -1571,7 +1573,7 @@ Phases 0 through 4 are complete. Selected TUI, web-tool, Agent Skills, and MCP w
 8. Add one focused runnable check for every non-trivial behavior.
 9. Do not implement a later phase merely to prepare for hypothetical use. Preserve the seam and stop.
 10. Complete security prerequisites before activating the feature that depends on them.
-11. Keep the TypeScript protocol definitions authoritative until a second implementation language creates a real code-generation need.
+11. The current plan defers protocol code generation until a second implementation language creates a real need.
 
 ### Foundational dependency decisions
 
@@ -1586,7 +1588,7 @@ Resolve these before implementation because they affect irreversible boundaries.
 - [x] Record external reference revisions used during implementation.
 - [x] Keep third-party extensions out of the daemon process in v1. Only trusted first-party extensions may run in process.
 - [x] Keep capability search local and lexical. V1 uses BM25, not embeddings or provider-native tool search.
-- [x] Keep TypeScript definitions authoritative until the first non-TypeScript client requires code generation.
+- [x] Record TypeScript definitions as the current implementation and defer code generation until a non-TypeScript client creates a concrete need.
 
 Decisions that can wait are listed in the phase where they become necessary.
 
@@ -2107,7 +2109,7 @@ Child sessions remain inspectable, budgeted, cancellable, policy-narrowed, repla
 
 The local web client and only the TypeScript SDK, wire-protocol, transport, security, workspace, packaging, and transport-neutral browser boundaries required for it are brought forward as an explicit exception to phase ordering. This work may proceed while the current dogfood follow-up remains incomplete, but those prerequisites still block expanded dogfooding of credentialed or untrusted capabilities. Unavailable features remain explicitly unsupported. This exception does not bring forward remote accounts, pairing, encrypted relay transport, hosted-service deployment, the session viewer, media roles, public SDK publication, multi-language generation, cloud placement, or unrelated protocol work, and it does not mark Phase 9 complete.
 
-Do not build public or multi-language SDKs before this phase. The second real client creates the need.
+The current plan defers public or multi-language SDKs until a real second client creates the need.
 
 #### Wire protocol
 
@@ -2348,9 +2350,9 @@ The shared remote-connectivity and remote-web subsections are a scoped sequencin
 
 #### Mobile clients
 
-- [ ] Generate Swift and Kotlin SDKs from the protocol schema.
-- [ ] Build native SwiftUI and Jetpack Compose clients.
-- [ ] Add session list, start, open, live events, steering, permissions, diff review, detach, and reconnect.
+- [ ] Choose mobile implementation stacks when work begins, based on concrete platform and product requirements.
+- [ ] Add client SDKs through the current protocol contract, introducing schema generation only when the selected implementations need it.
+- [ ] Build the selected mobile clients with session list, start, open, live events, steering, permissions, diff review, detach, and reconnect.
 - [ ] Reuse the reviewed remote pairing, encryption, scope, relay, and revocation contracts.
 - [ ] Add read-only observer mode.
 - [ ] Exclude secrets and full file contents from notifications.

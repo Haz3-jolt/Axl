@@ -11,16 +11,16 @@ These instructions apply to the entire Axl repository.
 
 Axl is a universal agent harness that adapts to existing user setups, models, tools, and clients. One authoritative daemon owns each session. Clients are projections over a canonical event protocol.
 
-## Plans and source of truth
+## Project documents
 
-Read these documents before changing architecture or sequencing work:
+Consult the documents relevant to the work:
 
-- `ROADMAP.md`: product behavior, invariants, and ordered implementation plan
-- `CODE_STRUCTURE.md`: repository and package boundaries
+- `ROADMAP.md`: living product plans and delivery snapshot
+- `CODE_STRUCTURE.md`: current repository and package boundaries
 - `OPEN_SOURCE.md`: licensing, governance, security, and release requirements
-- `docs/architecture/client-boundaries.md`: daemon, SDK, client, and platform-adapter ownership
+- `docs/architecture/client-boundaries.md`: current daemon, SDK, client, and platform-adapter ownership
 
-When documents conflict, stop and surface the conflict instead of silently choosing one.
+The roadmap is planning context, not normative agent instructions or a sole source of truth. Its future sequencing, languages, frameworks, and technology choices remain proposals until current code or a focused architecture or policy document adopts them. Follow the user's request and the repository as it exists. Surface only conflicts that materially affect the requested change.
 
 ## Reference implementations
 
@@ -46,9 +46,9 @@ Study their behavior, contracts, tests, and architecture. Write independent Axl 
 - Project policy may narrow global policy but may never widen it.
 - Model-visible inputs and configuration must be reconstructable from the redacted event log.
 
-## Implementation order
+## Implementation scope
 
-Follow the technical implementation roadmap in `ROADMAP.md`. Build phases 0 through 4 with a stable harness. Begin dogfooding only after Axl can safely edit its own disposable worktree, run tests inside Bubblewrap, survive daemon restart, and replay the session deterministically.
+Use `ROADMAP.md` to understand current plans and reported status, not as a mandatory sequence. Implement the requested slice against current code and focused architecture decisions.
 
 Build the smallest complete vertical slice. Do not scaffold later phases or add speculative abstractions.
 
@@ -58,7 +58,7 @@ Write plainly and directly. Prefer short sentences and concrete verbs. Do not us
 
 ## Coding rules
 
-- TypeScript is the application language except for native Swift and Kotlin clients introduced later.
+- Follow the language and stack already used by the area being changed. Future examples in the roadmap do not mandate a language or framework.
 - Prefer the standard library and installed platform capabilities before dependencies.
 - Ask before adding a production dependency.
 - Keep the kernel small and deterministic.
