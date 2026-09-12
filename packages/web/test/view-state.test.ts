@@ -8,6 +8,7 @@ import type { ConversationState, SessionSummary } from "@axl/sdk";
 import { editDiffRows } from "@axl/ui";
 import {
   matchesSession,
+  resolvePromptDelivery,
   restoreDraft,
   sessionTitle,
   sessionUsageStats,
@@ -21,6 +22,14 @@ const session = {
   firstUserMessage: "First prompt",
   lastUserMessage: "Fix 🚀 launch",
 } as SessionSummary;
+
+test("prompt delivery defaults to a new turn or active steering and preserves explicit intent", () => {
+  assert.equal(resolvePromptDelivery("auto", false), "prompt");
+  assert.equal(resolvePromptDelivery("auto", true), "steer");
+  assert.equal(resolvePromptDelivery("follow_up", true), "follow_up");
+  assert.equal(resolvePromptDelivery("interrupt", true), "interrupt");
+  assert.equal(resolvePromptDelivery("queue_front", false), "queue_front");
+});
 
 test("session presentation handles fallbacks, Unicode search, and failed drafts", () => {
   assert.equal(sessionTitle(session), "Fix 🚀 launch");

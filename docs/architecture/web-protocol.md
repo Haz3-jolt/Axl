@@ -423,6 +423,8 @@ interface SessionDisposeResult {
 
 Queued prompts use `session.queue.enqueue` and `session.queue.requeue`. Enqueue records prompt content and priority in canonical history before returning. The daemon appends lifecycle events as an item is queued, started, paused after restart, and explicitly re-queued. Pending items are never executed automatically after restart. Every attachment derives the same queue from those events.
 
+The SDK `deliverPrompt` workflow maps explicit prompt, steer, follow-up, interrupt-and-deliver, queue-next, and queue-last intent to those typed methods. A steer or follow-up that loses its active operation is queued with the documented priority instead of being dropped. Transport ambiguity is returned as an explicit uncertain outcome so clients preserve the draft for review rather than silently retrying a potentially accepted delivery.
+
 `session.shell` is correlated by its caller-supplied operation ID but is never retried automatically. Its SDK wrapper returns either `{ state: "completed", result }` or `{ state: "uncertain", operationId }`. If transport loss prevents the SDK from proving a canonical `user.shell` result, it preserves the command for explicit user review. `session.interrupt` may cancel the active shell operation, but cancellation does not imply that prior shell side effects were rolled back.
 
 A profile is accepted only when the daemon can enforce, persist, log, and restore it. Web chat maps to the zero-tool `chat` profile. `minimal` provides Bash and editing, `standard` provides the normal tool set, and `exec` is Bash-only. The non-chat profiles use the code interface.

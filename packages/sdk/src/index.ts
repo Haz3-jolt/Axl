@@ -5,6 +5,7 @@
 export * from "@axl/protocol";
 export * from "./client.ts";
 export * from "./commands.ts";
+export * from "./delivery.ts";
 export * from "./models.ts";
 export * from "./presentation.ts";
 export * from "./projector.ts";
