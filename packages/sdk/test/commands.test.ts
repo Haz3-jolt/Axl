@@ -36,6 +36,16 @@ const catalog: CommandListResult = {
       requiredCapabilities: ["session.configure"],
       availability: { state: "available" },
     },
+    {
+      id: "core.compact",
+      name: "compact",
+      aliases: [],
+      description: "Summarize older context",
+      context: "session",
+      argument: { required: false, hint: "instructions" },
+      requiredCapabilities: ["session.compact"],
+      availability: { state: "available" },
+    },
   ],
 };
 
@@ -67,9 +77,17 @@ test("command controller loads, searches, and invokes typed operations", async (
     state: "completed",
     command: "reload",
   });
+  assert.deepEqual(await commands.invoke("/compact keep decisions", sessionId), {
+    state: "completed",
+    command: "compact",
+  });
   assert.deepEqual(requests, [
     { method: "command.list", params: { sessionId } },
     { method: "session.reload", params: { sessionId } },
+    {
+      method: "session.compact",
+      params: { sessionId, instructions: "keep decisions" },
+    },
   ]);
 });
 

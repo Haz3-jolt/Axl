@@ -61,7 +61,7 @@ This work does not add:
 - remote access, device pairing, or a hosted relay
 - public SDK publication or non-TypeScript SDK generation
 - browser file editing or arbitrary filesystem access
-- arbitrary shell or Git execution from the browser
+- browser-side or host-bypassing shell or Git execution; direct shell runs only through the typed daemon RPC
 - extension-provided panels, nodes, or renderers
 - the full session viewer or cross-session transcript search
 - new web media UI, OCR, voice, or cloud placement; the SDK still types the merged shared blob RPCs
