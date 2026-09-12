@@ -1,14 +1,21 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createConnection, type Socket } from "node:net";
 import { extname, join, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
-import { MAX_WIRE_MESSAGE_BYTES, WIRE_PROTOCOL_VERSION } from "@axl/protocol";
+import {
+  MAX_WIRE_MESSAGE_BYTES,
+  WIRE_PROTOCOL_VERSION,
+  parseSessionId,
+  type SessionOpenResult,
+} from "@axl/protocol";
+import { AxlClientError } from "@axl/sdk";
+import { connectUnixClient } from "@axl/sdk/unix";
 import { WebSocketServer, type WebSocket } from "ws";
 
 const SECURITY_HEADERS = {
@@ -47,6 +54,8 @@ export interface WebPreferences {
   readonly changesView: "files" | "all";
 }
 
+const MAX_WEB_ARTIFACT_BYTES = 64 * 1024 * 1024;
+
 const DEFAULT_WEB_PREFERENCES: WebPreferences = {
   sidebarWidth: 264,
   changesWidth: 680,
@@ -81,10 +90,169 @@ export interface WebGateway {
   close(): Promise<void>;
 }
 
+interface WebSessionArtifact {
+  readonly format: "axl.web-session";
+  readonly version: 1;
+  readonly files: Readonly<Record<string, string>>;
+}
+
+function decodeBase64(value: unknown, path: string): Buffer {
+  if (
+    typeof value !== "string" ||
+    value.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/u.test(value)
+  ) {
+    throw new Error(`${path} is not canonical base64`);
+  }
+  const bytes = Buffer.from(value, "base64");
+  if (bytes.toString("base64") !== value) throw new Error(`${path} is not canonical base64`);
+  return bytes;
+}
+
+function artifactManifest(bytes: Buffer): { readonly blobDigests: readonly string[] } {
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes.toString("utf8")) as unknown;
+  } catch {
+    throw new Error("Artifact manifest is invalid");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Artifact manifest is invalid");
+  }
+  const manifest = value as Record<string, unknown>;
+  const keys = [
+    "format",
+    "version",
+    "sourceSessionId",
+    "sourceSha256",
+    "eventCount",
+    "blobDigests",
+  ];
+  if (
+    Object.keys(manifest).some((key) => !keys.includes(key)) ||
+    keys.some((key) => !Object.hasOwn(manifest, key)) ||
+    manifest.format !== "axl.session" ||
+    manifest.version !== 1 ||
+    typeof manifest.sourceSha256 !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(manifest.sourceSha256) ||
+    !Number.isSafeInteger(manifest.eventCount) ||
+    (manifest.eventCount as number) < 1 ||
+    !Array.isArray(manifest.blobDigests) ||
+    manifest.blobDigests.length > 10_000 ||
+    new Set(manifest.blobDigests).size !== manifest.blobDigests.length ||
+    manifest.blobDigests.some(
+      (digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/u.test(digest),
+    )
+  ) {
+    throw new Error("Artifact manifest is invalid");
+  }
+  try {
+    parseSessionId(manifest.sourceSessionId, "manifest.sourceSessionId");
+  } catch {
+    throw new Error("Artifact manifest is invalid");
+  }
+  return { blobDigests: manifest.blobDigests as string[] };
+}
+
+export async function encodeWebSessionArtifact(directory: string): Promise<Buffer> {
+  const manifestPath = join(directory, "manifest.json");
+  const manifestInfo = await stat(manifestPath);
+  if (!manifestInfo.isFile() || manifestInfo.size > 1024 * 1024) {
+    throw new Error("Artifact manifest is invalid");
+  }
+  const manifest = await readFile(manifestPath);
+  const { blobDigests } = artifactManifest(manifest);
+  let encodedSize = 1024 + Math.ceil(manifestInfo.size / 3) * 4;
+  const readBounded = async (path: string): Promise<string> => {
+    const info = await stat(path);
+    if (!info.isFile()) throw new Error("Artifact contains a non-file entry");
+    encodedSize += Math.ceil(info.size / 3) * 4 + path.length + 8;
+    if (encodedSize > MAX_WEB_ARTIFACT_BYTES) {
+      throw new Error("Session artifact exceeds the 64 MiB browser limit");
+    }
+    return (await readFile(path)).toString("base64");
+  };
+  const files: Record<string, string> = {
+    "manifest.json": manifest.toString("base64"),
+    "events.jsonl": await readBounded(join(directory, "events.jsonl")),
+  };
+  for (const digest of blobDigests) {
+    files[`blobs/${digest}`] = await readBounded(join(directory, "blobs", digest));
+  }
+  const bytes = Buffer.from(JSON.stringify({ format: "axl.web-session", version: 1, files }));
+  if (bytes.byteLength > MAX_WEB_ARTIFACT_BYTES)
+    throw new Error("Session artifact exceeds the 64 MiB browser limit");
+  return bytes;
+}
+
+export async function writeWebSessionArtifact(bytes: Buffer, directory: string): Promise<void> {
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_WEB_ARTIFACT_BYTES) {
+    throw new Error("Session artifact must be between 1 byte and 64 MiB");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes.toString("utf8")) as unknown;
+  } catch {
+    throw new Error("Session artifact is not valid JSON");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Session artifact is invalid");
+  }
+  const archive = value as Partial<WebSessionArtifact>;
+  if (
+    Object.keys(archive).some((key) => !["format", "version", "files"].includes(key)) ||
+    Object.keys(archive).length !== 3 ||
+    archive.format !== "axl.web-session" ||
+    archive.version !== 1 ||
+    typeof archive.files !== "object" ||
+    archive.files === null ||
+    Array.isArray(archive.files)
+  ) {
+    throw new Error("Session artifact is invalid");
+  }
+  const manifest = decodeBase64(archive.files["manifest.json"], "manifest.json");
+  const { blobDigests } = artifactManifest(manifest);
+  const expected = new Set([
+    "manifest.json",
+    "events.jsonl",
+    ...blobDigests.map((digest) => `blobs/${digest}`),
+  ]);
+  if (
+    Object.keys(archive.files).length !== expected.size ||
+    Object.keys(archive.files).some((path) => !expected.has(path))
+  ) {
+    throw new Error("Session artifact contains unexpected files");
+  }
+  const events = decodeBase64(archive.files["events.jsonl"], "events.jsonl");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(join(directory, "manifest.json"), manifest, { mode: 0o600 });
+  await writeFile(join(directory, "events.jsonl"), events, { mode: 0o600 });
+  if (blobDigests.length > 0) await mkdir(join(directory, "blobs"), { mode: 0o700 });
+  for (const digest of blobDigests) {
+    await writeFile(
+      join(directory, "blobs", digest),
+      decodeBase64(archive.files[`blobs/${digest}`], `blobs/${digest}`),
+      { mode: 0o600 },
+    );
+  }
+}
+
+async function requestBody(request: IncomingMessage, maximumBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const value = Buffer.from(chunk);
+    size += value.byteLength;
+    if (size > maximumBytes) throw new RangeError("Request body is too large");
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
 function send(
   response: ServerResponse,
   status: number,
-  body: string,
+  body: string | Buffer,
   type = "text/plain; charset=utf-8",
 ): void {
   response.writeHead(status, { ...SECURITY_HEADERS, "content-type": type });
@@ -189,6 +357,19 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
     perMessageDeflate: false,
   });
 
+  const withArtifactClient = async <Result>(
+    operation: (client: Awaited<ReturnType<typeof connectUnixClient>>) => Promise<Result>,
+  ): Promise<Result> => {
+    const client = await connectUnixClient(options.socketPath, {
+      identity: { kind: "web-host", version: options.packageVersion, instanceId: randomUUID() },
+    });
+    try {
+      return await operation(client);
+    } finally {
+      client.close();
+    }
+  };
+
   const authorized = (request: IncomingMessage): boolean =>
     Date.now() < credentialExpiresAt &&
     cookie(request, cookieName) !== undefined &&
@@ -196,6 +377,7 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
   const validOrigin = (request: IncomingMessage): boolean =>
     request.headers.host === expectedHost && request.headers.origin === expectedOrigin;
   const server = createServer(async (request, response) => {
+    let relative = "";
     try {
       if (
         request.headers.host !== expectedHost ||
@@ -203,7 +385,7 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
         !request.url.startsWith(prefix)
       )
         return send(response, 404, "Not found");
-      const relative = request.url.slice(prefix.length).split("?", 1)[0] ?? "";
+      relative = request.url.slice(prefix.length).split("?", 1)[0] ?? "";
       if (request.method === "POST" && relative === "auth/exchange") {
         if (!validOrigin(request) || !launchAvailable || Date.now() >= launchExpiresAt)
           return send(response, 401, "Authentication failed");
@@ -234,6 +416,47 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
           JSON.stringify({ cwd: options.cwd, webSocketPath: `${prefix}ws`, preferences }),
           "application/json; charset=utf-8",
         );
+      }
+      if (request.method === "POST" && relative === "artifact/export") {
+        if (!validOrigin(request) || !authorized(request))
+          return send(response, 401, "Authentication required");
+        const body = JSON.parse((await requestBody(request, 4096)).toString("utf8")) as {
+          sessionId?: unknown;
+        };
+        const sessionId = parseSessionId(body.sessionId, "sessionId");
+        await mkdir(options.stateDirectory, { recursive: true, mode: 0o700 });
+        const temporary = await mkdtemp(join(options.stateDirectory, "web-export-"));
+        try {
+          const outputDirectory = join(temporary, "artifact");
+          await withArtifactClient((client) =>
+            client.request("session.export", { sessionId, outputDirectory }),
+          );
+          const artifact = await encodeWebSessionArtifact(outputDirectory);
+          response.setHeader(
+            "content-disposition",
+            `attachment; filename="axl-session-${sessionId}.json"`,
+          );
+          return send(response, 200, artifact, "application/json");
+        } finally {
+          await rm(temporary, { recursive: true, force: true });
+        }
+      }
+      if (request.method === "POST" && relative === "artifact/import") {
+        if (!validOrigin(request) || !authorized(request))
+          return send(response, 401, "Authentication required");
+        const artifact = await requestBody(request, MAX_WEB_ARTIFACT_BYTES);
+        await mkdir(options.stateDirectory, { recursive: true, mode: 0o700 });
+        const temporary = await mkdtemp(join(options.stateDirectory, "web-import-"));
+        try {
+          const inputDirectory = join(temporary, "artifact");
+          await writeWebSessionArtifact(artifact, inputDirectory);
+          const imported: SessionOpenResult = await withArtifactClient((client) =>
+            client.request("session.import", { inputDirectory, cwd: options.cwd }),
+          );
+          return send(response, 200, JSON.stringify(imported), "application/json; charset=utf-8");
+        } finally {
+          await rm(temporary, { recursive: true, force: true });
+        }
       }
       if (request.method === "POST" && relative === "preferences") {
         if (!validOrigin(request) || !authorized(request))
@@ -272,7 +495,15 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
       if (data === undefined) return send(response, 404, "Not found");
       response.writeHead(200, { ...SECURITY_HEADERS, "content-type": mime(path) });
       response.end(data);
-    } catch {
+    } catch (error) {
+      if (error instanceof RangeError) return send(response, 413, error.message);
+      if (error instanceof AxlClientError) {
+        const action = relative === "artifact/export" ? "export" : "import";
+        return send(response, 400, `Session ${action} failed (${error.code})`);
+      }
+      if (error instanceof Error && /^(Session artifact|Artifact )/u.test(error.message)) {
+        return send(response, 400, error.message);
+      }
       send(response, 400, "Invalid request");
     }
   });

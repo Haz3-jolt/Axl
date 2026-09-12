@@ -95,6 +95,51 @@ const BUILT_INS: readonly Omit<CommandDescriptor, "availability">[] = [
     requiredCapabilities: ["session.clone"],
   },
   {
+    id: "core.rename",
+    name: "rename",
+    aliases: [],
+    description: "rename the current session",
+    context: "session",
+    argument: { required: true, hint: "title" },
+    requiredCapabilities: ["session.rename"],
+  },
+  {
+    id: "core.export",
+    name: "export",
+    aliases: [],
+    description: "download a portable session artifact",
+    context: "session",
+    argument: { required: false },
+    requiredCapabilities: ["session.export"],
+  },
+  {
+    id: "core.import",
+    name: "import",
+    aliases: [],
+    description: "import a portable session artifact",
+    context: "global",
+    argument: { required: false },
+    requiredCapabilities: ["session.import"],
+  },
+  {
+    id: "core.dispose",
+    name: "dispose",
+    aliases: ["end"],
+    description: "stop the runtime and preserve durable history",
+    context: "session",
+    argument: { required: false },
+    requiredCapabilities: ["session.dispose"],
+  },
+  {
+    id: "core.delete",
+    name: "delete",
+    aliases: [],
+    description: "permanently delete session history",
+    context: "session",
+    argument: { required: false },
+    requiredCapabilities: ["session.delete"],
+  },
+  {
     id: "core.review",
     name: "review",
     aliases: [],
@@ -110,7 +155,7 @@ export function commandCatalog(
   sessionId?: SessionId,
 ): CommandListResult {
   return {
-    generation: "builtin-1",
+    generation: "builtin-2",
     commands: BUILT_INS.filter((command) =>
       command.requiredCapabilities.every((capability) => capabilities.has(capability)),
     ).map((command) => ({

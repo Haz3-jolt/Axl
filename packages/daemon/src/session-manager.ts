@@ -141,6 +141,7 @@ export interface SessionManagerOptions {
   readonly dataDirectory: string;
   readonly runtime: SessionRuntimeFactory;
   readonly workspaceDeniedPaths?: readonly string[];
+  readonly onSessionMetadataChange?: () => void;
 }
 
 interface ActiveTurn {
@@ -229,6 +230,7 @@ function summarizeSession(events: readonly CanonicalEvent[]): StoredSessionSumma
   });
   const firstUserMessage = messages[0];
   const lastUserMessage = messages.at(-1);
+  const renamed = events.findLast((event) => event.type === "session.renamed");
   const sandbox = events.findLast((event) => event.type === "sandbox.configured");
   const image =
     sandbox?.type === "sandbox.configured" && typeof sandbox.payload.details?.image === "string"
@@ -237,6 +239,7 @@ function summarizeSession(events: readonly CanonicalEvent[]): StoredSessionSumma
   return {
     sessionId: created.sessionId,
     cwd: created.payload.cwd,
+    ...(renamed?.type === "session.renamed" ? { title: renamed.payload.title } : {}),
     createdAt: created.timestamp,
     updatedAt: events.at(-1)?.timestamp ?? created.timestamp,
     userMessageCount: messages.length,
@@ -489,6 +492,20 @@ export class SessionManager {
         events.push(event);
         this.authorizeEventBlobs(sessionId, event);
         for (const listener of listeners) listener(event);
+        if (
+          event.type === "session.created" ||
+          event.type === "session.renamed" ||
+          event.type === "session.closed" ||
+          event.type === "user.message" ||
+          event.type === "user.shell" ||
+          event.type === "assistant.message" ||
+          event.type === "session.error" ||
+          event.type === "context.compacted" ||
+          event.type === "interaction.requested" ||
+          event.type === "interaction.resolved"
+        ) {
+          this.options.onSessionMetadataChange?.();
+        }
       },
       onActivity: (frame) => {
         if (!this.applyActivity(activityState, frame)) return;
@@ -556,6 +573,7 @@ export class SessionManager {
     };
     this.sessions.set(sessionId, managed);
     await this.pauseRecoveredQueue(managed);
+    this.options.onSessionMetadataChange?.();
     return managed;
   }
 
@@ -644,8 +662,18 @@ export class SessionManager {
     try {
       await stat(this.logPath(target));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        if (acceptance.method === "session.delete") {
+          await this.delete(target);
+          return { deleted: true, historyPreserved: false };
+        }
+        return undefined;
+      }
       throw error;
+    }
+    if (acceptance.method === "session.delete") {
+      await this.delete(target);
+      return { deleted: true, historyPreserved: false };
     }
     const stored = (await JsonlEventLog.open(this.logPath(target), target)).events;
     const evidence = stored.filter((event) => event.operationId === operationId);
@@ -734,6 +762,12 @@ export class SessionManager {
         return { interrupted: true, operationId: affected };
       }
       return { interrupted: false };
+    }
+    if (acceptance.method === "session.rename") {
+      const renamed = evidence.find((event) => event.type === "session.renamed");
+      return renamed?.type === "session.renamed"
+        ? { title: renamed.payload.title, eventId: renamed.id }
+        : undefined;
     }
     if (acceptance.method === "session.dispose") {
       return evidence.some((event) => event.type === "session.closed")
@@ -840,9 +874,11 @@ export class SessionManager {
   describe(sessionId: unknown): SessionOpenResult {
     const managed = this.managed(sessionId);
     const activeOperationId = managed.activeTurn?.operationId;
+    const renamed = managed.events.findLast((event) => event.type === "session.renamed");
     return {
       sessionId: managed.session.log.sessionId,
       cwd: managed.cwd,
+      ...(renamed?.type === "session.renamed" ? { title: renamed.payload.title } : {}),
       runtime: {
         state: managed.disposing
           ? "disposing"
@@ -1022,6 +1058,30 @@ export class SessionManager {
     if (tip === undefined)
       throw new DaemonError("empty_session", "Session has no history to clone");
     return this.copySession(sourceId, tip, true, undefined, reservation);
+  }
+
+  async rename(
+    sessionId: unknown,
+    title: string,
+    operationId?: OperationId,
+  ): Promise<{ readonly title: string; readonly eventId: EventId }> {
+    if (operationId === undefined) {
+      throw new DaemonError("internal_error", "Rename operation ID is missing");
+    }
+    const parsed = parseSessionId(sessionId, "sessionId");
+    await this.resume(parsed);
+    const managed = this.managed(parsed);
+    if (managed.activeTurn || managed.rebuilding || managed.interruptDelivery !== undefined) {
+      throw new DaemonError("operation_active", "Rename the session after its active operation");
+    }
+    const existing = managed.events.find(
+      (event) => event.type === "session.renamed" && event.operationId === operationId,
+    );
+    if (existing?.type === "session.renamed") {
+      return { title: existing.payload.title, eventId: existing.id };
+    }
+    const event = await managed.session.rename(operationId, title);
+    return { title: event.payload.title, eventId: event.id };
   }
 
   async resume(
@@ -1730,6 +1790,7 @@ export class SessionManager {
       managed.interruptedForDelivery.delete(active.operationId);
       if (managed.activeTurn === active) delete managed.activeTurn;
       active.finish();
+      this.options.onSessionMetadataChange?.();
       this.startQueueDrain(managed);
     }
   }
@@ -1827,6 +1888,7 @@ export class SessionManager {
     } finally {
       if (managed.activeTurn === active) delete managed.activeTurn;
       active.finish();
+      this.options.onSessionMetadataChange?.();
       this.startQueueDrain(managed);
     }
   }
@@ -1896,6 +1958,7 @@ export class SessionManager {
     } finally {
       if (managed.activeTurn === active) delete managed.activeTurn;
       active.finish();
+      this.options.onSessionMetadataChange?.();
       this.startQueueDrain(managed);
     }
   }
@@ -2137,12 +2200,14 @@ export class SessionManager {
 
     const abort = (): void => {
       if (managed.interactions.delete(interactionId)) {
+        this.options.onSessionMetadataChange?.();
         pending.reject(new DOMException("Interaction aborted", "AbortError"));
       }
     };
     signal?.addEventListener("abort", abort, { once: true });
     const timeout = setTimeout(() => {
       if (managed.interactions.delete(interactionId)) {
+        this.options.onSessionMetadataChange?.();
         pending.reject(new DaemonError("interaction_timeout", "Interaction timed out"));
       }
     }, 300_000);
@@ -2152,7 +2217,7 @@ export class SessionManager {
       await managed.session.requestInteraction({ interactionId, ...request });
       return await response;
     } catch (error) {
-      managed.interactions.delete(interactionId);
+      if (managed.interactions.delete(interactionId)) this.options.onSessionMetadataChange?.();
       throw error;
     } finally {
       clearTimeout(timeout);
@@ -2205,6 +2270,7 @@ export class SessionManager {
     try {
       const resolutionEventId = await resolving;
       managed.interactions.delete(interactionId);
+      this.options.onSessionMetadataChange?.();
       pending.resolve(response);
       return { interactionId, resolutionEventId };
     } catch (error) {
@@ -2237,11 +2303,46 @@ export class SessionManager {
       managed.session = next;
     })();
     managed.rebuilding = rebuilding;
+    this.options.onSessionMetadataChange?.();
     try {
       await rebuilding;
     } finally {
       if (managed.rebuilding === rebuilding) delete managed.rebuilding;
+      this.options.onSessionMetadataChange?.();
     }
+  }
+
+  async delete(sessionId: unknown): Promise<void> {
+    const parsed = parseSessionId(sessionId, "sessionId");
+    this.assertNotQuarantined(parsed);
+    try {
+      await stat(this.logPath(parsed));
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+      await this.workspaceCheckpoints.remove(parsed);
+      this.options.onSessionMetadataChange?.();
+      return;
+    }
+    const managed = this.sessions.get(parsed);
+    if (
+      managed?.activeTurn !== undefined ||
+      managed?.rebuilding !== undefined ||
+      managed?.interruptDelivery !== undefined
+    ) {
+      throw new DaemonError("operation_active", "Delete the session after its active operation");
+    }
+    await this.dispose(parsed);
+    await Promise.all([
+      rm(this.logPath(parsed), { force: true }),
+      this.workspaceCheckpoints.remove(parsed),
+    ]);
+    const directory = await openFile(join(this.options.dataDirectory, "sessions"), "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+    this.options.onSessionMetadataChange?.();
   }
 
   async dispose(sessionId: unknown, operationId?: OperationId): Promise<void> {
@@ -2286,6 +2387,7 @@ export class SessionManager {
     await managed.session.dispose();
     await this.blobs.disposeSession(parsed);
     this.sessions.delete(parsed);
+    this.options.onSessionMetadataChange?.();
   }
 
   private applyActivity(

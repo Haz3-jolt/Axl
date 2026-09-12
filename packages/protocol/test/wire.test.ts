@@ -192,6 +192,13 @@ test("validates every request shape", () => {
     { kind: "request", id: 19, method: "session.clone", params: { sessionId } },
     {
       kind: "request",
+      id: 31,
+      method: "session.rename",
+      params: { sessionId, title: "Focused work" },
+    },
+    { kind: "request", id: 32, method: "session.delete", params: { sessionId } },
+    {
+      kind: "request",
       id: 3,
       method: "session.send",
       params: {
@@ -438,6 +445,7 @@ test("rejects malformed requests at the wire boundary", () => {
       params: { subscriptionId: "", cursor: "cursor-1" },
     },
     { kind: "request", id: 1, method: "session.fork", params: { sessionId } },
+    { kind: "request", id: 1, method: "session.rename", params: { sessionId, title: "" } },
     {
       kind: "request",
       id: 1,
@@ -726,6 +734,7 @@ test("validates server messages and newline framing", () => {
         {
           sessionId,
           cwd: "/repo",
+          title: "Focused work",
           createdAt: 1,
           updatedAt: 2,
           userMessageCount: 1,
@@ -851,6 +860,13 @@ test("validates server messages and newline framing", () => {
           retryable: false,
         },
       }),
+    ProtocolValidationError,
+  );
+
+  const sessionsChanged = { kind: "sessions_changed", generation: 2 } as const;
+  assert.deepEqual(parseServerMessage(sessionsChanged), sessionsChanged);
+  assert.throws(
+    () => parseServerMessage({ ...sessionsChanged, generation: -1 }),
     ProtocolValidationError,
   );
 

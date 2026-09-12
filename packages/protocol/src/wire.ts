@@ -71,6 +71,7 @@ export interface SessionConfiguration extends SessionSelection {
 export interface SessionOpenResult {
   readonly sessionId: SessionId;
   readonly cwd: string;
+  readonly title?: string;
   readonly runtime: {
     readonly state: "inactive" | "idle" | "running" | "waiting_interaction" | "disposing";
     readonly activeOperationId?: OperationId;
@@ -81,6 +82,7 @@ export interface SessionOpenResult {
 export interface SessionSummary {
   readonly sessionId: SessionId;
   readonly cwd: string;
+  readonly title?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly userMessageCount: number;
@@ -633,6 +635,8 @@ export const WIRE_CAPABILITIES = [
   "session.resume",
   "session.fork",
   "session.clone",
+  "session.rename",
+  "session.delete",
   "session.export",
   "session.import",
   "session.send.prompt",
@@ -803,6 +807,14 @@ export interface RpcMethodMap {
   readonly "session.clone": {
     readonly params: { readonly sessionId: SessionId };
     readonly result: SessionForkResult;
+  };
+  readonly "session.rename": {
+    readonly params: { readonly sessionId: SessionId; readonly title: string };
+    readonly result: { readonly title: string; readonly eventId: EventId };
+  };
+  readonly "session.delete": {
+    readonly params: { readonly sessionId: SessionId };
+    readonly result: { readonly deleted: true; readonly historyPreserved: false };
   };
   readonly "session.export": {
     readonly params: { readonly sessionId: SessionId; readonly outputDirectory: string };
@@ -980,6 +992,8 @@ export const RETRYABLE_MUTATION_METHODS = [
   "session.create",
   "session.fork",
   "session.clone",
+  "session.rename",
+  "session.delete",
   "session.import",
   "session.send",
   "session.interruptAndDeliver",
@@ -1164,6 +1178,11 @@ export interface PresenceDelivery {
   readonly attachments: readonly AttachmentPresence[];
 }
 
+export interface SessionsChangedDelivery {
+  readonly kind: "sessions_changed";
+  readonly generation: number;
+}
+
 export interface WireHello {
   readonly kind: "hello";
   readonly wireVersion: number;
@@ -1185,6 +1204,7 @@ export type ServerMessage =
   | WireEvent
   | WireActivity
   | PresenceDelivery
+  | SessionsChangedDelivery
   | WireHello;
 
 export interface SessionForkResult extends SessionOpenResult {
@@ -1335,6 +1355,17 @@ function boundedString(value: unknown, path: string, maximum: number): string {
     throw new ProtocolValidationError(path, `must not exceed ${maximum} UTF-8 bytes`);
   }
   return result;
+}
+
+function sessionTitle(value: unknown, path: string): string {
+  const title = boundedString(value, path, 256);
+  if (title.length === 0 || title.trim() !== title || /[\p{Cc}\p{Cf}]/u.test(title)) {
+    throw new ProtocolValidationError(
+      path,
+      "must be non-empty trimmed text without control characters",
+    );
+  }
+  return title;
 }
 
 function boundedText(value: unknown, path: string, maximum: number): string {
@@ -1721,6 +1752,18 @@ export function parseWireRequest(value: unknown): WireRequest {
       ...base,
       method,
       params: { sessionId: parseSessionId(params.sessionId, "request.params.sessionId") },
+    };
+  }
+  if (method === "session.rename") {
+    exact(params, "request.params", ["sessionId", "title"]);
+    const title = sessionTitle(params.title, "request.params.title");
+    return {
+      ...base,
+      method,
+      params: {
+        sessionId: parseSessionId(params.sessionId, "request.params.sessionId"),
+        title,
+      },
     };
   }
   if (method === "session.export") {
@@ -2133,7 +2176,8 @@ export function parseWireRequest(value: unknown): WireRequest {
   if (
     method === "session.interrupt" ||
     method === "session.reload" ||
-    method === "session.dispose"
+    method === "session.dispose" ||
+    method === "session.delete"
   ) {
     exact(params, "request.params", ["sessionId"]);
     return {
@@ -2154,6 +2198,7 @@ function parseSessionOpenResult(
   exact(result, path, [
     "sessionId",
     "cwd",
+    "title",
     "runtime",
     "profile",
     ...(allowSelectedText ? ["selectedText"] : []),
@@ -2171,6 +2216,7 @@ function parseSessionOpenResult(
   return {
     sessionId: parseSessionId(result.sessionId, `${path}.sessionId`),
     cwd: string(result.cwd, `${path}.cwd`),
+    ...(result.title === undefined ? {} : { title: sessionTitle(result.title, `${path}.title`) }),
     runtime: {
       state: runtime.state as SessionOpenResult["runtime"]["state"],
       ...(runtime.activeOperationId === undefined
@@ -2191,6 +2237,7 @@ function parseSessionSummary(value: unknown, path: string): SessionSummary {
   exact(summary, path, [
     "sessionId",
     "cwd",
+    "title",
     "createdAt",
     "updatedAt",
     "userMessageCount",
@@ -2213,6 +2260,7 @@ function parseSessionSummary(value: unknown, path: string): SessionSummary {
   return {
     sessionId: parseSessionId(summary.sessionId, `${path}.sessionId`),
     cwd: string(summary.cwd, `${path}.cwd`),
+    ...(summary.title === undefined ? {} : { title: sessionTitle(summary.title, `${path}.title`) }),
     createdAt: nonNegativeInteger(summary.createdAt, `${path}.createdAt`),
     updatedAt: nonNegativeInteger(summary.updatedAt, `${path}.updatedAt`),
     userMessageCount: nonNegativeInteger(summary.userMessageCount, `${path}.userMessageCount`),
@@ -2514,6 +2562,20 @@ export function parseRpcResult<Method extends RpcMethod>(
         ? {}
         : { selectedText: boundedText(result.selectedText, `${path}.selectedText`, 262_144) }),
     };
+  } else if (method === "session.rename") {
+    const result = object(value, path);
+    exact(result, path, ["title", "eventId"]);
+    parsed = {
+      title: sessionTitle(result.title, `${path}.title`),
+      eventId: parseEventId(result.eventId, `${path}.eventId`),
+    };
+  } else if (method === "session.delete") {
+    const result = object(value, path);
+    exact(result, path, ["deleted", "historyPreserved"]);
+    if (result.deleted !== true || result.historyPreserved !== false) {
+      throw new ProtocolValidationError(path, "must confirm permanent deletion");
+    }
+    parsed = { deleted: true, historyPreserved: false };
   } else if (method === "session.export") {
     const result = object(value, path);
     exact(result, path, ["outputDirectory", "sourceSha256", "eventCount", "blobCount"]);
@@ -2849,6 +2911,8 @@ export const RPC_METHODS = [
   "session.blob.abort",
   "session.blob.read",
   "session.dispose",
+  "session.rename",
+  "session.delete",
 ] as const satisfies readonly RpcMethod[];
 
 export type KnownRpcErrorCode = (typeof RPC_ERROR_CODES)[number];
@@ -2985,6 +3049,13 @@ export const RPC_METHOD_ERROR_CODES = {
     ...MUTATION_ERRORS,
     "content_too_large",
   ],
+  "session.rename": [
+    ...SESSION_BASE_ERRORS,
+    "operation_active",
+    ...MUTATION_ERRORS,
+    "content_too_large",
+  ],
+  "session.delete": [...SESSION_BASE_ERRORS, "operation_active", ...MUTATION_ERRORS],
   "session.export": [
     ...SESSION_BASE_ERRORS,
     "operation_active",
@@ -3314,6 +3385,13 @@ export function parseServerMessage(value: unknown): ServerMessage {
             ? {}
             : { details: parseJsonObject(error.details, "message.error.details") }),
       },
+    };
+  }
+  if (kind === "sessions_changed") {
+    exact(message, "message", ["kind", "generation"]);
+    return {
+      kind,
+      generation: nonNegativeInteger(message.generation, "message.generation"),
     };
   }
   if (kind === "presence") {

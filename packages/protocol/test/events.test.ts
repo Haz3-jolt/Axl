@@ -27,6 +27,7 @@ const sessionId = parseSessionId("123e4567-e89b-42d3-a456-426614174000");
 const validPayloads = {
   "session.created": { cwd: "/workspace", profile: "chat" },
   "session.resumed": {},
+  "session.renamed": { title: "Focused work" },
   "session.closed": { reason: "completed" },
   "user.message": { content: [{ type: "text", text: "hello" }] },
   "queue.enqueued": { content: [{ type: "text", text: "later" }], priority: "back" },
@@ -163,6 +164,8 @@ test("rejects unknown event types", () => {
 test("rejects invalid event payloads", () => {
   const cases = [
     event("session.resumed", { unexpected: true }),
+    event("session.renamed", { title: "  padded" }),
+    event("session.renamed", { title: "" }),
     event("user.message", { content: [{ type: "thinking", text: "hidden" }] }),
     event("assistant.message", { content: [], stopReason: "error" }),
     event("context.compacted", { summary: "empty", replacedEventIds: [] }),

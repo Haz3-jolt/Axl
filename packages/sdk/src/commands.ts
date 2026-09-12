@@ -27,7 +27,17 @@ export interface EffectiveCommand extends CommandDescriptor {
   readonly source: "daemon" | "presentation";
 }
 
-export type CommandSurface = "model" | "thinking" | "providers" | "resume" | "fork" | "review";
+export type CommandSurface =
+  | "model"
+  | "thinking"
+  | "providers"
+  | "resume"
+  | "fork"
+  | "review"
+  | "import"
+  | "export"
+  | "dispose"
+  | "delete";
 
 export type CommandOutcome =
   | { readonly state: "completed"; readonly command: string }
@@ -232,6 +242,21 @@ export class CommandController {
         });
         return { state: "open-session", session };
       }
+      case "rename": {
+        await this.client.request("session.rename", {
+          sessionId: sessionId as SessionId,
+          title: argument as string,
+        });
+        return { state: "completed", command: command.name };
+      }
+      case "import":
+      case "export":
+      case "dispose":
+      case "delete":
+        if (argument) {
+          throw new AxlClientError("invalid_command_argument", `Use /${command.name}`);
+        }
+        return { state: "focus", surface: command.name };
       default:
         throw new AxlClientError(
           "unsupported_command",

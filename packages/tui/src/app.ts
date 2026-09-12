@@ -357,8 +357,6 @@ const CLIENT_COMMANDS: readonly { readonly name: string; readonly summary: strin
   { name: "/status", summary: "show session, display, and queue state" },
   { name: "/usage", summary: "show session token, cache, cost, and speed totals" },
   { name: "/requeue", summary: "re-queue a paused prompt by queue item ID" },
-  { name: "/import", summary: "import and open a session artifact" },
-  { name: "/export", summary: "export the current session artifact" },
   { name: "/stash", summary: "stash, restore, swap, or clear the prompt" },
   { name: "/favorite", summary: "toggle a model in the favorites list" },
   { name: "/developer", summary: "toggle the optional developer panel" },
@@ -2403,6 +2401,29 @@ export class AxlApp {
       }
       return;
     }
+    if (command === "/rename") {
+      if (!argument) this.notice = this.view.palette.dim("· use /rename <title>");
+      else if (this.view.working)
+        this.notice = this.view.palette.dim("· finish or interrupt the turn before renaming");
+      else void this.renameSession(argument);
+      return;
+    }
+    if (command === "/dispose" || command === "/end") {
+      if (this.view.working)
+        this.notice = this.view.palette.dim(
+          "· finish or interrupt the turn before ending the runtime",
+        );
+      else void this.disposeSession(false);
+      return;
+    }
+    if (command === "/delete") {
+      if (this.view.working)
+        this.notice = this.view.palette.dim(
+          "· finish or interrupt the turn before deleting the session",
+        );
+      else void this.disposeSession(true);
+      return;
+    }
     if (command === "/help") {
       const { dim, accent } = this.view.palette;
       this.commitLines([
@@ -3743,6 +3764,7 @@ export class AxlApp {
               (!query ||
                 session.sessionId.toLowerCase().includes(query) ||
                 session.cwd.toLowerCase().includes(query) ||
+                session.title?.toLowerCase().includes(query) ||
                 session.firstUserMessage?.toLowerCase().includes(query) ||
                 session.lastUserMessage?.toLowerCase().includes(query)),
           ),
@@ -3773,7 +3795,10 @@ export class AxlApp {
               ...shown.flatMap((session, position) => {
                 const selected = start + position === index;
                 const message =
-                  session.lastUserMessage ?? session.firstUserMessage ?? "Session without a prompt";
+                  session.title ??
+                  session.lastUserMessage ??
+                  session.firstUserMessage ??
+                  "Session without a prompt";
                 const current = session.sessionId === this.sessionId ? " · current" : "";
                 const location = scope === "all" ? ` · ${formatPath(session.cwd)}` : "";
                 return [
@@ -3979,6 +4004,39 @@ export class AxlApp {
     } catch (error) {
       this.notice = this.view.palette.error(
         `✖ ${error instanceof Error ? error.message : "could not fork session"}`,
+      );
+      this.redraw();
+    }
+  }
+
+  private async renameSession(title: string): Promise<void> {
+    try {
+      await this.commandController.invoke(`/rename ${title}`, this.sessionId);
+      this.notice = this.view.palette.dim(`· renamed session to ${sanitizeTerminalText(title)}`);
+    } catch (error) {
+      this.notice = this.view.palette.error(
+        `✖ ${error instanceof Error ? error.message : "could not rename session"}`,
+      );
+    }
+    this.redraw();
+  }
+
+  private async disposeSession(deleteHistory: boolean): Promise<void> {
+    const confirmed =
+      !deleteHistory ||
+      (await this.confirmShutdown("Delete this session permanently?", [
+        "This removes its durable history and workspace checkpoints.",
+        "This action cannot be undone.",
+      ]));
+    if (!confirmed || this.stopped) return;
+    try {
+      await this.client.request(deleteHistory ? "session.delete" : "session.dispose", {
+        sessionId: this.sessionId,
+      });
+      this.stop();
+    } catch (error) {
+      this.notice = this.view.palette.error(
+        `✖ ${error instanceof Error ? error.message : `could not ${deleteHistory ? "delete" : "dispose of"} session`}`,
       );
       this.redraw();
     }

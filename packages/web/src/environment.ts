@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import { AxlClient, type SessionId } from "@axl/sdk";
+import { AxlClient, parseRpcResult, type SessionId, type SessionOpenResult } from "@axl/sdk";
 import { BrowserWebSocketTransportFactory } from "@axl/sdk/browser";
 
 export interface WebPreferences {
@@ -72,6 +72,31 @@ export async function saveWebPreferences(preferences: WebPreferences): Promise<v
     headers: { "content-type": "application/json" },
     body: JSON.stringify(preferences),
   });
+}
+
+export async function exportSessionArtifact(sessionId: SessionId): Promise<Blob> {
+  const response = await fetch("artifact/export", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId }),
+  });
+  if (!response.ok) throw new Error((await response.text()) || "Could not export the session");
+  return response.blob();
+}
+
+export async function importSessionArtifact(file: File): Promise<SessionOpenResult> {
+  if (file.size === 0 || file.size > 64 * 1024 * 1024) {
+    throw new Error("Session artifact must be between 1 byte and 64 MiB");
+  }
+  const response = await fetch("artifact/import", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: file,
+  });
+  if (!response.ok) throw new Error((await response.text()) || "Could not import the session");
+  return parseRpcResult("session.import", await response.json());
 }
 
 export async function connectWebEnvironment(): Promise<{

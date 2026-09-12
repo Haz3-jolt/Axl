@@ -206,9 +206,14 @@ These actions remain distinct:
 - stop the local gateway without stopping sessions
 - interrupt the active operation while preserving the session
 - dispose a runtime while preserving durable history
+- permanently delete one session's durable history and workspace checkpoints after confirmation
 - stop the daemon after durable operation handling
 
-Closing or reloading a browser tab detaches only that attachment. It never interrupts or disposes a session.
+Closing or reloading a browser tab detaches only that attachment. It never interrupts, disposes, or deletes a session.
+
+Session rename is a canonical event. Clone creates an independent daemon session. Browser export and import use a 64 MiB bounded portable JSON envelope through authenticated trusted-gateway endpoints. The gateway translates that envelope to and from the daemon's directory artifact contract inside private temporary directories. Browser JavaScript receives no host path or process authority.
+
+The daemon publishes capability-filtered session-catalog invalidations after list-visible metadata and runtime changes. Web clients coalesce those notifications and fetch a new typed session list so another attached TUI, web client, or SDK consumer can rename, create, dispose, or delete a session without leaving stale browser navigation.
 
 Switching sessions replaces the conversation snapshot and clears all prior Explorer, Changes, branch, file, diff, queue, interaction, cursor, and status state before loading the selected session's recorded `cwd`.
 

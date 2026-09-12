@@ -13,13 +13,13 @@ This document specifies typed RPC, negotiation, errors, package ownership, and t
 
 ## Current baseline
 
-Wire version 14 uses newline-delimited JSON over a Unix socket. It includes typed request and result envelopes, initialization, capability negotiation, structured errors, idempotency keys, subscription identities, paged snapshots, acknowledged opaque cursors, presence, daemon security reporting, direct shell events, transient activity, session-bound blobs, workspace review, session profiles, web-tool selection, manual compaction, steering, follow-ups, atomic interrupt-and-deliver, canonical model-retry attempts, provider management, model-request configuration, and bounded human-command discovery.
+Wire version 15 uses newline-delimited JSON over a Unix socket. It includes typed request and result envelopes, initialization, capability negotiation, structured errors, idempotency keys, subscription identities, paged snapshots, acknowledged opaque cursors, presence, session-catalog invalidation, daemon security reporting, direct shell events, transient activity, session-bound blobs, workspace review, session profiles, web-tool selection, manual compaction, steering, follow-ups, atomic interrupt-and-deliver, canonical model-retry attempts, provider management, model-request configuration, bounded human-command discovery, and durable session rename and deletion.
 
-The TUI consumes these contracts through `packages/sdk`. The two former branch tips both used version 11 for incompatible additions: provider management on the feature branch and daemon-owned request settings on `main`. Version 12 combines both surfaces. Version 13 adds atomic interrupt-and-deliver. Version 14 adds the capability-filtered `command.list` catalog. Host-control version 1 remains separate from session wire negotiation and is available only to trusted process hosts.
+The TUI consumes these contracts through `packages/sdk`. The two former branch tips both used version 11 for incompatible additions: provider management on the feature branch and daemon-owned request settings on `main`. Version 12 combines both surfaces. Version 13 adds atomic interrupt-and-deliver. Version 14 adds the capability-filtered `command.list` catalog. Version 15 adds canonical session titles, typed rename and permanent deletion, and session-catalog invalidation notifications. Host-control version 1 remains separate from session wire negotiation and is available only to trusted process hosts.
 
 ## Versioning
 
-The current wire version is 14. Version 8 introduced typed envelopes, initialization, errors, retry metadata, subscriptions, cursors, acknowledgements, and presence. Version 9 adds the canonical `model.retry_scheduled` event. Version 10 adds `daemon_stopping` as a pre-RPC and universal RPC error. The two incompatible version-11 development surfaces are superseded. Version 12 combines provider-management RPCs with `config.request`, `model.request_configured`, and request settings in session create and configure RPCs. Version 13 adds atomic interrupt-and-deliver events and RPC. Version 14 adds the bounded command catalog used by first-party command interfaces. Compatible capability additions that do not alter accepted wire data do not require a bump. Pre-1.0 clients require an exact wire-version match.
+The current wire version is 15. Version 8 introduced typed envelopes, initialization, errors, retry metadata, subscriptions, cursors, acknowledgements, and presence. Version 9 adds the canonical `model.retry_scheduled` event. Version 10 adds `daemon_stopping` as a pre-RPC and universal RPC error. The two incompatible version-11 development surfaces are superseded. Version 12 combines provider-management RPCs with `config.request`, `model.request_configured`, and request settings in session create and configure RPCs. Version 13 adds atomic interrupt-and-deliver events and RPC. Version 14 adds the bounded command catalog used by first-party command interfaces. Version 15 adds canonical session titles, rename and permanent-delete RPCs, and session-catalog invalidation. Compatible capability additions that do not alter accepted wire data do not require a bump. Pre-1.0 clients require an exact wire-version match.
 
 The daemon sends `hello` first:
 
@@ -66,6 +66,10 @@ session.list
 session.resume
 session.fork
 session.clone
+session.rename
+session.delete
+session.export
+session.import
 session.send.prompt
 session.steer
 session.follow_up
@@ -241,6 +245,10 @@ The following table lists the additional errors each method may return. The expo
 | `session.unsubscribe` | `unknown_subscription` |
 | `session.fork` | `unknown_session`, `event_migration_required`, `corrupt_session`, `operation_active`, `invalid_fork_point`, `invalid_idempotency_key`, `idempotency_conflict`, `content_too_large` |
 | `session.clone` | `unknown_session`, `event_migration_required`, `corrupt_session`, `operation_active`, `empty_session`, `invalid_idempotency_key`, `idempotency_conflict`, `content_too_large` |
+| `session.rename` | `unknown_session`, `event_migration_required`, `operation_active`, `invalid_idempotency_key`, `idempotency_conflict`, `content_too_large` |
+| `session.delete` | `unknown_session`, `event_migration_required`, `operation_active`, `invalid_idempotency_key`, `idempotency_conflict` |
+| `session.export` | `unknown_session`, `event_migration_required`, `operation_active`, `invalid_path`, `artifact_exists`, `blob_missing`, `blob_corrupt` |
+| `session.import` | `invalid_cwd`, `invalid_path`, `not_found`, `invalid_artifact`, `corrupt_session`, `blob_missing`, `blob_corrupt`, `content_too_large`, `invalid_idempotency_key`, `idempotency_conflict` |
 | `session.send` | `unknown_session`, `event_migration_required`, `operation_active`, `invalid_idempotency_key`, `idempotency_conflict`, `blob_not_owned`, `blob_missing`, `blob_corrupt`, `content_too_large` |
 | `session.interruptAndDeliver` | `unknown_session`, `event_migration_required`, `operation_active`, `invalid_idempotency_key`, `idempotency_conflict`, `blob_not_owned`, `blob_missing`, `blob_corrupt`, `content_too_large` |
 | `session.queue.enqueue` | `unknown_session`, `event_migration_required`, `invalid_idempotency_key`, `idempotency_conflict`, `blob_not_owned`, `blob_missing`, `blob_corrupt`, `content_too_large` |
@@ -249,6 +257,7 @@ The following table lists the additional errors each method may return. The expo
 | `session.interrupt` | `unknown_session`, `event_migration_required`, `invalid_idempotency_key`, `idempotency_conflict` |
 | `session.reload`, `session.configure` | `unknown_session`, `event_migration_required`, `corrupt_session`, `operation_active`, `invalid_idempotency_key`, `idempotency_conflict`, `content_too_large` |
 | `session.interaction.respond` | `unknown_session`, `event_migration_required`, `unknown_interaction`, `interaction_already_resolved`, `invalid_idempotency_key`, `idempotency_conflict`, `content_too_large` |
+| `session.dispose` | `unknown_session`, `event_migration_required`, `invalid_idempotency_key`, `idempotency_conflict` |
 | `session.subscribe` | `unknown_session`, `event_migration_required`, `snapshot_required` |
 | `session.workspace.list` | `unknown_session`, `event_migration_required`, `workspace_unavailable`, `workspace_changed`, `invalid_path`, `path_denied`, `symlink_escape`, `not_found`, `unsupported_file_type`, `unsupported_filename_encoding` |
 | `session.workspace.read` | all `session.workspace.list` errors plus `not_a_file`, `binary_file`, `invalid_encoding`, `content_too_large` |
@@ -460,6 +469,7 @@ Create, resume, fork, and clone return bounded session metadata. `session.resume
 interface SessionOpenResult {
   readonly sessionId: SessionId;
   readonly cwd: string;
+  readonly title?: string;
   readonly runtime: {
     readonly state:
       | "inactive"
@@ -510,9 +520,13 @@ interface SessionUnsubscribeResult {
 }
 ```
 
-There is no `session.end` alias. The user-facing End action invokes `session.dispose` and explains that the active runtime stops while durable history remains.
+`session.rename` appends a canonical `session.renamed` event and returns its event ID. The latest rename is the durable title returned by open and list results. `session.delete` is an idempotent mutation that disposes the runtime, removes canonical history and workspace checkpoints, and returns `{ deleted: true, historyPreserved: false }`.
 
-Unsubscribe, detach, gateway stop, interrupt, session disposal, and daemon stop are distinct. Closing a tab only detaches that attachment.
+There is no `session.end` alias. The user-facing End action invokes `session.dispose` and explains that the active runtime stops while durable history remains. Permanent Delete invokes `session.delete` only after explicit confirmation.
+
+A daemon sends `{ kind: "sessions_changed", generation }` to initialized attachments granted `session.list` whenever list-visible metadata or runtime state changes. The generation increases monotonically for that daemon process. Clients treat it as invalidation, coalesce refreshes, and fetch a fresh typed `session.list`; the notification does not contain session metadata or grant authority.
+
+Unsubscribe, detach, gateway stop, interrupt, session disposal, permanent deletion, and daemon stop are distinct. Closing a tab only detaches that attachment.
 
 ## Transient activity and blobs
 

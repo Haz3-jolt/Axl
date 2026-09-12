@@ -286,6 +286,7 @@ export class SessionView {
     switch (event.type) {
       case "session.created":
       case "session.resumed":
+      case "session.renamed":
       case "interrupt.requested":
       case "interrupt.updated":
       case "config.request":

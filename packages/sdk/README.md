@@ -115,6 +115,8 @@ A platform adapter may establish Unix sockets, WebSockets, or native IPC. It own
 
 `CommandController` loads the daemon's capability-filtered `command.list` catalog, merges presentation-only descriptors with collision checks, and gives clients one searchable command directory. Supported shared command invocation maps back to existing typed RPCs or returns a focused surface for the client to render. It does not use a generic command execution RPC.
 
+Clients granted `session.list` can register `onSessionsChanged`. The notification is an invalidation signal, so clients coalesce updates and fetch fresh typed summaries instead of treating notification payloads as session state.
+
 ## Requests and capabilities
 
 `AxlClient.request()` is typed by the protocol method map:

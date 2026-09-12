@@ -156,7 +156,7 @@ export function workspaceTotals(diffs: readonly WorkspaceDiffResult[]): {
 }
 
 export function sessionTitle(session: SessionSummary): string {
-  return session.lastUserMessage ?? session.firstUserMessage ?? "New session";
+  return session.title ?? session.lastUserMessage ?? session.firstUserMessage ?? "New session";
 }
 
 export function restoreDraft(sent: string, current: string): string {

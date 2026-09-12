@@ -138,6 +138,8 @@ Repository content, event text, Markdown, filenames, and tool output are untrust
 
 Static production assets use content hashes, but authenticated responses and HTML remain `no-store`. The packaging specification defines asset verification.
 
+Session import and export use authenticated same-origin `POST` endpoints under the process-random path prefix. The browser exchanges a portable `axl.web-session` JSON envelope capped at 64 MiB. The gateway validates its exact file list, manifest-declared content, canonical base64, and size before handing a private temporary directory to the daemon's typed artifact RPCs. Temporary files use owner-only permissions and are removed after every success or failure. Browser JavaScript never receives or chooses a daemon host filesystem path.
+
 ## WebSocket limits
 
 Initial limits are:

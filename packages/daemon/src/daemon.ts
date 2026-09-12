@@ -226,10 +226,14 @@ export class AxlDaemon {
   private readonly connections = new Set<Socket>();
   private readonly connectionStates = new Set<ConnectionState>();
   private readonly cursors = new Map<EventCursor, CursorRecord>();
+  private sessionCatalogGeneration = 0;
 
   constructor(options: DaemonOptions) {
     this.hostOptions = options;
-    this.sessions = new SessionManager(options);
+    this.sessions = new SessionManager({
+      ...options,
+      onSessionMetadataChange: () => this.publishSessionCatalogChanged(),
+    });
     this.socketPath = options.socketPath;
     this.securityMode = options.securityMode ?? "sandboxed";
     this.sandboxProvider = options.sandboxProvider ?? "unknown";
@@ -1087,6 +1091,15 @@ export class AxlDaemon {
           ...(cloned.selectedText === undefined ? {} : { selectedText: cloned.selectedText }),
         };
       }
+      case "session.rename":
+        return this.sessions.rename(
+          request.params.sessionId,
+          request.params.title,
+          this.mutationOperationId(acceptance),
+        );
+      case "session.delete":
+        await this.sessions.delete(request.params.sessionId);
+        return { deleted: true, historyPreserved: false };
       case "session.export":
         return this.sessions.exportArtifact(
           request.params.sessionId,
@@ -1308,6 +1321,7 @@ export class AxlDaemon {
         return [
           summary.sessionId,
           summary.cwd,
+          summary.title ?? "",
           summary.firstUserMessage ?? "",
           summary.lastUserMessage ?? "",
         ].some((value) => value.toLocaleLowerCase().includes(query));
@@ -1752,6 +1766,15 @@ export class AxlDaemon {
         });
       }
       subscription.bufferedActivity.length = 0;
+    }
+  }
+
+  private publishSessionCatalogChanged(): void {
+    this.sessionCatalogGeneration += 1;
+    for (const state of this.connectionStates) {
+      if (state.initialized && state.grantedCapabilities.has("session.list")) {
+        state.send({ kind: "sessions_changed", generation: this.sessionCatalogGeneration });
+      }
     }
   }
 

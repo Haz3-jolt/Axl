@@ -73,6 +73,7 @@ export type EventPayloadMap = {
     readonly sourceEventId?: EventId;
   };
   "session.resumed": Record<string, never>;
+  "session.renamed": { readonly title: string };
   "session.closed": { readonly reason: SessionCloseReason };
   "user.message": { readonly content: readonly UserContent[] };
   "queue.enqueued": {
@@ -354,6 +355,17 @@ const payloadParsers: { readonly [Type in EventType]: PayloadParser } = {
   },
   "session.resumed": (payload, path) => {
     exact(payload, path, []);
+    return payload;
+  },
+  "session.renamed": (payload, path) => {
+    exact(payload, path, ["title"]);
+    const title = string(payload.title, `${path}.title`);
+    if (new TextEncoder().encode(title).byteLength > 256) {
+      validationError(`${path}.title`, "must not exceed 256 UTF-8 bytes");
+    }
+    if (title.length === 0 || title.trim() !== title || /[\p{Cc}\p{Cf}]/u.test(title)) {
+      validationError(`${path}.title`, "must be non-empty trimmed text without control characters");
+    }
     return payload;
   },
   "session.closed": (payload, path) => {

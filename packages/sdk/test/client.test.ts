@@ -147,6 +147,18 @@ test("initializes exactly once and creates keys only for retryable mutations", a
   client.close();
 });
 
+test("delivers session catalog invalidation notifications", async () => {
+  const { client, transport } = await connect();
+  const generations: number[] = [];
+  const remove = client.onSessionsChanged((delivery) => generations.push(delivery.generation));
+  transport.emit({ kind: "sessions_changed", generation: 3 });
+  assert.deepEqual(generations, [3]);
+  remove();
+  transport.emit({ kind: "sessions_changed", generation: 4 });
+  assert.deepEqual(generations, [3]);
+  client.close();
+});
+
 test("reads and validates a session blob across bounded chunks", async () => {
   const { client, transport } = await connect();
   const pending = client.readBlob(parseSessionId("123e4567-e89b-42d3-a456-426614174000"), {
