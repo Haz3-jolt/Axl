@@ -37,7 +37,7 @@ import {
 } from "@axl/sdk";
 
 import { CommandPalette } from "./command-palette.tsx";
-import { filterCommands } from "./commands.ts";
+import { filterCommands, webPresentationCommands } from "./commands.ts";
 import type { ControlCenterTab } from "./control-center.tsx";
 import {
   browserProviderHost,
@@ -387,7 +387,16 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       if (disposed) { environment.client.close(); return; }
       activeClient = environment.client; setClient(environment.client); setBootstrap(environment.bootstrap);
       if (environment.client.connection.grantedCapabilities.includes("command.list")) {
-        commandController.current = new CommandController(environment.client);
+        commandController.current = new CommandController(environment.client, () =>
+          webPresentationCommands(
+            environment.bootstrap.hostCapabilities.includes("provider.auth.login"),
+            () => {
+              setUsageOpen(false);
+              setTranscriptSearchOpen(false);
+              setControlCenter("providers");
+            },
+          ),
+        );
       }
       setSidebarWidth(environment.bootstrap.preferences.sidebarWidth);
       setChangesWidth(environment.bootstrap.preferences.changesWidth);
@@ -550,8 +559,9 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     setBusy(true); setError(undefined);
     try {
       if (preview?.renameSession !== undefined) await preview.renameSession(title);
-      else if (client !== undefined) await client.request("session.rename", { sessionId: opened.sessionId, title });
-      else throw new Error("Session rename is unavailable");
+      else if (client !== undefined && commandController.current !== undefined) {
+        await commandController.current.invoke(`/rename ${title}`, opened.sessionId);
+      } else throw new Error("Session rename is unavailable");
       if (client !== undefined) await refreshSessions(client);
       else setSessions((current) => current.map((session) => session.sessionId === opened.sessionId ? { ...session, title } : session));
       setOpened((current) => current === undefined ? current : { ...current, title });
@@ -568,11 +578,16 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     if (!opened) return;
     setBusy(true); setError(undefined);
     try {
-      const cloned = preview?.cloneSession !== undefined
-        ? await preview.cloneSession()
-        : client !== undefined
-          ? await client.request("session.clone", { sessionId: opened.sessionId })
+      const cloneOutcome =
+        preview?.cloneSession === undefined && commandController.current !== undefined
+          ? await commandController.current.invoke("/clone", opened.sessionId)
           : undefined;
+      const cloned =
+        preview?.cloneSession !== undefined
+          ? await preview.cloneSession()
+          : cloneOutcome?.state === "open-session"
+            ? cloneOutcome.session
+            : undefined;
       if (cloned === undefined) throw new Error("Session clone is unavailable");
       if (client !== undefined) await refreshSessions(client);
       setSessionLifecycleOpen(false);
@@ -965,10 +980,11 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       setConversation((current) => ({ ...current, provider: choice.providerId, model: choice.modelId }));
       return;
     }
-    if (!client || !opened) return;
+    const controller = commandController.current;
+    if (!client || !opened || controller === undefined) return;
     setBusy(true); setError(undefined);
     try {
-      await client.request("session.configure", { sessionId: opened.sessionId, providerId: choice.providerId, modelId: choice.modelId });
+      await controller.invoke(`/model ${choice.providerId}/${choice.modelId}`, opened.sessionId);
       await refreshCommandDirectory(opened.sessionId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not change model");
@@ -982,10 +998,11 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       setConversation((current) => ({ ...current, thinking: thinkingLevel }));
       return;
     }
-    if (!client || !opened) return;
+    const controller = commandController.current;
+    if (!client || !opened || controller === undefined) return;
     setBusy(true); setError(undefined);
     try {
-      await client.request("session.configure", { sessionId: opened.sessionId, thinkingLevel });
+      await controller.invoke(`/thinking ${thinkingLevel}`, opened.sessionId);
       await refreshCommandDirectory(opened.sessionId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not change effort");
@@ -1044,13 +1061,15 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       showActionNotice("Fork preview");
       return;
     }
-    if (!client || !opened) return;
+    const controller = commandController.current;
+    if (!client || !opened || controller === undefined) return;
     setBusy(true); setError(undefined);
     try {
-      const forked = await client.request("session.fork", { sessionId: opened.sessionId, fromEventId });
+      const outcome = await controller.invoke(`/fork ${fromEventId}`, opened.sessionId);
+      if (outcome.state !== "open-session") throw new Error("Fork did not open a session");
       await refreshSessions(client);
-      await openSession(client, forked.sessionId);
-      setDraft(forked.selectedText ?? "");
+      await openSession(client, outcome.session.sessionId, outcome.session);
+      setDraft(outcome.session.selectedText ?? "");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not fork the session");
       setBusy(false);
@@ -1250,7 +1269,11 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
             state: "completed" as const,
             command: "compact",
           })
-        : await controller?.invoke(input, opened?.sessionId);
+        : await controller?.invoke(input, opened?.sessionId, {
+            ...(conversation.requestSettings === undefined
+              ? {}
+              : { requestSettings: conversation.requestSettings }),
+          });
       if (generation !== selectionGeneration.current || outcome === undefined) return;
       if (outcome.state === "open-session") {
         if (client === undefined) throw new Error("Session switching is unavailable in preview mode");
@@ -1259,13 +1282,25 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         setDraft(outcome.session.selectedText ?? "");
         return;
       }
-      if (outcome.state === "completed") {
-        if (outcome.command === "rename" && client !== undefined) await refreshSessions(client);
-        if ((outcome.command === "refresh" || outcome.command === "logout") && client !== undefined) {
+      if (outcome.state === "session-configured") {
+        await refreshCommandDirectory(opened?.sessionId);
+        showActionNotice(`/${outcome.command} completed`);
+        return;
+      }
+      if (
+        outcome.state === "provider-catalog-refreshed" ||
+        outcome.state === "provider-logged-out"
+      ) {
+        if (client !== undefined) {
           const directory = await loadProviderDirectory(client, true);
           setProviderInventory(directory.providers);
           setModelCatalog(directory.models);
         }
+        showActionNotice(`/${outcome.command} completed`);
+        return;
+      }
+      if (outcome.state === "completed") {
+        if (outcome.command === "rename" && client !== undefined) await refreshSessions(client);
         showActionNotice(
           compacting && directCancellationRequested.current
             ? "Compaction cancelled"
@@ -1275,10 +1310,21 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       }
       if (outcome.surface === "model" || outcome.surface === "thinking") {
         setModelPickerOpenRequest((current) => current + 1);
-      } else if (outcome.surface === "providers") {
+      } else if (
+        outcome.surface === "providers" ||
+        outcome.surface === "login" ||
+        outcome.surface === "logout"
+      ) {
         setUsageOpen(false);
         setTranscriptSearchOpen(false);
         setControlCenter("providers");
+      } else if (outcome.surface === "request") {
+        const settings = conversation.requestSettings;
+        showActionNotice(
+          settings === undefined
+            ? "Request settings are unavailable for this runtime"
+            : `Output ${settings.maxOutputTokens ?? "model"} · idle ${settings.httpIdleTimeoutMs || "disabled"}`,
+        );
       } else if (outcome.surface === "resume") {
         setSidebarCollapsed(false);
         setSidebarOpen(true);
@@ -1286,6 +1332,8 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         showActionNotice("Choose Fork on the message where the new session should begin");
       } else if (outcome.surface === "import") {
         artifactInput.current?.click();
+      } else if (outcome.surface === "attach") {
+        fileInput.current?.click();
       } else if (outcome.surface === "export") {
         await exportArtifact();
       } else if (outcome.surface === "dispose" || outcome.surface === "delete") {
@@ -1376,11 +1424,11 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       showActionNotice(providerId === undefined ? "Provider catalogs refreshed" : `${providerId} refreshed`);
       return;
     }
-    if (!client) return;
+    const controller = commandController.current;
+    if (!client || controller === undefined) return;
     setProviderLoading(true); setProviderError(undefined);
     try {
-      if (client.connection.grantedCapabilities.includes("provider.catalog.refresh"))
-        await client.refreshProviderCatalogs(providerId === undefined ? {} : { providerId });
+      await controller.invoke(`/refresh${providerId === undefined ? "" : ` ${providerId}`}`);
       const directory = await loadProviderDirectory(client, true);
       setProviderInventory(directory.providers);
       setModelCatalog(directory.models);
@@ -1438,10 +1486,11 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       showActionNotice(`${providerId} logout preview`);
       return;
     }
-    if (!client) return;
+    const controller = commandController.current;
+    if (!client || controller === undefined) return;
     setProviderLoading(true); setProviderError(undefined);
     try {
-      await client.logoutProvider({ providerId });
+      await controller.invoke(`/logout ${providerId}`);
       const directory = await loadProviderDirectory(client, true);
       setProviderInventory(directory.providers);
       setModelCatalog(directory.models);

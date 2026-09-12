@@ -39,13 +39,14 @@ import {
   AxlClientError,
   type ClientModelInfo,
   CommandController,
+  type CommandOutcome,
   ConversationProjector,
+  type PresentationCommand,
   type DaemonHostControl,
   type DaemonHostStatus,
   type ModelRequestSettings,
   orderPendingTurnInputs,
   ProviderClientError,
-  parseModelRequestSettings,
   type SessionSubscription,
   subscribeSession,
   supportedThinkingLevels,
@@ -347,29 +348,26 @@ function openExternalUrl(url: string, onError: (error: Error) => void): void {
   child.unref();
 }
 
-const CLIENT_COMMANDS: readonly { readonly name: string; readonly summary: string }[] = [
-  { name: "/theme", summary: "select a color theme" },
-  { name: "/settings", summary: "change persistent terminal preferences" },
-  { name: "/details", summary: "set transcript detail: compact, full, or focus" },
-  { name: "/fullscreen", summary: "switch to fullscreen transcript mode" },
-  { name: "/regular", summary: "return to terminal scrollback mode" },
-  { name: "/login", summary: "authenticate a provider" },
-  { name: "/status", summary: "show session, display, and queue state" },
-  { name: "/usage", summary: "show session token, cache, cost, and speed totals" },
-  { name: "/requeue", summary: "re-queue a paused prompt by queue item ID" },
-  { name: "/stash", summary: "stash, restore, swap, or clear the prompt" },
-  { name: "/favorite", summary: "toggle a model in the favorites list" },
-  { name: "/developer", summary: "toggle the optional developer panel" },
-  { name: "/attach", summary: "attach an image file to the next prompt" },
-  { name: "/vim", summary: "toggle optional Vim editing" },
-  { name: "/commands", summary: "browse and search available commands" },
-  { name: "/history", summary: "search prompt history" },
-  { name: "/edit", summary: "open the prompt in VISUAL or EDITOR" },
-  { name: "/hotkeys", summary: "browse and search keyboard shortcuts" },
-  { name: "/help", summary: "show commands and keys" },
-  { name: "/detach", summary: "leave the session running in the daemon" },
-  { name: "/request", summary: "show or configure model output and HTTP idle limits" },
-  { name: "/quit", summary: "interrupt work and shut down the daemon" },
+const TUI_COMMANDS: readonly { readonly name: string; readonly description: string }[] = [
+  { name: "theme", description: "select a color theme" },
+  { name: "settings", description: "change persistent terminal preferences" },
+  { name: "details", description: "set transcript detail: compact, full, or focus" },
+  { name: "fullscreen", description: "switch to fullscreen transcript mode" },
+  { name: "regular", description: "return to terminal scrollback mode" },
+  { name: "login", description: "authenticate a provider" },
+  { name: "status", description: "show session, display, and queue state" },
+  { name: "usage", description: "show session token, cache, cost, and speed totals" },
+  { name: "stash", description: "stash, restore, swap, or clear the prompt" },
+  { name: "favorite", description: "toggle a model in the favorites list" },
+  { name: "developer", description: "toggle the optional developer panel" },
+  { name: "vim", description: "toggle optional Vim editing" },
+  { name: "commands", description: "browse and search available commands" },
+  { name: "history", description: "search prompt history" },
+  { name: "edit", description: "open the prompt in VISUAL or EDITOR" },
+  { name: "hotkeys", description: "browse and search keyboard shortcuts" },
+  { name: "help", description: "show commands and keys" },
+  { name: "detach", description: "leave the session running in the daemon" },
+  { name: "quit", description: "interrupt work and shut down the daemon" },
 ];
 
 const RESERVED_EXTENSION_INPUTS = new Set(["\r", "\n", "\x1b", "\x03", "\x04", "\x0f", "\x1a"]);
@@ -680,7 +678,6 @@ export class AxlApp {
   ) {
     this.options = options;
     this.client = options.client;
-    this.commandController = new CommandController(options.client);
     this.reconnectClient = options.reconnectClient;
     this.daemonHost = options.daemonHost;
     this.sessionId = sessionId;
@@ -748,6 +745,7 @@ export class AxlApp {
     );
     this.view.toolOutputDisplay = options.toolOutputDisplay ?? "compact";
     this.extensionHost = new TerminalExtensionHost(options.extensions);
+    this.commandController = this.createCommandController(options.client);
     this.extensionWidgetsAbove = new ExtensionWidgetsComponent(
       this.extensionHost,
       "aboveEditor",
@@ -800,11 +798,40 @@ export class AxlApp {
     this.bindClient(options.client);
   }
 
+  private presentationCommands(): readonly PresentationCommand[] {
+    return [
+      ...TUI_COMMANDS.filter(
+        (command) =>
+          command.name !== "login" ||
+          this.client.connection.grantedCapabilities?.includes("provider.auth.login") !== true,
+      ).map((command) => ({
+        id: `tui.${command.name}`,
+        name: command.name,
+        description: command.description,
+        run: (argument?: string) => this.runPresentationCommand(command.name, argument),
+      })),
+      ...this.extensionHost.commands().map((command) => ({
+        id: `${command.extensionId}.${command.name}`,
+        name: command.name,
+        extensionId: command.extensionId,
+        description: extensionSingleLine(`${command.description} · ${command.extensionId}`),
+        run: (argument?: string) =>
+          this.runExtensionAction(command.extensionId, (context) =>
+            command.run(argument ?? "", context),
+          ),
+      })),
+    ];
+  }
+
+  private createCommandController(client: AxlClient): CommandController {
+    return new CommandController(client, () => this.presentationCommands());
+  }
+
   private bindClient(client: AxlClient): void {
     const previous = this.client;
     this.unsubscribeDisconnect();
     this.client = client;
-    this.commandController = new CommandController(client);
+    this.commandController = this.createCommandController(client);
     this.unsubscribeDisconnect = client.onDisconnect((error) => {
       if (error instanceof AxlClientError && error.code === "daemon_stopping") {
         this.reconnectGeneration += 1;
@@ -1000,18 +1027,7 @@ export class AxlApp {
     try {
       await app.commandController.refresh(opened?.sessionId);
       await app.extensionHost.activate();
-      const builtIns = new Set([
-        ...app.commandController.commands.flatMap((command) => [command.name, ...command.aliases]),
-        ...CLIENT_COMMANDS.map((command) => command.name.slice(1)),
-      ]);
-      const conflictingCommand = app.extensionHost
-        .commands()
-        .find((command) => builtIns.has(command.name));
-      if (conflictingCommand !== undefined) {
-        throw new Error(
-          `Extension ${conflictingCommand.extensionId} conflicts with built-in command /${conflictingCommand.name}`,
-        );
-      }
+      void app.commandController.commands;
       const conflictingShortcut = app.extensionHost
         .shortcuts()
         .find((shortcut) => isReservedExtensionShortcut(shortcut.key));
@@ -1189,11 +1205,6 @@ export class AxlApp {
           command.availability.state === "available"
             ? command.description
             : `${command.description} · ${command.availability.reason}`,
-      })),
-      ...CLIENT_COMMANDS,
-      ...this.extensionHost.commands().map((command) => ({
-        name: `/${command.name}`,
-        summary: extensionSingleLine(`${command.description} · ${command.extensionId}`),
       })),
     ];
   }
@@ -2334,6 +2345,328 @@ export class AxlApp {
     }
   }
 
+  private async runPresentationCommand(name: string, argument?: string): Promise<void> {
+    switch (name) {
+      case "quit":
+        await this.quit();
+        return;
+      case "detach":
+        this.stop();
+        return;
+      case "help": {
+        const { dim, accent } = this.view.palette;
+        this.commitLines([
+          accent("Commands"),
+          ...this.availableCommands().map(
+            (item) => `  ${accent(item.name.padEnd(11))} ${dim(item.summary)}`,
+          ),
+          "",
+          accent("Keys"),
+          ...KEY_HELP.map((row) => `  ${dim(row)}`),
+        ]);
+        return;
+      }
+      case "commands":
+        await this.commandController.refresh(this.sessionId);
+        this.openCommands();
+        return;
+      case "history":
+        this.openHistory();
+        return;
+      case "edit":
+        void this.openExternalEditor();
+        return;
+      case "hotkeys":
+        this.openPicker({
+          title: "Keyboard shortcuts",
+          items: this.availableHotkeys().map((item) => ({
+            value: `${item.key} ${item.action}`,
+            label: item.key,
+            description: item.action,
+          })),
+          current: "",
+          onPick: () => undefined,
+        });
+        return;
+      case "stash":
+        if (argument === "clear") {
+          this.stashedPrompt = undefined;
+          this.notice = this.view.palette.dim("· prompt stash cleared");
+        } else if (argument) this.notice = this.view.palette.error("✖ use /stash or /stash clear");
+        else this.togglePromptStash();
+        return;
+      case "favorite": {
+        const activeModel = this.view.model ?? this.options.currentModel ?? "";
+        const activeProvider = this.view.provider ?? this.options.currentProvider;
+        this.toggleModelFavorite(
+          argument ||
+            (activeProvider === undefined ? activeModel : `${activeProvider}/${activeModel}`),
+        );
+        return;
+      }
+      case "developer":
+        this.setDeveloperPanel(argument ?? "");
+        return;
+      case "vim":
+        this.setEditorMode(argument ?? "");
+        return;
+      case "fullscreen":
+        this.setTuiMode("fullscreen");
+        return;
+      case "regular":
+        this.setTuiMode("regular");
+        return;
+      case "settings":
+        this.openSettings();
+        return;
+      case "login":
+        await this.loginProvider(argument);
+        return;
+      case "details":
+        this.selectDetails(argument ?? "");
+        return;
+      case "theme":
+        this.selectTheme(argument ?? "");
+        return;
+      case "status":
+        this.commitLines([
+          this.view.palette.accent("Session"),
+          `  id        ${this.sessionId}`,
+          `  profile   ${this.view.profile ?? "?"}`,
+          `  provider  ${this.view.provider ?? "?"}`,
+          `  model     ${this.view.model ?? "?"}`,
+          `  thinking  ${this.view.thinking ?? "?"}`,
+          ...this.requestConfigurationLines(),
+          `  sandbox   ${this.view.sandbox ?? "?"}`,
+          `  connection ${this.connectionState}`,
+          `  display   ${this.tuiMode}${this.tuiMode === "fullscreen" ? ` · mouse ${this.fullscreenMouse}` : ""}`,
+          `  events    ${this.seenEventIds.size}`,
+          ...(this.lastReconnectError === undefined
+            ? []
+            : [`  last error ${this.lastReconnectError}`]),
+          `  usage     ${this.view.usageLabel()}`,
+          `  speed     ${this.view.tpsLabel() || "?"}`,
+          `  queued    ${
+            this.queued.length +
+            (this.sessionSubscription?.projector.state.queue.filter(
+              (item) => item.status === "queued" || item.status === "paused",
+            ).length ?? 0)
+          }`,
+          `  editor    ${this.editorMode}`,
+          `  favorites ${this.modelFavorites.length}`,
+          `  developer ${this.developerPanelEnabled ? "on" : "off"}`,
+        ]);
+        return;
+      case "usage": {
+        const promptTokens =
+          this.view.inputTokens + this.view.cacheReadTokens + this.view.cacheWriteTokens;
+        const cacheHit = promptTokens === 0 ? 0 : (this.view.cacheReadTokens / promptTokens) * 100;
+        this.commitLines([
+          this.view.palette.accent("Session usage"),
+          `  model       ${this.view.provider ?? "?"}/${this.view.model ?? "?"} · ${this.view.thinking ?? "?"}`,
+          `  input       ${this.view.inputTokens}`,
+          `  output      ${this.view.outputTokens}`,
+          `  cache read  ${this.view.cacheReadTokens}`,
+          `  cache write ${this.view.cacheWriteTokens}`,
+          `  cache hit   ${cacheHit.toFixed(1)}%`,
+          `  reasoning   ${this.view.reasoningTokens}`,
+          `  cost        $${this.view.totalCostUsd.toFixed(4)}`,
+          `  speed       ${this.view.tpsLabel() || "unknown"}`,
+        ]);
+        return;
+      }
+      default:
+        throw new Error(`Unsupported TUI command /${name}`);
+    }
+  }
+
+  private async handleCommandOutcome(
+    command: string,
+    argument: string | undefined,
+    outcome: CommandOutcome,
+  ): Promise<void> {
+    if (outcome.state === "open-session") {
+      await this.switchSession(
+        outcome.session,
+        outcome.session.selectedText ?? "",
+        `· ${command === "clone" ? "cloned" : command === "fork" ? "forked" : "resumed"} to new session`,
+      );
+      return;
+    }
+    if (outcome.state === "provider-catalog-refreshed") {
+      await this.loadProviderInventory();
+      this.notice = this.view.palette.dim(
+        `· refreshed ${plural(outcome.result.providers.length, "provider")}`,
+      );
+      return;
+    }
+    if (outcome.state === "provider-logged-out") {
+      this.notice = this.view.palette.dim(`· ${authenticationLabel(outcome.result)}`);
+      return;
+    }
+    if (outcome.state === "session-configured") {
+      await this.commandController.refresh(this.sessionId);
+      if (outcome.update.modelId !== undefined) {
+        this.options.onModelChange?.(outcome.update.modelId);
+      }
+      await this.persistPreferences({
+        ...(outcome.update.providerId === undefined
+          ? {}
+          : { providerId: outcome.update.providerId }),
+        ...(outcome.update.modelId === undefined ? {} : { modelId: outcome.update.modelId }),
+        ...(outcome.update.thinkingLevel === undefined
+          ? {}
+          : { thinkingLevel: outcome.update.thinkingLevel }),
+        ...(outcome.update.requestSettings === undefined
+          ? {}
+          : { requestSettings: outcome.update.requestSettings }),
+      });
+      if (outcome.command === "request") {
+        this.notice = this.view.palette.dim("· model request settings updated");
+      }
+      return;
+    }
+    if (outcome.state === "completed") {
+      if (command === "rename") {
+        this.notice = this.view.palette.dim(
+          `· renamed session to ${sanitizeTerminalText(argument ?? "")}`,
+        );
+      }
+      return;
+    }
+    switch (outcome.surface) {
+      case "model":
+        await this.selectModel("");
+        return;
+      case "thinking":
+        this.selectThinking("");
+        return;
+      case "providers":
+        await this.showProviders(outcome.argument);
+        return;
+      case "login":
+        await this.loginProvider(outcome.argument);
+        return;
+      case "logout":
+        await this.logoutProvider(outcome.argument);
+        return;
+      case "request":
+        this.commitLines([
+          ...this.requestConfigurationLines(),
+          "  /request output <tokens|model> · /request idle <milliseconds|disabled>",
+        ]);
+        return;
+      case "resume":
+        await this.openResume();
+        return;
+      case "fork":
+        this.openFork();
+        return;
+      case "requeue":
+        this.openRequeue();
+        return;
+      case "review":
+        if (outcome.argument === "off") {
+          await this.configureWorkspaceReview(false);
+          this.notice = this.view.palette.dim("· workspace review disabled");
+        } else {
+          await this.openDiffReview((outcome.argument ?? "working") as WorkspaceReviewScope);
+        }
+        return;
+      case "attach":
+        if (outcome.argument === "clear") {
+          this.pendingAttachments.length = 0;
+          this.clipboardFiles.clear();
+          this.notice = this.view.palette.dim("· attachments cleared");
+        } else if (outcome.argument === undefined) {
+          this.notice = this.view.palette.dim("· use /attach <image path> or /attach clear");
+        } else {
+          await this.attachPath(outcome.argument);
+        }
+        return;
+      case "import":
+        if (outcome.argument === undefined) {
+          this.notice = this.view.palette.dim("· use /import <artifact directory>");
+        } else {
+          await this.importSession(outcome.argument);
+        }
+        return;
+      case "export":
+        await this.exportSession(outcome.argument ?? "");
+        return;
+      case "dispose":
+        await this.disposeSession(false);
+        return;
+      case "delete":
+        await this.disposeSession(true);
+        return;
+    }
+  }
+
+  private async runSharedCommand(
+    line: string,
+    command: string,
+    argument: string | undefined,
+  ): Promise<void> {
+    const changesSession = command === "resume" || command === "fork" || command === "clone";
+    const requiresIdle = new Set([
+      "clone",
+      "compact",
+      "delete",
+      "dispose",
+      "export",
+      "fork",
+      "import",
+      "login",
+      "model",
+      "reload",
+      "rename",
+      "resume",
+      "thinking",
+    ]).has(command);
+    if (requiresIdle && this.view.working) {
+      this.notice = this.view.palette.dim("· finish or interrupt the turn first");
+      return;
+    }
+    if ((changesSession || command === "import") && this.pendingAttachments.length > 0) {
+      this.notice = this.view.palette.dim("· send or clear attachments before changing sessions");
+      return;
+    }
+    if (command === "reload") {
+      await this.reload();
+      return;
+    }
+    if (command === "compact") {
+      await this.compact(argument);
+      return;
+    }
+    if (command === "refresh") {
+      await this.refreshProviders(argument);
+      return;
+    }
+    if (command === "logout") {
+      await this.logoutProvider(argument);
+      return;
+    }
+    if (command === "login") {
+      await this.loginProvider(argument);
+      return;
+    }
+    if (command === "model") {
+      await this.selectModel(argument ?? "");
+      return;
+    }
+    if (command === "thinking") {
+      this.selectThinking(argument ?? "");
+      return;
+    }
+    const requestSettings = this.sessionSubscription?.projector.overview.requestSettings;
+    const outcome = await this.commandController.invoke(line, this.sessionId, {
+      ...(requestSettings === undefined ? {} : { requestSettings }),
+    });
+    await this.handleCommandOutcome(command, argument, outcome);
+  }
+
   private async submit(
     inputLine: string,
     delivery: "default" | "followUp" | "interrupt" = "default",
@@ -2363,321 +2696,23 @@ export class AxlApp {
     const [command, ...arguments_] = line.split(/\s+/);
     const argument = arguments_.join(" ");
 
-    if (command === "/quit") {
-      await this.quit();
-      return;
-    }
-    if (command === "/detach") {
-      this.stop();
-      return;
-    }
-    if (command === "/resume" || command === "/fork" || command === "/clone") {
-      if (this.view.working) {
-        this.notice = this.view.palette.dim("· finish or interrupt the turn first");
-      } else if (this.pendingAttachments.length > 0) {
-        this.notice = this.view.palette.dim("· send or clear attachments before changing sessions");
-      } else if (command === "/resume") void this.openResume();
-      else if (command === "/fork") this.openFork();
-      else void this.cloneSession();
-      return;
-    }
-    if (command === "/import") {
-      if (!argument) {
-        this.notice = this.view.palette.dim("· use /import <artifact directory>");
-      } else if (this.view.working) {
-        this.notice = this.view.palette.dim("· finish or interrupt the turn before importing");
-      } else if (this.pendingAttachments.length > 0) {
-        this.notice = this.view.palette.dim("· send or clear attachments before changing sessions");
-      } else {
-        void this.importSession(argument);
-      }
-      return;
-    }
-    if (command === "/export") {
-      if (this.view.working) {
-        this.notice = this.view.palette.dim("· finish or interrupt the turn before exporting");
-      } else {
-        void this.exportSession(argument);
-      }
-      return;
-    }
-    if (command === "/rename") {
-      if (!argument) this.notice = this.view.palette.dim("· use /rename <title>");
-      else if (this.view.working)
-        this.notice = this.view.palette.dim("· finish or interrupt the turn before renaming");
-      else void this.renameSession(argument);
-      return;
-    }
-    if (command === "/dispose" || command === "/end") {
-      if (this.view.working)
-        this.notice = this.view.palette.dim(
-          "· finish or interrupt the turn before ending the runtime",
-        );
-      else void this.disposeSession(false);
-      return;
-    }
-    if (command === "/delete") {
-      if (this.view.working)
-        this.notice = this.view.palette.dim(
-          "· finish or interrupt the turn before deleting the session",
-        );
-      else void this.disposeSession(true);
-      return;
-    }
-    if (command === "/help") {
-      const { dim, accent } = this.view.palette;
-      this.commitLines([
-        accent("Commands"),
-        ...this.availableCommands().map(
-          (item) => `  ${accent(item.name.padEnd(11))} ${dim(item.summary)}`,
-        ),
-        "",
-        accent("Keys"),
-        ...KEY_HELP.map((row) => `  ${dim(row)}`),
-      ]);
-      return;
-    }
-    if (command === "/commands") {
-      try {
-        await this.commandController.refresh(this.sessionId);
-        this.openCommands();
-      } catch (error) {
-        this.notice = this.view.palette.error(
-          `✖ ${error instanceof Error ? error.message : "could not refresh commands"}`,
-        );
-      }
-      return;
-    }
-    if (command === "/history") {
-      this.openHistory();
-      return;
-    }
-    if (command === "/edit") {
-      void this.openExternalEditor();
-      return;
-    }
-    if (command === "/hotkeys") {
-      this.openPicker({
-        title: "Keyboard shortcuts",
-        items: this.availableHotkeys().map((item) => ({
-          value: `${item.key} ${item.action}`,
-          label: item.key,
-          description: item.action,
-        })),
-        current: "",
-        onPick: () => undefined,
-      });
-      return;
-    }
-    if (command === "/stash") {
-      if (argument === "clear") {
-        this.stashedPrompt = undefined;
-        this.notice = this.view.palette.dim("· prompt stash cleared");
-      } else if (argument) this.notice = this.view.palette.error("✖ use /stash or /stash clear");
-      else this.togglePromptStash();
-      return;
-    }
-    if (command === "/favorite") {
-      const activeModel = this.view.model ?? this.options.currentModel ?? "";
-      const activeProvider = this.view.provider ?? this.options.currentProvider;
-      this.toggleModelFavorite(
-        argument ||
-          (activeProvider === undefined ? activeModel : `${activeProvider}/${activeModel}`),
-      );
-      return;
-    }
-    if (command === "/developer") {
-      this.setDeveloperPanel(argument);
-      return;
-    }
-    if (command === "/vim") {
-      this.setEditorMode(argument);
-      return;
-    }
-    if (command === "/attach") {
-      if (argument === "clear") {
-        this.pendingAttachments.length = 0;
-        this.clipboardFiles.clear();
-        this.notice = this.view.palette.dim("· attachments cleared");
-      } else if (!argument) {
-        this.notice = this.view.palette.dim("· use /attach <image path> or /attach clear");
-      } else {
-        void this.attachPath(argument);
-      }
-      return;
-    }
-    if (command === "/review") {
-      if (argument === "off") {
-        void this.configureWorkspaceReview(false);
-        this.notice = this.view.palette.dim("· workspace review disabled");
-      } else if (argument && argument !== "working" && argument !== "last-turn") {
-        this.notice = this.view.palette.error(
-          "✖ use /review working, /review last-turn, or /review off",
-        );
-      } else void this.openDiffReview((argument || "working") as WorkspaceReviewScope);
-      return;
-    }
-    if (command === "/request") {
-      const current = this.sessionSubscription?.projector.overview.requestSettings;
-      if (!argument) {
-        this.commitLines([
-          ...this.requestConfigurationLines(),
-          "  /request output <tokens|model> · /request idle <milliseconds|disabled>",
-        ]);
-      } else if (current === undefined) {
-        this.notice = this.view.palette.error(
-          "✖ Request settings are unavailable for this runtime",
-        );
-      } else {
-        const [field, value, extra] = arguments_;
-        try {
-          if (
-            extra !== undefined ||
-            value === undefined ||
-            !["output", "idle"].includes(field ?? "")
-          )
-            throw new Error(
-              "Use /request output <tokens|model> or /request idle <milliseconds|disabled>",
-            );
-          const requestSettings = parseModelRequestSettings({
-            ...current,
-            ...(field === "output"
-              ? { maxOutputTokens: value === "model" ? null : Number(value) }
-              : { httpIdleTimeoutMs: value === "disabled" ? 0 : Number(value) }),
-          });
-          await this.configure({ requestSettings });
-        } catch (error) {
+    const resolvedCommand = this.commandController.resolve(line);
+    if (resolvedCommand !== undefined) {
+      const invocation =
+        resolvedCommand.source === "presentation"
+          ? this.commandController.invoke(line, this.sessionId)
+          : this.runSharedCommand(line, resolvedCommand.name, argument || undefined);
+      void invocation.then(
+        () => {
+          if (!this.stopped) this.redraw();
+        },
+        (error: unknown) => {
+          this.editor.setText(line);
           this.notice = this.view.palette.error(
-            `✖ ${sanitizeTerminalText(error instanceof Error ? error.message : "Invalid request settings")}`,
+            `✖ ${error instanceof Error ? error.message : "command failed"}`,
           );
-        }
-      }
-      return;
-    }
-    if (command === "/status") {
-      this.commitLines([
-        this.view.palette.accent("Session"),
-        `  id        ${this.sessionId}`,
-        `  profile   ${this.view.profile ?? "?"}`,
-        `  provider  ${this.view.provider ?? "?"}`,
-        `  model     ${this.view.model ?? "?"}`,
-        `  thinking  ${this.view.thinking ?? "?"}`,
-        ...this.requestConfigurationLines(),
-        `  sandbox   ${this.view.sandbox ?? "?"}`,
-        `  connection ${this.connectionState}`,
-        `  display   ${this.tuiMode}${this.tuiMode === "fullscreen" ? ` · mouse ${this.fullscreenMouse}` : ""}`,
-        `  events    ${this.seenEventIds.size}`,
-        ...(this.lastReconnectError === undefined
-          ? []
-          : [`  last error ${this.lastReconnectError}`]),
-        `  usage     ${this.view.usageLabel()}`,
-        `  speed     ${this.view.tpsLabel() || "?"}`,
-        `  queued    ${
-          this.queued.length +
-          (this.sessionSubscription?.projector.state.queue.filter(
-            (item) => item.status === "queued" || item.status === "paused",
-          ).length ?? 0)
-        }`,
-        `  editor    ${this.editorMode}`,
-        `  favorites ${this.modelFavorites.length}`,
-        `  developer ${this.developerPanelEnabled ? "on" : "off"}`,
-      ]);
-      return;
-    }
-    if (command === "/usage") {
-      const promptTokens =
-        this.view.inputTokens + this.view.cacheReadTokens + this.view.cacheWriteTokens;
-      const cacheHit = promptTokens === 0 ? 0 : (this.view.cacheReadTokens / promptTokens) * 100;
-      this.commitLines([
-        this.view.palette.accent("Session usage"),
-        `  model       ${this.view.provider ?? "?"}/${this.view.model ?? "?"} · ${this.view.thinking ?? "?"}`,
-        `  input       ${this.view.inputTokens}`,
-        `  output      ${this.view.outputTokens}`,
-        `  cache read  ${this.view.cacheReadTokens}`,
-        `  cache write ${this.view.cacheWriteTokens}`,
-        `  cache hit   ${cacheHit.toFixed(1)}%`,
-        `  reasoning   ${this.view.reasoningTokens}`,
-        `  cost        $${this.view.totalCostUsd.toFixed(4)}`,
-        `  speed       ${this.view.tpsLabel() || "unknown"}`,
-      ]);
-      return;
-    }
-    if (command === "/requeue") {
-      const queueItem = this.sessionSubscription?.projector.state.queue.find(
-        (item) => item.queueItemId === argument && item.status === "paused",
-      );
-      if (queueItem === undefined) {
-        this.notice = this.view.palette.error("✖ provide the ID of a paused queued prompt");
-      } else {
-        void this.client
-          .request("session.queue.requeue", {
-            sessionId: this.sessionId,
-            queueItemId: queueItem.queueItemId,
-            priority: "back",
-          })
-          .catch((error: unknown) => {
-            this.notice = this.view.palette.error(
-              `✖ ${error instanceof Error ? error.message : "re-queue failed"}`,
-            );
-            this.redraw();
-          });
-      }
-      return;
-    }
-    if (command === "/fullscreen") {
-      this.setTuiMode("fullscreen");
-      return;
-    }
-    if (command === "/regular") {
-      this.setTuiMode("regular");
-      return;
-    }
-    if (command === "/settings") {
-      this.openSettings();
-      return;
-    }
-    if (command === "/details") {
-      this.selectDetails(argument);
-      return;
-    }
-    if (command === "/theme") {
-      this.selectTheme(argument);
-      return;
-    }
-    if (command === "/model") {
-      void this.selectModel(argument);
-      return;
-    }
-    if (command === "/providers") {
-      void this.showProviders(argument || undefined);
-      return;
-    }
-    if (command === "/refresh") {
-      void this.refreshProviders(argument || undefined);
-      return;
-    }
-    if (command === "/logout") {
-      void this.logoutProvider(argument || undefined);
-      return;
-    }
-    if (command === "/thinking") {
-      this.selectThinking(argument);
-      return;
-    }
-    if (command === "/login" || command === "/reload" || command === "/compact") {
-      if (this.view.working)
-        this.notice = this.view.palette.dim("· finish or interrupt the turn first");
-      else if (command === "/login") void this.loginProvider(argument || undefined);
-      else if (command === "/reload") void this.reload();
-      else void this.compact(argument || undefined);
-      return;
-    }
-    const extensionCommand = this.extensionHost
-      .commands()
-      .find((candidate) => `/${candidate.name}` === command);
-    if (extensionCommand !== undefined) {
-      this.runExtensionAction(extensionCommand.extensionId, (context) =>
-        extensionCommand.run(argument, context),
+          this.redraw();
+        },
       );
       return;
     }
@@ -3569,6 +3604,18 @@ export class AxlApp {
     );
   }
 
+  private async applyConfigurationCommand(input: string): Promise<void> {
+    const command = input.slice(1).split(/\s/u, 1)[0] ?? "";
+    const argument = input.slice(command.length + 2).trim() || undefined;
+    const outcome = await this.commandController.invoke(input, this.sessionId, {
+      ...(this.sessionSubscription?.projector.overview.requestSettings === undefined
+        ? {}
+        : { requestSettings: this.sessionSubscription.projector.overview.requestSettings }),
+    });
+    await this.handleCommandOutcome(command, argument, outcome);
+    this.redraw();
+  }
+
   private async selectModel(modelId: string): Promise<void> {
     if (this.view.working) {
       this.notice = this.view.palette.dim("· finish or interrupt the turn first");
@@ -3603,7 +3650,9 @@ export class AxlApp {
         this.redraw();
         return;
       }
-      await this.configure({ providerId: selected.providerId, modelId: selected.model.modelId });
+      await this.applyConfigurationCommand(
+        `/model ${selected.providerId}/${selected.model.modelId}`,
+      );
       return;
     }
     const favorites = new Set(this.modelFavorites);
@@ -3639,7 +3688,9 @@ export class AxlApp {
         this.overlays.close();
         const selected = this.modelSelection(value);
         if (selected !== undefined) {
-          void this.configure({ providerId: selected.providerId, modelId: selected.model.modelId });
+          void this.applyConfigurationCommand(
+            `/model ${selected.providerId}/${selected.model.modelId}`,
+          );
         }
       },
     });
@@ -3674,14 +3725,14 @@ export class AxlApp {
         this.notice = this.view.palette.error(`✖ unknown thinking level ${level}`);
         return;
       }
-      void this.configure({ thinkingLevel: level as ThinkingLevel });
+      void this.applyConfigurationCommand(`/thinking ${level}`);
       return;
     }
     this.openPicker({
       title: "Select thinking level",
       items: levels.map((value) => ({ value, label: value })),
       current: this.view.thinking ?? this.options.currentThinking ?? "medium",
-      onPick: (value) => void this.configure({ thinkingLevel: value as ThinkingLevel }),
+      onPick: (value) => void this.applyConfigurationCommand(`/thinking ${value}`),
     });
   }
 
@@ -3709,7 +3760,7 @@ export class AxlApp {
       (this.view.thinking ?? this.options.currentThinking ?? "medium") as ThinkingLevel,
     );
     const next = levels[(current + 1 + levels.length) % levels.length] as ThinkingLevel;
-    await this.configure({ thinkingLevel: next });
+    await this.applyConfigurationCommand(`/thinking ${next}`);
   }
 
   private modelLabel(modelId: string, all: readonly string[]): string {
@@ -3875,6 +3926,39 @@ export class AxlApp {
     }
   }
 
+  private openRequeue(): void {
+    const paused =
+      this.sessionSubscription?.projector.state.queue.filter((item) => item.status === "paused") ??
+      [];
+    if (paused.length === 0) {
+      this.notice = this.view.palette.dim("· no paused queued prompts");
+      return;
+    }
+    this.openPicker({
+      title: "Re-queue paused prompt",
+      items: paused.map((item) => ({
+        value: item.queueItemId,
+        label:
+          item.content
+            .find((part) => part.type === "text")
+            ?.text.replace(/\s+/gu, " ")
+            .trim() || item.queueItemId,
+        description: item.queueItemId,
+      })),
+      current: "",
+      onPick: (queueItemId) => {
+        void this.commandController
+          .invoke(`/requeue ${queueItemId}`, this.sessionId)
+          .catch((error: unknown) => {
+            this.notice = this.view.palette.error(
+              `✖ ${error instanceof Error ? error.message : "re-queue failed"}`,
+            );
+            this.redraw();
+          });
+      },
+    });
+  }
+
   private openFork(): void {
     const messages = this.transcript.flatMap((entry) => {
       if (entry.kind !== "event") return [];
@@ -4009,18 +4093,6 @@ export class AxlApp {
     }
   }
 
-  private async renameSession(title: string): Promise<void> {
-    try {
-      await this.commandController.invoke(`/rename ${title}`, this.sessionId);
-      this.notice = this.view.palette.dim(`· renamed session to ${sanitizeTerminalText(title)}`);
-    } catch (error) {
-      this.notice = this.view.palette.error(
-        `✖ ${error instanceof Error ? error.message : "could not rename session"}`,
-      );
-    }
-    this.redraw();
-  }
-
   private async disposeSession(deleteHistory: boolean): Promise<void> {
     const confirmed =
       !deleteHistory ||
@@ -4037,19 +4109,6 @@ export class AxlApp {
     } catch (error) {
       this.notice = this.view.palette.error(
         `✖ ${error instanceof Error ? error.message : `could not ${deleteHistory ? "delete" : "dispose of"} session`}`,
-      );
-      this.redraw();
-    }
-  }
-
-  private async cloneSession(): Promise<void> {
-    try {
-      const outcome = await this.commandController.invoke("/clone", this.sessionId);
-      if (outcome.state !== "open-session") throw new Error("Clone did not open a session");
-      await this.switchSession(outcome.session, "", "· cloned to new session");
-    } catch (error) {
-      this.notice = this.view.palette.error(
-        `✖ ${error instanceof Error ? error.message : "could not clone session"}`,
       );
       this.redraw();
     }
@@ -4692,10 +4751,15 @@ export class AxlApp {
     this.notice = this.view.palette.dim("· refreshing provider catalogs · Esc to cancel");
     this.redraw();
     try {
-      const result = await this.client.refreshProviderCatalogs(
-        providerId === undefined ? {} : { providerId },
+      const outcome = await this.commandController.invoke(
+        `/refresh${providerId === undefined ? "" : ` ${providerId}`}`,
+        this.sessionId,
         { signal: controller.signal },
       );
+      if (outcome.state !== "provider-catalog-refreshed") {
+        throw new Error("Provider refresh returned an unexpected command outcome");
+      }
+      const { result } = outcome;
       await this.loadProviderInventory(providerId, controller.signal);
       this.commitLines(
         result.providers.map((provider) =>
@@ -4876,12 +4940,16 @@ export class AxlApp {
     this.notice = this.view.palette.dim(`· logging out ${provider.displayName} · Esc to cancel`);
     this.redraw();
     try {
-      const status = await this.client.logoutProvider(
-        { providerId: provider.providerId },
+      const outcome = await this.commandController.invoke(
+        `/logout ${provider.providerId}`,
+        this.sessionId,
         { signal: controller.signal },
       );
+      if (outcome.state !== "provider-logged-out") {
+        throw new Error("Provider logout returned an unexpected command outcome");
+      }
       this.notice = this.view.palette.dim(
-        `· ${provider.displayName} · ${authenticationLabel(status)}`,
+        `· ${provider.displayName} · ${authenticationLabel(outcome.result)}`,
       );
     } catch (error) {
       this.notice = this.view.palette.error(`✖ ${providerErrorText(error)}`);
@@ -5210,6 +5278,12 @@ export class AxlApp {
       this.extensionCommandControllers.clear();
       this.overlays.clear();
       await this.extensionHost.reload();
+      try {
+        void this.commandController.commands;
+      } catch (error) {
+        await this.extensionHost.dispose();
+        throw error;
+      }
       await this.restartThemeWatcher(true);
       this.rebuildTranscript();
       await this.refreshBranch();

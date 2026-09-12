@@ -46,9 +46,11 @@ test("validates persisted browser layout preferences", () => {
   );
 });
 
-test("browser provider login remains outside daemon RPC authority", () => {
+test("browser requests only implemented provider, queue, and presence capabilities", () => {
   assert.equal(WEB_REQUESTED_CAPABILITIES.includes("provider.auth.login"), false);
   assert.equal(WEB_REQUESTED_CAPABILITIES.includes("provider.auth.status"), true);
+  assert.equal(WEB_REQUESTED_CAPABILITIES.includes("session.queue.requeue"), false);
+  assert.equal(WEB_REQUESTED_CAPABILITIES.includes("session.presence"), false);
 });
 
 test("provider login sends only typed intent to the trusted host", async () => {
