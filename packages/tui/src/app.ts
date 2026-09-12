@@ -38,6 +38,7 @@ import {
   type AxlClient,
   AxlClientError,
   type ClientModelInfo,
+  CommandController,
   ConversationProjector,
   type DaemonHostControl,
   type DaemonHostStatus,
@@ -346,32 +347,21 @@ function openExternalUrl(url: string, onError: (error: Error) => void): void {
   child.unref();
 }
 
-const COMMANDS: readonly { readonly name: string; readonly summary: string }[] = [
-  { name: "/model", summary: "select a model grouped by provider" },
-  { name: "/thinking", summary: "select reasoning effort" },
+const CLIENT_COMMANDS: readonly { readonly name: string; readonly summary: string }[] = [
   { name: "/theme", summary: "select a color theme" },
   { name: "/settings", summary: "change persistent terminal preferences" },
   { name: "/details", summary: "set transcript detail: compact, full, or focus" },
   { name: "/fullscreen", summary: "switch to fullscreen transcript mode" },
   { name: "/regular", summary: "return to terminal scrollback mode" },
-  { name: "/providers", summary: "show provider authentication and catalog status" },
   { name: "/login", summary: "authenticate a provider" },
-  { name: "/logout", summary: "remove stored provider authentication" },
-  { name: "/refresh", summary: "refresh configured provider catalogs" },
-  { name: "/reload", summary: "reload AGENTS.md, prompt, and tools" },
-  { name: "/compact", summary: "summarize older context, optionally with instructions" },
   { name: "/status", summary: "show session, display, and queue state" },
   { name: "/usage", summary: "show session token, cache, cost, and speed totals" },
   { name: "/requeue", summary: "re-queue a paused prompt by queue item ID" },
-  { name: "/resume", summary: "open another saved session" },
-  { name: "/fork", summary: "fork from an earlier user message" },
-  { name: "/clone", summary: "clone the complete current session" },
   { name: "/import", summary: "import and open a session artifact" },
   { name: "/export", summary: "export the current session artifact" },
   { name: "/stash", summary: "stash, restore, swap, or clear the prompt" },
   { name: "/favorite", summary: "toggle a model in the favorites list" },
   { name: "/developer", summary: "toggle the optional developer panel" },
-  { name: "/review", summary: "review working-tree or last-turn changes" },
   { name: "/attach", summary: "attach an image file to the next prompt" },
   { name: "/vim", summary: "toggle optional Vim editing" },
   { name: "/commands", summary: "browse and search available commands" },
@@ -576,6 +566,7 @@ export class AxlApp {
   private cwd: string;
   private readonly options: AxlAppOptions;
   private client: AxlClient;
+  private commandController: CommandController;
   private daemonHost: DaemonHostControl | undefined;
   private quitPending = false;
   private quitting = false;
@@ -691,6 +682,7 @@ export class AxlApp {
   ) {
     this.options = options;
     this.client = options.client;
+    this.commandController = new CommandController(options.client);
     this.reconnectClient = options.reconnectClient;
     this.daemonHost = options.daemonHost;
     this.sessionId = sessionId;
@@ -814,6 +806,7 @@ export class AxlApp {
     const previous = this.client;
     this.unsubscribeDisconnect();
     this.client = client;
+    this.commandController = new CommandController(client);
     this.unsubscribeDisconnect = client.onDisconnect((error) => {
       if (error instanceof AxlClientError && error.code === "daemon_stopping") {
         this.reconnectGeneration += 1;
@@ -870,6 +863,7 @@ export class AxlApp {
           reconnectExisting = false;
           if (disconnectedClient.state !== "connected") await disconnectedClient.reconnect();
           if (this.stopped || generation !== this.reconnectGeneration) return;
+          await this.commandController.refresh(this.sessionId);
           let workspaceReconnectError: string | undefined;
           try {
             await disconnectedClient.request("session.workspace.checkpoint", {
@@ -913,6 +907,7 @@ export class AxlApp {
         await candidate.request("session.resume", {
           sessionId: this.sessionId,
         });
+        await this.commandController.refresh(this.sessionId);
         let workspaceReconnectError: string | undefined;
         try {
           await candidate.request("session.workspace.checkpoint", {
@@ -1005,8 +1000,12 @@ export class AxlApp {
       themeCatalog,
     );
     try {
+      await app.commandController.refresh(opened?.sessionId);
       await app.extensionHost.activate();
-      const builtIns = new Set(COMMANDS.map((command) => command.name.slice(1)));
+      const builtIns = new Set([
+        ...app.commandController.commands.flatMap((command) => [command.name, ...command.aliases]),
+        ...CLIENT_COMMANDS.map((command) => command.name.slice(1)),
+      ]);
       const conflictingCommand = app.extensionHost
         .commands()
         .find((command) => builtIns.has(command.name));
@@ -1186,7 +1185,14 @@ export class AxlApp {
 
   private availableCommands(): readonly { readonly name: string; readonly summary: string }[] {
     return [
-      ...COMMANDS,
+      ...this.commandController.commands.map((command) => ({
+        name: `/${command.name}`,
+        summary:
+          command.availability.state === "available"
+            ? command.description
+            : `${command.description} · ${command.availability.reason}`,
+      })),
+      ...CLIENT_COMMANDS,
       ...this.extensionHost.commands().map((command) => ({
         name: `/${command.name}`,
         summary: extensionSingleLine(`${command.description} · ${command.extensionId}`),
@@ -2346,8 +2352,7 @@ export class AxlApp {
     const prefixMatches = /^\/[a-z]+$/.test(inputLine)
       ? this.availableCommands().filter((command) => command.name.startsWith(inputLine))
       : [];
-    const line =
-      prefixMatches.length === 1 ? (prefixMatches[0] as (typeof COMMANDS)[number]).name : inputLine;
+    const line = prefixMatches.length === 1 ? (prefixMatches[0]?.name ?? inputLine) : inputLine;
     if (line.startsWith("!")) {
       const excluded = line.startsWith("!!");
       const shellCommand = line.slice(excluded ? 2 : 1).trim();
@@ -2412,7 +2417,14 @@ export class AxlApp {
       return;
     }
     if (command === "/commands") {
-      this.openCommands();
+      try {
+        await this.commandController.refresh(this.sessionId);
+        this.openCommands();
+      } catch (error) {
+        this.notice = this.view.palette.error(
+          `✖ ${error instanceof Error ? error.message : "could not refresh commands"}`,
+        );
+      }
       return;
     }
     if (command === "/history") {
@@ -3954,11 +3966,16 @@ export class AxlApp {
   private async forkSession(fromEventId: string | undefined): Promise<void> {
     if (fromEventId === undefined) return;
     try {
-      const forked = await this.client.request("session.fork", {
-        sessionId: this.sessionId,
-        fromEventId: parseEventId(fromEventId),
-      });
-      await this.switchSession(forked, forked.selectedText ?? "", "· forked to new session");
+      const outcome = await this.commandController.invoke(
+        `/fork ${parseEventId(fromEventId)}`,
+        this.sessionId,
+      );
+      if (outcome.state !== "open-session") throw new Error("Fork did not open a session");
+      await this.switchSession(
+        outcome.session,
+        outcome.session.selectedText ?? "",
+        "· forked to new session",
+      );
     } catch (error) {
       this.notice = this.view.palette.error(
         `✖ ${error instanceof Error ? error.message : "could not fork session"}`,
@@ -3969,10 +3986,9 @@ export class AxlApp {
 
   private async cloneSession(): Promise<void> {
     try {
-      const cloned = await this.client.request("session.clone", {
-        sessionId: this.sessionId,
-      });
-      await this.switchSession(cloned, "", "· cloned to new session");
+      const outcome = await this.commandController.invoke("/clone", this.sessionId);
+      if (outcome.state !== "open-session") throw new Error("Clone did not open a session");
+      await this.switchSession(outcome.session, "", "· cloned to new session");
     } catch (error) {
       this.notice = this.view.palette.error(
         `✖ ${error instanceof Error ? error.message : "could not clone session"}`,
@@ -4062,6 +4078,7 @@ export class AxlApp {
     this.liveAssistant.reset();
     this.cwd = opened.cwd;
     this.sessionId = opened.sessionId;
+    await this.commandController.refresh(opened.sessionId);
     this.mediaCache.setSession(opened.sessionId);
     this.branch = branch;
     this.seenEventIds.clear();
@@ -4901,6 +4918,7 @@ export class AxlApp {
         sessionId: this.sessionId,
         ...update,
       });
+      await this.commandController.refresh(this.sessionId);
       if (update.modelId) this.options.onModelChange?.(update.modelId);
       await this.persistPreferences(update);
       if (update.requestSettings !== undefined)
@@ -5105,10 +5123,10 @@ export class AxlApp {
     this.notice = undefined;
     this.redraw();
     try {
-      await this.client.request("session.compact", {
-        sessionId: this.sessionId,
-        ...(instructions === undefined ? {} : { instructions }),
-      });
+      await this.commandController.invoke(
+        `/compact${instructions === undefined ? "" : ` ${instructions}`}`,
+        this.sessionId,
+      );
       this.notice = undefined;
     } catch (error) {
       this.awaitingOperationOwnership = false;
@@ -5129,7 +5147,7 @@ export class AxlApp {
 
   private async reload(): Promise<void> {
     try {
-      await this.client.request("session.reload", { sessionId: this.sessionId });
+      await this.commandController.invoke("/reload", this.sessionId);
       for (const controller of this.extensionCommandControllers) controller.abort();
       this.extensionCommandControllers.clear();
       this.overlays.clear();

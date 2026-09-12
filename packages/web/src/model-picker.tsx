@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, type JSX } from "react";
+import { useEffect, useRef, type JSX } from "react";
 import type { ThinkingLevel } from "@axl/sdk";
 import type { ModelChoice } from "./model-catalog.ts";
 
@@ -11,6 +11,7 @@ export function ModelPicker({
   model,
   thinking,
   disabled,
+  openRequest,
   onModel,
   onThinking,
 }: {
@@ -19,6 +20,7 @@ export function ModelPicker({
   readonly model: string | undefined;
   readonly thinking: ThinkingLevel | undefined;
   readonly disabled: boolean;
+  readonly openRequest?: number;
   readonly onModel: (choice: ModelChoice) => void;
   readonly onThinking: (level: ThinkingLevel) => void;
 }): JSX.Element {
@@ -26,6 +28,11 @@ export function ModelPicker({
   const selected = choices.find((choice) => choice.providerId === provider && choice.modelId === model);
   const levels = selected?.thinkingLevels ?? [];
   const close = (): void => details.current?.removeAttribute("open");
+  useEffect(() => {
+    if (openRequest === undefined || openRequest === 0) return;
+    details.current?.setAttribute("open", "");
+    queueMicrotask(() => details.current?.querySelector<HTMLButtonElement>("button")?.focus());
+  }, [openRequest]);
   return <details className="model-picker" ref={details}>
     <summary aria-label="Choose model and effort">
       <span>{model ?? "Daemon default"}</span>

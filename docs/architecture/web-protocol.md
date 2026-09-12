@@ -13,13 +13,13 @@ This document specifies typed RPC, negotiation, errors, package ownership, and t
 
 ## Current baseline
 
-Wire version 13 uses newline-delimited JSON over a Unix socket. It includes typed request and result envelopes, initialization, capability negotiation, structured errors, idempotency keys, subscription identities, paged snapshots, acknowledged opaque cursors, presence, daemon security reporting, direct shell events, transient activity, session-bound blobs, workspace review, session profiles, web-tool selection, manual compaction, steering, follow-ups, atomic interrupt-and-deliver, canonical model-retry attempts, provider management, and model-request configuration.
+Wire version 14 uses newline-delimited JSON over a Unix socket. It includes typed request and result envelopes, initialization, capability negotiation, structured errors, idempotency keys, subscription identities, paged snapshots, acknowledged opaque cursors, presence, daemon security reporting, direct shell events, transient activity, session-bound blobs, workspace review, session profiles, web-tool selection, manual compaction, steering, follow-ups, atomic interrupt-and-deliver, canonical model-retry attempts, provider management, model-request configuration, and bounded human-command discovery.
 
-The TUI consumes these contracts through `packages/sdk`. The two former branch tips both used version 11 for incompatible additions: provider management on the feature branch and daemon-owned request settings on `main`. Version 12 combines both surfaces. Version 13 adds atomic interrupt-and-deliver. Host-control version 1 remains separate from session wire negotiation and is available only to trusted process hosts.
+The TUI consumes these contracts through `packages/sdk`. The two former branch tips both used version 11 for incompatible additions: provider management on the feature branch and daemon-owned request settings on `main`. Version 12 combines both surfaces. Version 13 adds atomic interrupt-and-deliver. Version 14 adds the capability-filtered `command.list` catalog. Host-control version 1 remains separate from session wire negotiation and is available only to trusted process hosts.
 
 ## Versioning
 
-The current wire version is 13. Version 8 introduced typed envelopes, initialization, errors, retry metadata, subscriptions, cursors, acknowledgements, and presence. Version 9 adds the canonical `model.retry_scheduled` event. Version 10 adds `daemon_stopping` as a pre-RPC and universal RPC error. The two incompatible version-11 development surfaces are superseded. Version 12 combines provider-management RPCs with `config.request`, `model.request_configured`, and request settings in session create and configure RPCs. Version 13 adds atomic interrupt-and-deliver events and RPC. Compatible capability additions that do not alter accepted wire data do not require a bump. Pre-1.0 clients require an exact wire-version match.
+The current wire version is 14. Version 8 introduced typed envelopes, initialization, errors, retry metadata, subscriptions, cursors, acknowledgements, and presence. Version 9 adds the canonical `model.retry_scheduled` event. Version 10 adds `daemon_stopping` as a pre-RPC and universal RPC error. The two incompatible version-11 development surfaces are superseded. Version 12 combines provider-management RPCs with `config.request`, `model.request_configured`, and request settings in session create and configure RPCs. Version 13 adds atomic interrupt-and-deliver events and RPC. Version 14 adds the bounded command catalog used by first-party command interfaces. Compatible capability additions that do not alter accepted wire data do not require a bump. Pre-1.0 clients require an exact wire-version match.
 
 The daemon sends `hello` first:
 
@@ -55,6 +55,12 @@ session.unsubscribe
 A compatible implementation must support them. Feature methods are advertised as stable capability identifiers:
 
 ```text
+command.list
+provider.list
+provider.catalog.refresh
+provider.auth.status
+provider.auth.login
+provider.auth.logout
 session.create
 session.list
 session.resume
@@ -190,6 +196,14 @@ request<M extends RpcMethod>(
 ```
 
 Clients do not cast results.
+
+### Command discovery
+
+`command.list` returns a bounded, capability-filtered catalog for the current attachment and optional session. Descriptors contain names, aliases, descriptions, context, argument hints, required capabilities, and current availability. They contain no dynamic model, session, file, or queue data.
+
+The SDK command controller validates and searches this catalog, merges presentation-only commands with collision checks, and maps supported shared commands to their existing typed RPCs or focused client surfaces. Slash commands and command-palette selections use this same controller. Built-in effects do not use a generic `command.invoke` method.
+
+The initial built-in catalog is static for one daemon version, so clients refresh it on connection, reconnection, session replacement, explicit opening of the command palette, and configuration changes. A catalog-invalidated delivery remains deferred until dynamic daemon command registration has a concrete runtime consumer.
 
 ## Structured errors
 

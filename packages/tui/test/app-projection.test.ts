@@ -101,6 +101,34 @@ function subscription(events: readonly CanonicalEvent[]) {
   } as const;
 }
 
+function commandList() {
+  return {
+    generation: "fixture-1",
+    commands: [
+      {
+        id: "core.model",
+        name: "model",
+        aliases: [],
+        description: "select a model grouped by provider",
+        context: "session",
+        argument: { required: false, hint: "provider/model" },
+        requiredCapabilities: ["session.configure"],
+        availability: { state: "available" },
+      },
+      {
+        id: "core.thinking",
+        name: "thinking",
+        aliases: ["effort"],
+        description: "select reasoning effort",
+        context: "session",
+        argument: { required: false, hint: "level" },
+        requiredCapabilities: ["session.configure"],
+        availability: { state: "available" },
+      },
+    ],
+  } as const;
+}
+
 function client(
   events: readonly CanonicalEvent[],
   requests: unknown[] = [],
@@ -110,6 +138,7 @@ function client(
     connection: { daemonInstanceId: "fixture-daemon" },
     async request(method: string, params: unknown) {
       requests.push({ method, params });
+      if (method === "command.list") return commandList();
       if (method === "session.create") return openResult(events);
       if (method === "session.subscribe") return subscription(events);
       if (method === "session.ack") {
@@ -237,6 +266,7 @@ class ReconnectClient {
 
   async request(method: string): Promise<unknown> {
     this.requests.push(method);
+    if (method === "command.list") return commandList();
     if (method === "session.create" || method === "session.resume") {
       return openResult(this.events);
     }
@@ -478,6 +508,7 @@ test("reconnects, resumes, and resubscribes after daemon loss", async () => {
   await new Promise((resolve) => setTimeout(resolve, 400));
   assert.deepEqual(replacement.requests, [
     "session.resume",
+    "command.list",
     "session.workspace.checkpoint",
     "session.subscribe",
     "session.ack",
@@ -515,6 +546,7 @@ test("coalesces TUI recovery through the SDK client before replacing it", async 
     "connection.reconnect",
     "session.subscribe",
     "session.ack",
+    "command.list",
     "session.workspace.checkpoint",
   ]);
   assert.match(output.text, /daemon reconnected/);
