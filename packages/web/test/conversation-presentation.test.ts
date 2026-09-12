@@ -229,8 +229,8 @@ test("renders safe assistant Markdown without interpreting model HTML", () => {
   assert.match(html, /<h2>Result<\/h2>/);
   assert.match(html, /<strong>ready<\/strong>/);
   assert.match(html, /<code>code<\/code>/);
-  assert.doesNotMatch(html, /<script>/);
-  assert.doesNotMatch(html, /href="javascript:/);
+  assert.doesNotMatch(html, /<script>/i);
+  assert.doesNotMatch(html, /href="javascript:/i);
 });
 
 test("renders specialized tool details and actionable MCP forms", () => {
