@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { EffectiveCommand } from "@axl/sdk";
 
-import { filterCommands } from "../src/commands.ts";
+import { filterCommands, webPresentationCommands } from "../src/commands.ts";
 
 const commands: readonly EffectiveCommand[] = [
   {
@@ -31,6 +31,24 @@ const commands: readonly EffectiveCommand[] = [
     source: "daemon",
   },
 ];
+
+test("trusted web login contributes a direct presentation command", async () => {
+  let opened = 0;
+  const commands = webPresentationCommands(true, () => {
+    opened += 1;
+  });
+
+  assert.deepEqual(
+    commands.map((command) => command.name),
+    ["login"],
+  );
+  await commands[0]?.run();
+  assert.equal(opened, 1);
+  assert.deepEqual(
+    webPresentationCommands(false, () => undefined),
+    [],
+  );
+});
 
 test("command palette search matches names and descriptions", () => {
   assert.deepEqual(

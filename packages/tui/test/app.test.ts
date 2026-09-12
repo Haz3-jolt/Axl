@@ -1322,6 +1322,35 @@ test("terminal extensions cannot replace encoded safety shortcuts", async (conte
   );
 });
 
+test("terminal extensions cannot replace daemon commands", async (context) => {
+  const { socketPath, directory } = await startStack(context);
+  const extension: TerminalExtension = {
+    manifest: {
+      id: "test.command-collision",
+      name: "Command collision",
+      capabilities: ["terminal.commands"],
+    },
+    activate(api) {
+      api.registerCommand({
+        name: "reload",
+        description: "Replace the daemon command",
+        run: () => undefined,
+      });
+    },
+  };
+  await assert.rejects(
+    AxlApp.start({
+      client: await connectUnixClient(socketPath),
+      input: new PassThrough(),
+      output: captureOutput().output,
+      cwd: directory,
+      color: false,
+      extensions: [extension],
+    }),
+    /Command name collision: \/reload/,
+  );
+});
+
 test("terminal extensions contribute UI and reload without leaking owned resources", async (context) => {
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
@@ -1392,6 +1421,110 @@ test("terminal extensions contribute UI and reload without leaking owned resourc
   await until(() => cleanups === 4, "extension shutdown cleanup");
 });
 
+test("every TUI command has an explicit owner", async (context) => {
+  const ownership = {
+    daemon: [
+      "!",
+      "!!",
+      "clone",
+      "compact",
+      "delete",
+      "dispose",
+      "logout",
+      "refresh",
+      "reload",
+      "rename",
+    ],
+    "sdk-workflow": [
+      "attach",
+      "detach",
+      "export",
+      "fork",
+      "import",
+      "login",
+      "model",
+      "providers",
+      "request",
+      "resume",
+      "review",
+      "requeue",
+      "thinking",
+    ],
+    "trusted-host": ["edit", "quit"],
+    presentation: [
+      "commands",
+      "details",
+      "developer",
+      "favorite",
+      "fullscreen",
+      "help",
+      "history",
+      "hotkeys",
+      "regular",
+      "settings",
+      "stash",
+      "status",
+      "theme",
+      "usage",
+      "vim",
+    ],
+  } as const;
+  const expected = Object.values(ownership)
+    .flat()
+    .filter((command) => command !== "!" && command !== "!!")
+    .sort();
+  assert.equal(new Set(Object.values(ownership).flat()).size, expected.length + 2);
+
+  const providerManagement: ProviderManagementService = {
+    list: () => Promise.resolve({ providers: [] }),
+    refresh: () => Promise.resolve({ providers: [] }),
+    authenticationStatus: () => Promise.resolve({ providers: [] }),
+    login: ({ providerId }) => Promise.resolve({ providerId, phase: "authenticated" as const }),
+    logout: ({ providerId }) => Promise.resolve({ providerId, phase: "logged_out" as const }),
+  };
+  const { socketPath, directory } = await startStack(
+    context,
+    port,
+    () => new ToolRegistry(),
+    undefined,
+    undefined,
+    providerManagement,
+  );
+  const client = await connectUnixClient(socketPath);
+  const input = new PassThrough();
+  const { output } = captureOutput();
+  const app = await AxlApp.start({ client, input, output, cwd: directory, color: false });
+  const available = (
+    app as unknown as {
+      availableCommands(): readonly { readonly name: string }[];
+    }
+  )
+    .availableCommands()
+    .map((command) => command.name.slice(1))
+    .sort();
+  assert.deepEqual(available, expected);
+  assert.deepEqual(
+    (
+      app as unknown as {
+        availableHotkeys(): readonly { readonly key: string }[];
+      }
+    )
+      .availableHotkeys()
+      .map((hotkey) => hotkey.key)
+      .filter((key) => key.startsWith("!"))
+      .map((key) => key.slice(0, -"command".length)),
+    ["!", "!!"],
+  );
+
+  const daemonCommands = (await client.listCommands()).commands.map((command) => command.name);
+  const daemonOwned = new Set<string>([...ownership.daemon, ...ownership["sdk-workflow"]]);
+  assert.deepEqual(
+    daemonCommands.filter((command) => !daemonOwned.has(command)),
+    [],
+  );
+  app.stop();
+});
+
 test("command discovery, history, autocomplete, and external editing behave", async (context) => {
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
@@ -1427,8 +1560,9 @@ test("command discovery, history, autocomplete, and external editing behave", as
   assert.match(text(), /select a model/);
   input.write("\x15/model g\t");
   await until(() => text().includes("/model gpt-5"), "argument completion");
+  const commandFrames = (text().match(/Commands/g) ?? []).length;
   input.write("\x15/commands\r");
-  await until(() => text().includes("Commands"), "command palette");
+  await until(() => (text().match(/Commands/g) ?? []).length > commandFrames, "command palette");
   input.write("detach");
   await until(() => text().includes("/detach"), "detach command search");
   app.stop();

@@ -5,7 +5,7 @@
 
 Status: implementation in progress for [issue #389](https://github.com/Observal/Axl/issues/389)
 
-The wire-version 14 baseline implements a capability-filtered daemon catalog, strict protocol validation, an SDK command controller, daemon-backed TUI discovery, and web command-palette and slash discovery. TUI dispatch migration, dynamic catalog invalidation, staged new-session commands, and extension registration remain pending.
+The wire-version 15 baseline implements a capability-filtered daemon catalog, strict protocol validation, an SDK command controller, daemon-backed TUI and web discovery, TUI shared-command dispatch, and dynamic client presentation-command merging. Dynamic daemon catalog invalidation, staged new-session commands, and daemon extension registration remain pending.
 
 ## Purpose
 
@@ -15,9 +15,9 @@ This document defines command ownership, discovery, invocation, staged new-sessi
 
 ## Current problem
 
-The TUI currently owns a static command list and a large command dispatcher in `packages/tui/src/app.ts`. Some branches call typed daemon RPCs, some mutate terminal state, some invoke trusted process-host operations, and some combine all three. The public extension API adds terminal-only commands beside that table.
+The command plane replaces the TUI's former static shared-command list and large mixed-ownership dispatcher. Shared commands now come from the daemon catalog and execute through typed SDK workflows. TUI presentation and trusted-host commands join the effective directory through a dynamic client source alongside terminal extension commands.
 
-A browser implementation must not copy this structure. Separate tables would drift in names, argument handling, availability, permissions, and outcomes.
+Browser command execution uses the same daemon catalog and SDK controller. Client-specific focused surfaces still render locally.
 
 The existing typed RPC surface remains useful and authoritative. The command plane coordinates human-facing discovery and invocation over that surface. It does not replace typed RPC for SDK and automation callers.
 
@@ -317,6 +317,7 @@ A first-party command uses the same registration path after that public daemon A
 | `/reload` | Daemon session command. |
 | `/compact` | Daemon session command. |
 | `/status` | Client presentation over SDK-projected canonical state. |
+| `/usage` | Client presentation over SDK-projected canonical usage. |
 | `/requeue` | SDK selection workflow followed by daemon queue operation. |
 | `/resume` | SDK session-list and resume workflow. |
 | `/fork` | SDK message selection followed by daemon fork operation. |
@@ -344,7 +345,7 @@ A first-party command uses the same registration path after that public daemon A
 | `!command` | Typed daemon shell operation; output enters model context. |
 | `!!command` | Typed daemon shell operation; output stays outside model context. |
 
-The classification is normative. A client may choose different visual controls, but it may not move a shared effect into presentation code.
+The classification is normative. Shared daemon and SDK commands require parity when a client requests their capabilities. Presentation command names do not require cross-client parity: for example, the web command palette may replace the TUI's `/commands`. A client may choose different visual controls, but it may not move a shared effect into presentation code.
 
 ## SDK command controller
 

@@ -37,7 +37,7 @@ The branch now contains the first complete local-session slice:
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
 - The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
-- Ordinary session creation works. Staged Chat/Code creation, the remaining shared-command migration, paused-item requeue, presence presentation, and several hardening tests remain.
+- Ordinary session creation and shared-command routing work. Staged Chat/Code creation, paused-item requeue, presence presentation, and several hardening tests remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
 
@@ -47,11 +47,10 @@ The visual foundation, ordinary local conversation path, provider authentication
 
 Active remaining work:
 
-1. Finish replacing the TUI static shared-command dispatcher with the SDK controller and remove duplicated browser command routing.
-2. Add explicit paused-item requeue controls and browser presence presentation.
-3. Add staged Chat/Code creation, including explicit workspace and tool-profile semantics.
-4. Move the provider directory and remaining configuration sequencing into reusable SDK controllers.
-5. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
+1. Add explicit paused-item requeue controls and browser presence presentation.
+2. Add staged Chat/Code creation, including explicit workspace and tool-profile semantics.
+3. Move the provider directory and remaining configuration sequencing into reusable SDK controllers.
+4. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
 
 Deferred work is labeled in place. It includes extension-driven command invalidation, `axl web --dev`, IndexedDB cursor persistence, localization, long-session React measurement, and pre-stable CLI flag renames.
 
@@ -77,7 +76,7 @@ The normal local chat path is available. These items close the remaining gap bet
 
 1. [x] Implement issue #389's capability-filtered daemon command catalog without adding a generic built-in `command.invoke` path.
 2. [x] Add the reusable SDK command controller that validates, merges, searches, and maps catalog entries to existing typed RPCs or focused workflows.
-3. [ ] Finish replacing the TUI static shared-command dispatcher with the SDK controller. Daemon-backed shared metadata and refresh are implemented; trusted-host and remaining workflow commands still need migration.
+3. [x] Replace the TUI static shared-command dispatcher with the SDK controller. Shared commands use daemon metadata and typed SDK outcomes; TUI presentation and trusted-host commands use the dynamic client directory.
 4. [x] Add the web command palette and slash discovery UI. It searches the effective daemon directory, explains unavailable commands, collects bounded arguments, and opens focused interfaces without duplicating command metadata.
 5. [ ] **Deferred:** add dynamic catalog invalidation when daemon extension registration exists. Connection, reconnection, session replacement, explicit palette opening, and configuration changes already refresh the current static catalog.
 
@@ -205,7 +204,7 @@ Do not recreate separate hardcoded TUI and browser command tables.
 - [x] Record command effects through the canonical events emitted by their typed operations rather than a generic invocation event.
 - [x] Let clients merge honest presentation-only commands into the shared directory.
 - [x] Keep terminal-only mechanics local to the TUI and define browser-native semantics where a command is shared.
-- [ ] Delete duplicated browser command routing after the remaining migration.
+- [x] Route browser slash execution through the SDK command controller while keeping focused browser rendering local.
 
 This is a protocol and ownership change and requires architecture review before implementation.
 
@@ -289,7 +288,7 @@ Also:
 
 ## Slash-command coverage
 
-The browser command interface must use the shared live command directory.
+The browser must support every daemon and SDK command whose capabilities it requests. Presentation command names may differ by client; browser-native controls such as `Ctrl+K` do not require a duplicate `/commands` alias. The table below remains a browser product backlog, not a cross-client name-parity requirement.
 
 | Command | Browser requirement |
 | --- | --- |
@@ -397,7 +396,7 @@ Do not request a capability before its interaction, error behavior, and security
 
 ## Provider management
 
-- [ ] Add `/providers` with provider, authentication, catalog, region, enabled, and model availability state. The web provider status surface covers authentication, catalog, enabled state, and model counts; shared command routing and region detail remain.
+- [ ] Add provider region detail. The `/providers` route and web provider status surface cover authentication, catalog, enabled state, and model counts.
 - [x] Refresh inventory after login, logout, catalog refresh, settings changes, and reconnect.
 - [ ] Add per-provider catalog-refresh cancellation. Web already shows bounded refresh progress, results, and retry; trusted-host login has correlated cancellation.
 - [x] Preserve usable provider groups when one provider fails.
