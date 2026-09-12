@@ -15,7 +15,7 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   AgentSession,
@@ -66,6 +66,7 @@ import {
 } from "@axl/protocol";
 
 import { BlobStore, BlobStoreError } from "./blob-store.ts";
+import { eventBlobReferences } from "./event-blobs.ts";
 import {
   exportSessionArtifact,
   importSessionArtifact,
@@ -375,6 +376,37 @@ export class SessionManager {
     );
   }
 
+  private async externalizeToolOverflow(
+    sessionId: SessionId,
+    event: CanonicalEvent,
+  ): Promise<CanonicalEvent> {
+    if (event.type !== "tool.result") return event;
+    const details = event.payload.details;
+    if (typeof details !== "object" || details === null || Array.isArray(details)) return event;
+    const detailObject = details as JsonObject;
+    const overflowPath = detailObject.overflowPath;
+    if (typeof overflowPath !== "string") return event;
+    const root = await realpath(join(this.options.dataDirectory, "tool-output", sessionId));
+    const path = await realpath(overflowPath);
+    const child = relative(root, path);
+    if (child === "" || child.startsWith("..") || isAbsolute(child)) {
+      throw new Error("Tool overflow output escaped its session directory");
+    }
+    const overflowBlob = await this.blobs.storeText(sessionId, await readFile(path, "utf8"));
+    const nextDetails: Record<string, JsonValue> = {
+      ...detailObject,
+      overflowBlob: structuredClone(overflowBlob) as JsonObject,
+    };
+    delete nextDetails.overflowPath;
+    const content = event.payload.content.map((item) =>
+      item.type === "text"
+        ? { ...item, text: item.text.replaceAll(overflowPath, "a retrievable session attachment") }
+        : item,
+    );
+    await rm(path, { force: true });
+    return parseEvent({ ...event, payload: { ...event.payload, content, details: nextDetails } });
+  }
+
   private async externalizeOversizedContent(
     sessionId: SessionId,
     event: CanonicalEvent,
@@ -437,6 +469,7 @@ export class SessionManager {
         ...(runtime.log?.secretValues === undefined
           ? {}
           : { secretValues: runtime.log.secretValues }),
+        prepareEvent: (event) => this.externalizeToolOverflow(sessionId, event),
         prepareOversizedEvent: (event) => this.externalizeOversizedContent(sessionId, event),
       },
       ...(runtime.extensionHost === undefined ? {} : { extensionHost: runtime.extensionHost }),
@@ -2295,19 +2328,7 @@ export class SessionManager {
   }
 
   private authorizeEventBlobs(sessionId: SessionId, event: CanonicalEvent): void {
-    if (
-      event.type !== "user.message" &&
-      event.type !== "interrupt.requested" &&
-      event.type !== "user.shell" &&
-      event.type !== "assistant.message" &&
-      event.type !== "tool.result"
-    ) {
-      return;
-    }
-    const references = event.payload.content.flatMap((item) =>
-      item.type === "blob" ? [item.blob] : [],
-    );
-    this.blobs.authorize(sessionId, references);
+    this.blobs.authorize(sessionId, eventBlobReferences(event));
   }
 
   hostSessions() {

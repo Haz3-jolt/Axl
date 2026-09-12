@@ -147,6 +147,55 @@ test("initializes exactly once and creates keys only for retryable mutations", a
   client.close();
 });
 
+test("reads and validates a session blob across bounded chunks", async () => {
+  const { client, transport } = await connect();
+  const pending = client.readBlob(parseSessionId("123e4567-e89b-42d3-a456-426614174000"), {
+    sha256: "a".repeat(64),
+    mediaType: "text/plain",
+    sizeBytes: 3,
+  });
+  const first = transport.messages.at(-1) as {
+    id: number;
+    method: string;
+    params: Record<string, unknown>;
+  };
+  assert.equal(first.method, "session.blob.read");
+  transport.emit({
+    kind: "success",
+    id: first.id,
+    method: first.method,
+    result: { data: "aGk=", offset: 0, nextOffset: 2, eof: false },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = transport.messages.at(-1) as {
+    id: number;
+    method: string;
+    params: Record<string, unknown>;
+  };
+  assert.deepEqual(second.params, {
+    sessionId: "123e4567-e89b-42d3-a456-426614174000",
+    sha256: "a".repeat(64),
+    offset: 2,
+    length: 1,
+  });
+  transport.emit({
+    kind: "success",
+    id: second.id,
+    method: second.method,
+    result: { data: "IQ==", offset: 2, nextOffset: 3, eof: true },
+  });
+  assert.equal(new TextDecoder().decode(await pending), "hi!");
+  await assert.rejects(
+    client.readBlob(parseSessionId("123e4567-e89b-42d3-a456-426614174000"), {
+      sha256: "b".repeat(64),
+      mediaType: "application/octet-stream",
+      sizeBytes: 20 * 1024 * 1024 + 1,
+    }),
+    (error) => error instanceof AxlClientError && error.code === "invalid_blob_read",
+  );
+  client.close();
+});
+
 test("exposes typed provider methods through negotiated capabilities", async () => {
   const { client, transport } = await connect();
   const pending = client.listProviders({ providerId: "openrouter" });

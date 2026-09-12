@@ -19,6 +19,8 @@ import {
   presentUnknownEvent,
 } from "@axl/sdk";
 import { editDiffRows } from "./diff.ts";
+import { InteractionCard, type InteractionResponder } from "./interaction.tsx";
+import { Markdown } from "./markdown.tsx";
 import { highlightLine, languageForPath } from "./syntax.ts";
 
 export function contentText(content: readonly { readonly type: string; readonly text?: string }[]): string {
@@ -68,7 +70,8 @@ function Attachment({ blob, resolveBlobUrl }: { readonly blob: BlobReference; re
   if (blob.mediaType.startsWith("image/") && url !== undefined) {
     return <figure className="message-image"><img src={url} alt={name} /><figcaption><span>{name}</span><small>{formatBytes(blob.sizeBytes)}</small></figcaption></figure>;
   }
-  return <div className="message-file"><span className="attachment-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 2.5h7l3 3v8H3zM10 2.5v3h3" /></svg></span><span><strong>{name}</strong><small>{blob.mediaType} · {formatBytes(blob.sizeBytes)}</small></span></div>;
+  const content = <><span className="attachment-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 2.5h7l3 3v8H3zM10 2.5v3h3" /></svg></span><span><strong>{name}</strong><small>{blob.mediaType} · {formatBytes(blob.sizeBytes)}</small></span></>;
+  return url === undefined ? <div className="message-file">{content}</div> : <a className="message-file" href={url} download={name}>{content}</a>;
 }
 
 function MessageContent({ content, resolveBlobUrl, searchQuery }: { readonly content: readonly { readonly type: string; readonly text?: string; readonly blob?: BlobReference }[]; readonly resolveBlobUrl?: ((blob: BlobReference) => string | undefined) | undefined; readonly searchQuery?: string | undefined }): React.JSX.Element {
@@ -90,7 +93,13 @@ function field(input: JsonObject, name: string): string | undefined {
 }
 
 function toolTarget(tool: ProjectedToolCall): string {
-  return field(tool.input, "path") ?? field(tool.input, "command") ?? field(tool.input, "url") ?? tool.name;
+  const target = field(tool.input, "path") ?? field(tool.input, "command") ?? field(tool.input, "url") ?? field(tool.input, "query") ?? field(tool.input, "pattern") ?? field(tool.input, "name");
+  if (tool.renderIntent === "mcp") {
+    const action = field(tool.input, "action");
+    const server = field(tool.input, "server");
+    return [server, action, target].filter(Boolean).join(" · ") || tool.name;
+  }
+  return target ?? tool.name;
 }
 
 function toolVerb(tool: ProjectedToolCall): string {
@@ -99,7 +108,10 @@ function toolVerb(tool: ProjectedToolCall): string {
   if (name === "write") return "Wrote";
   if (name === "edit") return "Edited";
   if (name === "bash" || tool.renderIntent === "shell") return "Ran";
+  if (tool.renderIntent === "search") return tool.result === undefined ? "Searching" : "Searched";
   if (tool.renderIntent === "web") return tool.result === undefined ? "Fetching" : "Fetched";
+  if (tool.renderIntent === "mcp") return tool.result === undefined ? "Calling MCP" : "Called MCP";
+  if (tool.renderIntent === "workflow") return tool.result === undefined ? "Running workflow" : "Ran workflow";
   return tool.result === undefined ? "Running" : "Ran";
 }
 
@@ -113,24 +125,49 @@ function resultDetails(tool: ProjectedToolCall): JsonObject | undefined {
   return details as JsonObject;
 }
 
+function blobReference(value: unknown): BlobReference | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const blob = value as Record<string, unknown>;
+  return typeof blob.sha256 === "string" && /^[0-9a-f]{64}$/u.test(blob.sha256) && typeof blob.mediaType === "string" && typeof blob.sizeBytes === "number" && Number.isSafeInteger(blob.sizeBytes) && blob.sizeBytes >= 0
+    ? { sha256: blob.sha256, mediaType: blob.mediaType, sizeBytes: blob.sizeBytes, ...(typeof blob.name === "string" ? { name: blob.name } : {}) }
+    : undefined;
+}
+
 function formatOutputSize(value: unknown): string | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? formatBytes(value) : undefined;
 }
 
-function TruncationNotice({ tool }: { readonly tool: ProjectedToolCall }): React.JSX.Element | null {
+export type ToolOutputLoader = (tool: ProjectedToolCall, blob: BlobReference) => Promise<string>;
+
+function TruncationNotice({ tool, loadFullOutput }: { readonly tool: ProjectedToolCall; readonly loadFullOutput?: ToolOutputLoader | undefined }): React.JSX.Element | null {
   const details = resultDetails(tool);
   const overflowPath = typeof details?.overflowPath === "string" ? details.overflowPath : undefined;
-  const truncated = details?.truncated === true || overflowPath !== undefined;
+  const overflowBlob = blobReference(details?.overflowBlob);
+  const truncated = details?.truncated === true || overflowPath !== undefined || overflowBlob !== undefined;
+  const [state, setState] = useState<{ readonly status: "idle" | "loading" | "loaded" | "error"; readonly text?: string }>({ status: "idle" });
   if (!truncated) return null;
+  const load = async (): Promise<void> => {
+    if (overflowBlob === undefined || loadFullOutput === undefined) return;
+    setState({ status: "loading" });
+    try {
+      setState({ status: "loaded", text: await loadFullOutput(tool, overflowBlob) });
+    } catch (error) {
+      setState({ status: "error", text: error instanceof Error ? error.message : "Could not retrieve complete output" });
+    }
+  };
   return <details className="truncation-notice">
     <summary><span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 2.5v7M8 12.5v.1M2.5 8a5.5 5.5 0 1 0 11 0 5.5 5.5 0 0 0-11 0Z" /></svg></span><strong>Output truncated</strong>{formatOutputSize(details?.outputBytes) && <small>{formatOutputSize(details?.outputBytes)} total</small>}<span className="truncation-action">Inspect</span></summary>
-    <div><p>The visible result keeps a bounded excerpt of the complete output.</p>{overflowPath && <><small>Complete output preserved at</small><code>{overflowPath}</code></>}</div>
+    <div><p>The visible result keeps a bounded excerpt of the complete output.</p>{overflowBlob && loadFullOutput ? <button type="button" disabled={state.status === "loading"} onClick={() => void load()}>{state.status === "loading" ? "Loading…" : state.status === "loaded" ? "Reload complete output" : "Load complete output"}</button> : overflowPath ? <small>Complete output is preserved for trusted local clients.</small> : null}{state.status === "loaded" && state.text !== undefined && <CodeBlock text={state.text} />}{state.status === "error" && <p className="tool-error" role="alert">{state.text}</p>}</div>
   </details>;
 }
 
 function CodeBlock({ text, numbered = false, path, language }: { readonly text: string; readonly numbered?: boolean; readonly path?: string | undefined; readonly language?: string | undefined }): React.JSX.Element {
   const resolvedLanguage = language ?? languageForPath(path);
   return <pre className={numbered ? "code-block numbered" : "code-block"}>{text.split("\n").map((line, index) => <span key={`${index}:${line}`} data-line={numbered ? index + 1 : undefined} dangerouslySetInnerHTML={{ __html: highlightLine(line || " ", resolvedLanguage) }} />)}</pre>;
+}
+
+function JsonInspector({ label, value }: { readonly label: string; readonly value: JsonObject }): React.JSX.Element {
+  return <details className="tool-inspector"><summary>{label}</summary><CodeBlock text={JSON.stringify(value, null, 2)} language="json" /></details>;
 }
 
 function DiffView({ input }: { readonly input: JsonObject }): React.JSX.Element {
@@ -143,21 +180,37 @@ function DiffView({ input }: { readonly input: JsonObject }): React.JSX.Element 
   return <div className="diff-file"><header><span>{path ?? "Edited file"}</span><span className="diff-stats"><i>−{removed}</i><b>+{added}</b></span></header><div className="diff" role="table" aria-label="Edit diff">{rows.map((row, index) => <div className={`diff-row ${row.kind}`} role="row" key={`${index}:${row.kind}:${row.text}`}><span className="line-number" role="cell">{row.oldLine ?? ""}</span><span className="line-number" role="cell">{row.newLine ?? ""}</span><span className="diff-sign" aria-hidden="true">{row.kind === "remove" ? "−" : row.kind === "add" ? "+" : ""}</span><code role="cell" dangerouslySetInnerHTML={{ __html: highlightLine(row.text || " ", language) }} /></div>)}</div></div>;
 }
 
-export function ToolEntry({ tool }: { readonly tool: ProjectedToolCall }): React.JSX.Element {
-  const truncated = resultDetails(tool)?.truncated === true || typeof resultDetails(tool)?.overflowPath === "string";
-  const [open, setOpen] = useState(tool.name.toLocaleLowerCase() === "edit" || truncated);
-  const status = tool.result === undefined ? "running" : tool.result.isError ? "failed" : "complete";
+function ToolBody({ tool }: { readonly tool: ProjectedToolCall }): React.JSX.Element {
   const output = resultText(tool);
   const command = field(tool.input, "command");
   const path = field(tool.input, "path");
   const content = field(tool.input, "content");
   const isWrite = tool.name.toLocaleLowerCase() === "write";
+  if (isWrite && content !== undefined) return <><div className="tool-label">New file</div><CodeBlock text={content} numbered path={path} /></>;
+  if (tool.renderIntent === "edit") return <DiffView input={tool.input} />;
+  if (tool.renderIntent === "shell") return <><div className="tool-label">Command</div><CodeBlock text={command ?? JSON.stringify(tool.input, null, 2)} language="bash" />{output && <><div className="tool-label">Output</div><CodeBlock text={output} /></>}</>;
+  if (tool.renderIntent === "read") return <><div className="tool-label">{path ?? "Result"}</div><CodeBlock text={output || JSON.stringify(tool.input, null, 2)} numbered={Boolean(output)} path={path} /></>;
+  if (tool.renderIntent === "search") return <><div className="tool-facts"><span><small>Query</small><code>{field(tool.input, "query") ?? field(tool.input, "pattern") ?? "Search"}</code></span>{field(tool.input, "path") && <span><small>Scope</small><code>{field(tool.input, "path")}</code></span>}</div>{output && <><div className="tool-label">Matches</div><CodeBlock text={output} /></>}</>;
+  if (tool.renderIntent === "mcp") return <><div className="tool-facts"><span><small>Server</small><code>{field(tool.input, "server") ?? "Default"}</code></span><span><small>Action</small><code>{field(tool.input, "action") ?? tool.name}</code></span></div>{output && <><div className="tool-label">MCP result</div><CodeBlock text={output} /></>}</>;
+  if (tool.renderIntent === "workflow") return <><div className="tool-facts"><span><small>Workflow</small><code>{field(tool.input, "workflow") ?? field(tool.input, "name") ?? tool.name}</code></span>{field(tool.input, "action") && <span><small>Action</small><code>{field(tool.input, "action")}</code></span>}</div>{output && <><div className="tool-label">Result</div><CodeBlock text={output} /></>}</>;
+  if (content !== undefined) return <><div className="tool-label">Content</div><CodeBlock text={content} numbered path={path} /></>;
+  return <CodeBlock text={output || JSON.stringify(tool.input, null, 2)} {...(output ? {} : { language: "json" })} />;
+}
+
+export function ToolEntry({ tool, loadFullOutput }: { readonly tool: ProjectedToolCall; readonly loadFullOutput?: ToolOutputLoader | undefined }): React.JSX.Element {
+  const details = resultDetails(tool);
+  const truncated = details?.truncated === true || typeof details?.overflowPath === "string" || blobReference(details?.overflowBlob) !== undefined;
+  const [open, setOpen] = useState(tool.name.toLocaleLowerCase() === "edit" || truncated);
+  const status = tool.result === undefined ? "running" : tool.result.isError ? "failed" : "complete";
+  const output = resultText(tool);
   return <details className={`tool-item ${status}`} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary><span className="tool-chevron"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg></span><span className="tool-icon"><ToolIcon intent={tool.renderIntent} name={tool.name} /></span><span className="tool-heading"><strong>{toolVerb(tool)}</strong><small>{toolTarget(tool)}</small></span><span className="tool-status" aria-label={status}>{status === "running" ? <i></i> : status === "failed" ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg> : <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3 3 7-7" /></svg>}</span></summary>
     <div className="tool-body">
-      {isWrite && content !== undefined ? <><div className="tool-label">New file</div><CodeBlock text={content} numbered path={path} /></> : tool.renderIntent === "edit" ? <DiffView input={tool.input} /> : tool.renderIntent === "shell" ? <><div className="tool-label">Command</div><CodeBlock text={command ?? JSON.stringify(tool.input, null, 2)} language="bash" />{output && <><div className="tool-label">Output</div><CodeBlock text={output} /></>}</> : tool.renderIntent === "read" ? <><div className="tool-label">{path ?? "Result"}</div><CodeBlock text={output || JSON.stringify(tool.input, null, 2)} numbered={Boolean(output)} path={path} /></> : content !== undefined ? <><div className="tool-label">Content</div><CodeBlock text={content} numbered path={path} /></> : <CodeBlock text={output || JSON.stringify(tool.input, null, 2)} {...(output ? {} : { language: "json" })} />}
-      <TruncationNotice tool={tool} />
-      {tool.result?.isError && <p className="tool-error">{output || "The tool failed without output."}</p>}
+      <ToolBody tool={tool} />
+      <JsonInspector label="Complete input" value={tool.input} />
+      {details && <JsonInspector label="Result metadata" value={details} />}
+      <TruncationNotice tool={tool} loadFullOutput={loadFullOutput} />
+      {tool.result?.isError && !output && <p className="tool-error">The tool failed without output.</p>}
     </div>
   </details>;
 }
@@ -179,7 +232,7 @@ function CompactionRecord({ item, searchQuery }: { readonly item: CanonicalPrese
   const count = item.event.payload.replacedEventIds.length;
   return <details className="compaction-record">
     <summary><span className="compaction-icon" aria-hidden="true">◇</span><strong>Context compacted</strong><small>{count} earlier record{count === 1 ? "" : "s"} summarized</small><span className="tool-chevron"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg></span></summary>
-    <div><p><HighlightedText text={item.event.payload.summary} query={searchQuery} /></p><small>Original history remains in the canonical session log.</small></div>
+    <div><Markdown text={item.event.payload.summary} searchQuery={searchQuery} /><small>Original history remains in the canonical session log.</small></div>
   </details>;
 }
 
@@ -191,7 +244,7 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled conversation presentation item: ${JSON.stringify(value)}`);
 }
 
-function EventRow({ item, tool, queue, interruption, interaction, attribution, resolveBlobUrl, searchQuery, onCopyMessage, onForkMessage }: { readonly item: ConversationPresentationItem; readonly tool?: ProjectedToolCall | undefined; readonly queue?: ProjectedQueueItem | undefined; readonly interruption?: ProjectedInterruptDelivery | undefined; readonly interaction?: ProjectedInteraction | undefined; readonly attribution?: ResponseAttribution | undefined; readonly resolveBlobUrl?: ((blob: BlobReference) => string | undefined) | undefined; readonly searchQuery?: string | undefined; readonly onCopyMessage?: ((text: string) => void) | undefined; readonly onForkMessage?: ((eventId: EventId) => void) | undefined }): React.JSX.Element | null {
+function EventRow({ item, tool, queue, interruption, interaction, attribution, resolveBlobUrl, loadFullToolOutput, searchQuery, onCopyMessage, onForkMessage, onRespondInteraction }: { readonly item: ConversationPresentationItem; readonly tool?: ProjectedToolCall | undefined; readonly queue?: ProjectedQueueItem | undefined; readonly interruption?: ProjectedInterruptDelivery | undefined; readonly interaction?: ProjectedInteraction | undefined; readonly attribution?: ResponseAttribution | undefined; readonly resolveBlobUrl?: ((blob: BlobReference) => string | undefined) | undefined; readonly loadFullToolOutput?: ToolOutputLoader | undefined; readonly searchQuery?: string | undefined; readonly onCopyMessage?: ((text: string) => void) | undefined; readonly onForkMessage?: ((eventId: EventId) => void) | undefined; readonly onRespondInteraction?: InteractionResponder | undefined }): React.JSX.Element | null {
   switch (item.kind) {
     case "user.message": {
       const event = item.event;
@@ -199,7 +252,7 @@ function EventRow({ item, tool, queue, interruption, interaction, attribution, r
     }
     case "assistant.message": {
       const event = item.event;
-      return <article className="message assistant" id={`message-${event.id}`}><span className="avatar axl">◆</span><div><header><strong>Axl</strong><time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></header>{event.payload.content.map((content, index) => content.type === "thinking" ? <details className="thinking" key={index}><summary><span className="tool-chevron"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg></span>Thinking</summary><p><HighlightedText text={content.text} query={searchQuery} /></p></details> : content.type === "text" ? <p key={index}><HighlightedText text={content.text} query={searchQuery} /></p> : <Attachment key={`${content.blob.sha256}:${index}`} blob={content.blob} resolveBlobUrl={resolveBlobUrl} />)}{event.payload.stopReason === "aborted" && <DeliveryState label="Response interrupted" status="aborted" text="" />}{event.payload.stopReason === "length" && <div className="response-warning" role="status"><span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 2.25 14 13H2zM8 6v3.5M8 12v.1" /></svg></span><span><strong>Response incomplete</strong><small>The model reached its output limit. Ask it to continue or increase the output limit.</small></span></div>}{event.payload.errorMessage && <p className="error">{event.payload.errorMessage}</p>}{event.payload.usage && <UsageDetails usage={event.payload.usage} attribution={attribution} endedAt={event.timestamp} />}<MessageActions eventId={event.id} text={contentText(event.payload.content)} fork={false} onCopy={onCopyMessage} /></div></article>;
+      return <article className="message assistant" id={`message-${event.id}`}><span className="avatar axl">◆</span><div><header><strong>Axl</strong><time>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></header>{event.payload.content.map((content, index) => content.type === "thinking" ? <details className="thinking" key={index}><summary><span className="tool-chevron"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg></span>Thinking</summary><Markdown text={content.text} searchQuery={searchQuery} /></details> : content.type === "text" ? <Markdown key={index} text={content.text} searchQuery={searchQuery} /> : <Attachment key={`${content.blob.sha256}:${index}`} blob={content.blob} resolveBlobUrl={resolveBlobUrl} />)}{event.payload.stopReason === "aborted" && <DeliveryState label="Response interrupted" status="aborted" text="" />}{event.payload.stopReason === "length" && <div className="response-warning" role="status"><span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 2.25 14 13H2zM8 6v3.5M8 12v.1" /></svg></span><span><strong>Response incomplete</strong><small>The model reached its output limit. Ask it to continue or increase the output limit.</small></span></div>}{event.payload.errorMessage && <p className="error">{event.payload.errorMessage}</p>}{event.payload.usage && <UsageDetails usage={event.payload.usage} attribution={attribution} endedAt={event.timestamp} />}<MessageActions eventId={event.id} text={contentText(event.payload.content)} fork={false} onCopy={onCopyMessage} /></div></article>;
     }
     case "queue.enqueued":
       return queue === undefined ? null : <DeliveryState label={queue.status === "queued" ? queue.priority === "front" ? "Queued next" : "Queued for later" : queue.status === "running" ? "Sending now" : queue.status === "paused" ? "Delivery paused" : queue.status === "completed" ? "Delivered" : queue.status === "aborted" ? "Delivery canceled" : "Delivery failed"} status={queue.status} text={contentText(queue.content)} />;
@@ -210,7 +263,7 @@ function EventRow({ item, tool, queue, interruption, interaction, attribution, r
     case "model.retry_scheduled":
       return <SystemNotice title={`Retrying model request ${item.event.payload.attempt}/${item.event.payload.maxAttempts}`} detail={`${item.event.payload.code} · ${(item.event.payload.delayMs / 1000).toFixed(item.event.payload.delayMs < 1000 ? 1 : 0)}s`} tone="warning" />;
     case "tool.call":
-      return tool === undefined ? <SystemNotice title="Tool call unavailable" detail={item.event.payload.name} tone="error" alert /> : <ToolEntry tool={tool} />;
+      return tool === undefined ? <SystemNotice title="Tool call unavailable" detail={item.event.payload.name} tone="error" alert /> : <ToolEntry tool={tool} loadFullOutput={loadFullToolOutput} />;
     case "config.thinking":
       return item.event.payload.clamped ? <SystemNotice title={`Thinking adjusted to ${item.event.payload.effective}`} detail={`Requested ${item.event.payload.requested}`} /> : null;
     case "config.dialect":
@@ -219,10 +272,8 @@ function EventRow({ item, tool, queue, interruption, interaction, attribution, r
       return <SystemNotice title={`Permission requested: ${item.event.payload.capability}`} detail={item.event.payload.description} tone="warning" />;
     case "permission.resolved":
       return <SystemNotice title={`Permission ${item.event.payload.decision.replaceAll("_", " ")}`} detail={item.event.payload.reason} />;
-    case "interaction.requested": {
-      const resolution = interaction?.resolution;
-      return <SystemNotice title={resolution === undefined ? "Interaction required" : `Interaction ${resolution.payload.action}`} detail={`${item.event.payload.source} · ${item.event.payload.message}`} tone={resolution === undefined ? "warning" : "neutral"} />;
-    }
+    case "interaction.requested":
+      return interaction === undefined ? <SystemNotice title="Interaction unavailable" detail={item.event.payload.message} tone="error" alert /> : <InteractionCard interaction={interaction} respond={onRespondInteraction} />;
     case "sandbox.configured":
       return item.event.payload.enforced ? null : <SystemNotice title="Sandbox is not enforced" detail="Tools may access the host with your user permissions." tone="warning" alert />;
     case "sandbox.violation":
@@ -263,7 +314,7 @@ function EventRow({ item, tool, queue, interruption, interaction, attribution, r
   }
 }
 
-export function Conversation({ conversation, resolveBlobUrl, searchQuery, onCopyMessage, onForkMessage }: { readonly conversation: ConversationState; readonly resolveBlobUrl?: ((blob: BlobReference) => string | undefined) | undefined; readonly searchQuery?: string | undefined; readonly onCopyMessage?: ((text: string) => void) | undefined; readonly onForkMessage?: ((eventId: EventId) => void) | undefined }): React.JSX.Element {
+export function Conversation({ conversation, resolveBlobUrl, loadFullToolOutput, searchQuery, onCopyMessage, onForkMessage, onRespondInteraction }: { readonly conversation: ConversationState; readonly resolveBlobUrl?: ((blob: BlobReference) => string | undefined) | undefined; readonly loadFullToolOutput?: ToolOutputLoader | undefined; readonly searchQuery?: string | undefined; readonly onCopyMessage?: ((text: string) => void) | undefined; readonly onForkMessage?: ((eventId: EventId) => void) | undefined; readonly onRespondInteraction?: InteractionResponder | undefined }): React.JSX.Element {
   const compacted = useMemo(() => new Set(conversation.compactedEventIds), [conversation.compactedEventIds]);
   const tools = useMemo(() => new Map(conversation.tools.map((tool) => [tool.callEventId, tool])), [conversation.tools]);
   const queue = useMemo(() => new Map(conversation.queue.map((entry) => [entry.queueItemId, entry])), [conversation.queue]);
@@ -291,6 +342,6 @@ export function Conversation({ conversation, resolveBlobUrl, searchQuery, onCopy
   return <>{conversation.records.map((record) => {
     if (record.kind === "unknown_event") return <EventRow key={record.event.id} item={presentUnknownEvent(record.event)} />;
     if (compacted.has(record.event.id)) return null;
-    return <EventRow key={record.event.id} item={presentCanonicalEvent(record.event)} tool={record.event.type === "tool.call" ? tools.get(record.event.id) : undefined} queue={queue.get(record.event.id)} interruption={interruptions.get(record.event.id)} interaction={interactions.get(record.event.id)} attribution={attributions.get(record.event.id)} resolveBlobUrl={resolveBlobUrl} searchQuery={searchQuery} onCopyMessage={onCopyMessage} onForkMessage={onForkMessage} />;
+    return <EventRow key={record.event.id} item={presentCanonicalEvent(record.event)} tool={record.event.type === "tool.call" ? tools.get(record.event.id) : undefined} queue={queue.get(record.event.id)} interruption={interruptions.get(record.event.id)} interaction={interactions.get(record.event.id)} attribution={attributions.get(record.event.id)} resolveBlobUrl={resolveBlobUrl} loadFullToolOutput={loadFullToolOutput} searchQuery={searchQuery} onCopyMessage={onCopyMessage} onForkMessage={onForkMessage} onRespondInteraction={onRespondInteraction} />;
   })}</>;
 }

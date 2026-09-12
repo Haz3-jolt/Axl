@@ -12,6 +12,7 @@ import {
   parseWireRequest,
   requiredCapability,
   WIRE_PROTOCOL_VERSION,
+  type BlobReference,
   type CapabilityId,
   type ClientIdentity,
   type ConnectionInitializeResult,
@@ -284,6 +285,61 @@ export class AxlClient {
     options: Omit<RequestOptions, "idempotencyKey"> = {},
   ): Promise<RpcResult<"provider.auth.logout">> {
     return this.request("provider.auth.logout", params, options);
+  }
+
+  async readBlob(
+    sessionId: SessionId,
+    blob: BlobReference,
+    options: Omit<RequestOptions, "idempotencyKey"> = {},
+  ): Promise<Uint8Array> {
+    if (
+      !Number.isSafeInteger(blob.sizeBytes) ||
+      blob.sizeBytes <= 0 ||
+      blob.sizeBytes > 20 * 1024 * 1024
+    ) {
+      throw new AxlClientError(
+        "invalid_blob_read",
+        "Blob size exceeds the supported session limit",
+      );
+    }
+    const bytes = new Uint8Array(blob.sizeBytes);
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const result = await this.request(
+        "session.blob.read",
+        {
+          sessionId,
+          sha256: blob.sha256,
+          offset,
+          length: Math.min(384 * 1024, bytes.byteLength - offset),
+        },
+        options,
+      );
+      if (
+        result.offset !== offset ||
+        result.nextOffset <= offset ||
+        result.nextOffset > bytes.length
+      ) {
+        throw new AxlClientError("invalid_blob_read", "Daemon returned an invalid blob range");
+      }
+      let decoded: Uint8Array;
+      try {
+        decoded = Uint8Array.from(atob(result.data), (character) => character.charCodeAt(0));
+      } catch (cause) {
+        throw new AxlClientError("invalid_blob_read", "Daemon returned invalid blob data", {
+          cause,
+        });
+      }
+      if (decoded.byteLength !== result.nextOffset - result.offset) {
+        throw new AxlClientError("invalid_blob_read", "Daemon returned a mismatched blob chunk");
+      }
+      bytes.set(decoded, offset);
+      offset = result.nextOffset;
+      if (result.eof !== (offset === bytes.length)) {
+        throw new AxlClientError("invalid_blob_read", "Daemon returned an invalid blob boundary");
+      }
+    }
+    return bytes;
   }
 
   async shell(

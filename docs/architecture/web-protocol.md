@@ -401,6 +401,8 @@ interface SessionDisposeResult {
 
 `session.configure` includes at least one changed field. It returns event IDs rather than duplicate full events; the canonical events arrive through the subscription.
 
+`session.interaction.respond` resolves daemon-owned MCP approvals, URL elicitation, sampling review, and structured form elicitation. Clients submit only the actions and schema-conforming content supported by the canonical request. Permission history is separate and has no client response RPC.
+
 `delivery: "prompt"` is ordinary prompt behavior. The version-7 `session.steer` and `session.followUp` methods remain available in version 8. The `session.send` delivery variants `steer` and `follow_up` remain unavailable until their separate capabilities are implemented, and clients must not simulate them.
 
 `session.send` completes when the turn reaches a canonical terminal assistant event or error. Detaching does not cancel it. `session.interrupt` is the session-operation cancellation path. `session.interruptAndDeliver` atomically stops active work at a safe boundary and delivers its replacement content exactly once; when no operation is active, it behaves as an ordinary send.
@@ -509,7 +511,9 @@ interface ActivityDelivery {
 
 The SDK follows the reset and replacement rules in [web-delivery.md](web-delivery.md): transport loss and replacement snapshots clear client activity, only the new subscription may restore an activity snapshot, operation changes replace prior transient state, and matching canonical events win. Activity is not acknowledged with canonical event cursors.
 
-The method map includes the merged `session.blob.start`, `session.blob.chunk`, `session.blob.commit`, `session.blob.abort`, and `session.blob.read` contracts. Blob transfer remains session-bound, bounded, content-addressed, and runtime-validated. The initial web UI does not expose media controls.
+The method map includes the merged `session.blob.start`, `session.blob.chunk`, `session.blob.commit`, `session.blob.abort`, and `session.blob.read` contracts. Blob transfer remains session-bound, bounded, content-addressed, and runtime-validated. The SDK reads blobs in bounded chunks. The web client creates revocable object URLs for canonical attachments but does not yet expose upload controls.
+
+When canonical shell output is truncated, the daemon moves the complete output into its session-owned blob store before persistence and records the reference as `tool.result.payload.details.overflowBlob`. Browser clients retrieve that blob on demand. New canonical events never expose the daemon host path. Legacy records containing `overflowPath` remain visible as unavailable historical metadata.
 
 ## Shared conversation projection
 

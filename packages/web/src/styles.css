@@ -56,7 +56,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px 
 .panel-resizer.right { position:fixed; right:calc(var(--changes-width,680px) - 3px); }
 .panel-resizer:hover:after, .resizing-panels .panel-resizer:after { position:absolute; inset:0 3px; background:#5d60a8; content:""; }
 .resizing-panels, .resizing-panels * { cursor:col-resize!important; user-select:none!important; }
-.workspace { position:relative; display:grid; grid-template-rows:56px minmax(0,1fr); min-width:0; height:100vh; }
+.workspace { position:relative; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:56px minmax(0,1fr); min-width:0; height:100vh; overflow:hidden; }
 .topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:0 24px; border-bottom:1px solid var(--line-soft); font-size:12px; }
 .topbar > div { display:flex; align-items:center; gap:12px; min-width:0; }
 .topbar > div:first-child { flex:1; overflow:hidden; }
@@ -78,6 +78,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px 
 .session-usage dt { color:var(--subtle); font-size:10px; }
 .session-usage dd { margin:3px 0 0; color:var(--text-soft); font-size:12px; font-variant-numeric:tabular-nums; }
 .session-usage > small { display:block; margin-top:9px; color:#97876a; font-size:10px; }
+.state-history { margin-top:10px; border-top:1px solid var(--line-soft); }
+.state-history > summary { padding-top:9px; color:var(--muted); font-size:10px; cursor:pointer; }
+.state-history ol { max-height:220px; margin:8px 0 0; padding:0; overflow:auto; list-style:none; }
+.state-history li { display:flex; justify-content:space-between; gap:10px; padding:6px 0; border-top:1px solid rgba(255,255,255,.035); }
+.state-history li span { min-width:0; }
+.state-history li strong,.state-history li small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.state-history li strong { color:var(--text-soft); font-size:10px; font-weight:550; }
+.state-history li small,.state-history time { color:var(--subtle); font-size:9px; }
+.state-history time { flex:none; font-variant-numeric:tabular-nums; }
 .transcript-search { position:absolute; z-index:7; top:64px; right:24px; display:grid; grid-template-columns:18px minmax(160px,280px) auto 26px 26px 26px; align-items:center; gap:5px; padding:6px 7px 6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--raised); box-shadow:0 14px 38px rgba(0,0,0,.42); color:var(--muted); }
 .transcript-search input { min-width:0; border:0; outline:0; background:transparent; color:var(--text); font-size:12px; }
 .transcript-search > span { min-width:38px; color:var(--subtle); font-size:10px; font-variant-numeric:tabular-nums; text-align:right; }

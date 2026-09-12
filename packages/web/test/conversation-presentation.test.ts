@@ -130,7 +130,14 @@ const conversation = {
       result: {
         content: [{ type: "text", text: "bounded output" }],
         isError: false,
-        details: { outputBytes: 319488, overflowPath: "/tmp/output.log" },
+        details: {
+          outputBytes: 319488,
+          overflowBlob: {
+            sha256: "c".repeat(64),
+            mediaType: "text/plain",
+            sizeBytes: 319488,
+          },
+        },
       },
     },
   ],
@@ -156,6 +163,7 @@ test("renders message actions, attachments, delivery, truncation, and usage stat
     createElement(Conversation, {
       conversation,
       resolveBlobUrl: () => "data:image/png;base64,AA==",
+      loadFullToolOutput: async () => "complete output",
       onCopyMessage: () => undefined,
       onForkMessage: () => undefined,
     }),
@@ -168,6 +176,7 @@ test("renders message actions, attachments, delivery, truncation, and usage stat
   assert.match(html, /Interrupted and delivered/);
   assert.match(html, /Output truncated/);
   assert.match(html, /312 KB total/);
+  assert.match(html, /Load complete output/);
   assert.match(html, /Response incomplete/);
   assert.match(html, /anthropic \/ claude-sonnet-4-6/);
   assert.match(html, /Cost unavailable/);
@@ -176,6 +185,195 @@ test("renders message actions, attachments, delivery, truncation, and usage stat
   assert.match(html, /tok\/s/);
   assert.match(html, /Copy message/);
   assert.match(html, /Fork from this message/);
+});
+
+test("renders safe assistant Markdown without interpreting model HTML", () => {
+  const markdown = {
+    compactedEventIds: [],
+    records: [
+      {
+        kind: "event",
+        event: {
+          id: "assistant-markdown",
+          timestamp: 1000,
+          type: "assistant.message",
+          payload: {
+            content: [
+              {
+                type: "text",
+                text: "## Result\n\n- **ready**\n\n`code`\n\n<script>alert(1)</script>\n\n[unsafe](javascript:alert(1))",
+              },
+            ],
+            stopReason: "stop",
+          },
+        },
+      },
+    ],
+    tools: [],
+    interactions: [],
+    operations: [],
+    uncertainShellOperations: [],
+    queue: [],
+    interruptDeliveries: [],
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+      costUsd: 0,
+    },
+  } as unknown as ConversationState;
+
+  const html = renderToStaticMarkup(createElement(Conversation, { conversation: markdown }));
+  assert.match(html, /<h2>Result<\/h2>/);
+  assert.match(html, /<strong>ready<\/strong>/);
+  assert.match(html, /<code>code<\/code>/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.doesNotMatch(html, /href="javascript:/);
+});
+
+test("renders specialized tool details and actionable MCP forms", () => {
+  const rich = {
+    compactedEventIds: [],
+    records: [
+      {
+        kind: "event",
+        event: {
+          id: "search",
+          type: "tool.call",
+          payload: { callId: "search", name: "web_search", input: { query: "Axl docs" } },
+        },
+      },
+      {
+        kind: "event",
+        event: {
+          id: "mcp",
+          type: "tool.call",
+          payload: {
+            callId: "mcp",
+            name: "mcp",
+            input: { action: "call_tool", server: "issues", name: "lookup", arguments: { id: 1 } },
+          },
+        },
+      },
+      {
+        kind: "event",
+        event: {
+          id: "workflow",
+          type: "tool.call",
+          payload: {
+            callId: "workflow",
+            name: "workflow_run",
+            input: { workflow: "verify", action: "run" },
+          },
+        },
+      },
+      {
+        kind: "event",
+        event: {
+          id: "interaction",
+          type: "interaction.requested",
+          payload: {
+            interactionId: "form-1",
+            kind: "mcp_elicitation_form",
+            source: "mcp:issues",
+            message: "Choose a channel",
+            data: {
+              request: {
+                requestedSchema: {
+                  type: "object",
+                  properties: { channel: { type: "string", enum: ["alpha", "stable"] } },
+                  required: ["channel"],
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+    tools: [
+      {
+        callEventId: "search",
+        name: "web_search",
+        input: { query: "Axl docs" },
+        renderIntent: "search",
+        result: {
+          content: [{ type: "text", text: "Two results" }],
+          isError: false,
+          details: { resultCount: 2 },
+        },
+      },
+      {
+        callEventId: "mcp",
+        name: "mcp",
+        input: { action: "call_tool", server: "issues", name: "lookup", arguments: { id: 1 } },
+        renderIntent: "mcp",
+        result: {
+          content: [{ type: "text", text: "AXL-1" }],
+          isError: false,
+          details: { durationMs: 4 },
+        },
+      },
+      {
+        callEventId: "workflow",
+        name: "workflow_run",
+        input: { workflow: "verify", action: "run" },
+        renderIntent: "workflow",
+        result: { content: [{ type: "text", text: "Passed" }], isError: false },
+      },
+    ],
+    interactions: [
+      {
+        interactionId: "form-1",
+        request: {
+          id: "interaction",
+          type: "interaction.requested",
+          payload: {
+            interactionId: "form-1",
+            kind: "mcp_elicitation_form",
+            source: "mcp:issues",
+            message: "Choose a channel",
+            data: {
+              request: {
+                requestedSchema: {
+                  type: "object",
+                  properties: { channel: { type: "string", enum: ["alpha", "stable"] } },
+                  required: ["channel"],
+                },
+              },
+            },
+          },
+        },
+      },
+    ],
+    operations: [],
+    uncertainShellOperations: [],
+    queue: [],
+    interruptDeliveries: [],
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+      costUsd: 0,
+    },
+  } as unknown as ConversationState;
+  const html = renderToStaticMarkup(
+    createElement(Conversation, {
+      conversation: rich,
+      onRespondInteraction: async () => undefined,
+    }),
+  );
+  assert.match(html, /Searched/);
+  assert.match(html, /Called MCP/);
+  assert.match(html, /Ran workflow/);
+  assert.match(html, /Complete input/);
+  assert.match(html, /Result metadata/);
+  assert.match(html, /MCP input/);
+  assert.match(html, /<select/);
+  assert.match(html, /Submit/);
 });
 
 test("hides compacted records and renders the retained summary", () => {
