@@ -397,14 +397,15 @@ test("pending-input presentation follows interruption, steering, then follow-up 
     { mode: "steer", text: "s1" },
     { mode: "interrupt", text: "i1" },
     { mode: "followUp", text: "f2" },
+    { mode: "follow_up", text: "f3" },
     { mode: "steer", text: "s2" },
   ] as const;
   assert.deepEqual(
     orderPendingTurnInputs(submitted).map((item) => item.text),
-    ["i1", "s1", "s2", "f1", "f2"],
+    ["i1", "s1", "s2", "f1", "f2", "f3"],
   );
   assert.deepEqual(
     submitted.map((item) => item.text),
-    ["f1", "s1", "i1", "f2", "s2"],
+    ["f1", "s1", "i1", "f2", "f3", "s2"],
   );
 });

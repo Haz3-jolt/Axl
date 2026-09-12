@@ -8,6 +8,35 @@ import type {
   WorkspaceDiffResult,
 } from "@axl/sdk";
 
+export interface PendingPromptDelivery {
+  readonly id: number;
+  readonly mode: "steer" | "follow_up" | "interrupt";
+  readonly text: string;
+  readonly contentKey: string;
+  readonly afterRecord: number;
+}
+
+export function consumePendingPromptDeliveries(
+  pendingInputs: readonly PendingPromptDelivery[],
+  conversation: ConversationState,
+): readonly PendingPromptDelivery[] {
+  const consumed = new Set<string>();
+  return pendingInputs.filter((pending) => {
+    const delivered = conversation.records.slice(pending.afterRecord).find((record) => {
+      if (
+        record.kind !== "event" ||
+        record.event.type !== "user.message" ||
+        consumed.has(record.event.id) ||
+        JSON.stringify(record.event.payload.content) !== pending.contentKey
+      )
+        return false;
+      consumed.add(record.event.id);
+      return true;
+    });
+    return delivered === undefined;
+  });
+}
+
 export function promptDeliveryShortcut(modifiers: {
   readonly altKey: boolean;
   readonly ctrlKey: boolean;
