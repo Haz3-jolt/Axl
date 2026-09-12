@@ -1,7 +1,21 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ConversationState, SessionSummary, WorkspaceDiffResult } from "@axl/sdk";
+import type {
+  ConversationState,
+  PromptDeliveryMode,
+  SessionSummary,
+  WorkspaceDiffResult,
+} from "@axl/sdk";
+
+export type SelectedPromptDelivery = "auto" | Exclude<PromptDeliveryMode, "prompt">;
+
+export function resolvePromptDelivery(
+  selected: SelectedPromptDelivery,
+  active: boolean,
+): PromptDeliveryMode {
+  return selected === "auto" ? (active ? "steer" : "prompt") : selected;
+}
 
 function messageText(
   content: readonly { readonly type: string; readonly text?: string }[],

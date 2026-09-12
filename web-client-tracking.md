@@ -78,10 +78,10 @@ The normal local chat path is available. These items close the remaining gap bet
 
 ### Prompt delivery
 
-6. [ ] Add draft-safe steer and follow-up submission.
-7. [ ] Add daemon-owned queue, requeue, paused-state recovery, and delivery outcome controls.
-8. [ ] Add atomic interrupt-and-deliver. Never simulate it with Stop followed by Send.
-9. [ ] Preserve drafts and show accepted, delivered, queued, paused, rejected, interrupted, failed, and uncertain outcomes accurately.
+6. [x] Add draft-safe steer and follow-up submission through the shared SDK delivery workflow.
+7. [ ] Finish daemon-owned queue controls. Queue-next, queue-last, and paused outcomes are implemented; explicit paused-item requeue remains.
+8. [x] Add atomic interrupt-and-deliver. It uses `session.interruptAndDeliver` and is never simulated with Stop followed by Send.
+9. [x] Preserve drafts on rejection or uncertain transport outcomes and present accepted, completed, queued, paused, interrupted, failed, and uncertain states accurately.
 
 ### Attachments and direct operations
 

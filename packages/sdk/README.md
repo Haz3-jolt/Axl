@@ -25,6 +25,7 @@ The SDK owns:
 - deterministic conversation projection
 - provider-neutral model metadata for presentation
 - validated command discovery, collision checks, search, and typed command workflows
+- explicit prompt delivery outcomes across send, steer, follow-up, queue, and interrupt workflows
 
 The SDK does not own:
 
@@ -80,6 +81,8 @@ Use `projector.overview` for status and activity updates. It provides current me
 Use `projector.state` when the UI needs those full collections.
 
 `ConversationProjector.state` is a disposable view. Canonical JSONL remains authoritative.
+
+Use `deliverPrompt` for user-facing delivery controls. It preserves the difference between prompt, steer, follow-up, queue-front, queue-back, and atomic interrupt intent. Its result distinguishes completed, accepted, queued, and uncertain delivery so clients can preserve drafts when transport failure prevents confirmation.
 
 ## Connection lifecycle
 
