@@ -26,6 +26,7 @@ import {
   type WorkspaceDiffResult,
   type WorkspaceStatusResult,
   type WorkspaceStatusScope,
+  orderPendingTurnInputs,
   subscribeSession,
 } from "@axl/sdk";
 
@@ -42,6 +43,7 @@ import {
 import { loadProviderDirectory, type ModelChoice } from "./model-catalog.ts";
 import { ModelPicker } from "./model-picker.tsx";
 import {
+  consumePendingPromptDeliveries,
   matchesSession,
   promptDeliveryShortcut,
   restoreDraft,
@@ -49,6 +51,7 @@ import {
   sessionUsageStats,
   transcriptMessageMatches,
   transcriptPromptBreakpoints,
+  type PendingPromptDelivery,
 } from "./view-state.ts";
 import { WorkspaceChanges, type WorkspaceReview } from "./workspace-changes.tsx";
 
@@ -125,6 +128,7 @@ export interface WebPreview {
   readonly deliverPrompt?: (
     mode: PromptDeliveryMode,
     content: readonly UserContent[],
+    onConversation: (conversation: ConversationState) => void,
   ) => Promise<{
     readonly outcome: PromptDeliveryOutcome;
     readonly conversation: ConversationState;
@@ -142,6 +146,8 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const [draft, setDraft] = useState("");
   const [pendingDeliveries, setPendingDeliveries] = useState(0);
   const [pendingTurnDeliveries, setPendingTurnDeliveries] = useState(0);
+  const pendingInputSequence = useRef(0);
+  const [pendingInputs, setPendingInputs] = useState<readonly PendingPromptDelivery[]>([]);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -354,6 +360,10 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   }, []);
 
   useEffect(() => { transcript.current?.scrollTo({ top: transcript.current.scrollHeight }); }, [conversation.records.length, conversation.activity?.sequence]);
+  useEffect(() => {
+    setPendingInputs((current) => consumePendingPromptDeliveries(current, conversation));
+  }, [conversation.records]);
+  useEffect(() => setPendingInputs([]), [opened?.sessionId]);
   useEffect(() => setTranscriptMatch(-1), [transcriptQuery]);
   useEffect(() => setSlashCommandIndex(0), [draft]);
   useEffect(() => {
@@ -413,14 +423,24 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         : "prompt");
     setDraft("");
     setError(undefined);
+    const content = [{ type: "text" as const, text }];
+    const pendingInput = mode === "steer" || mode === "follow_up" || mode === "interrupt"
+      ? {
+          id: ++pendingInputSequence.current,
+          mode,
+          text,
+          contentKey: JSON.stringify(content),
+          afterRecord: conversation.records.length,
+        }
+      : undefined;
+    if (pendingInput !== undefined) setPendingInputs((current) => [...current, pendingInput]);
     setPendingDeliveries((current) => current + 1);
     if (mode === "prompt" || mode === "interrupt") {
       setPendingTurnDeliveries((current) => current + 1);
     }
     try {
-      const content = [{ type: "text" as const, text }];
       const delivery = preview?.deliverPrompt !== undefined
-        ? await preview.deliverPrompt(mode, content)
+        ? await preview.deliverPrompt(mode, content, setConversation)
         : client !== undefined
           ? { outcome: await deliverPrompt(client, opened.sessionId, content, mode) }
           : undefined;
@@ -428,17 +448,20 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       const { outcome } = delivery;
       if ("conversation" in delivery) setConversation(delivery.conversation);
       if (outcome.state === "uncertain") {
+        if (pendingInput !== undefined) setPendingInputs((current) => current.filter((item) => item.id !== pendingInput.id));
         setDraft((current) => restoreDraft(text, current));
         setError("Delivery status is unknown. The prompt was restored for review.");
       } else {
         if (outcome.state === "accepted") {
           showActionNotice(outcome.mode === "steer" ? "Steer accepted" : "Follow-up accepted");
         } else if (outcome.state === "queued") {
+          if (pendingInput !== undefined) setPendingInputs((current) => current.filter((item) => item.id !== pendingInput.id));
           showActionNotice(outcome.queueState === "paused" ? "Prompt queued and paused" : "Prompt queued");
         }
         if (outcome.state === "completed" && client !== undefined) await refreshSessions(client);
       }
     } catch (cause) {
+      if (pendingInput !== undefined) setPendingInputs((current) => current.filter((item) => item.id !== pendingInput.id));
       setDraft((current) => restoreDraft(text, current));
       setError(cause instanceof Error ? cause.message : "Message was not delivered");
     } finally {
@@ -795,6 +818,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   );
   const connected = connection === "connected";
   const deliveryActive = conversation.activeOperationId !== undefined || pendingTurnDeliveries > 0;
+  const orderedPendingInputs = useMemo(() => orderPendingTurnInputs(pendingInputs), [pendingInputs]);
   const canConfigure = preview !== undefined || client?.connection.grantedCapabilities.includes("session.configure") === true;
 
   const jumpToMessage = (id: string): void => {
@@ -850,7 +874,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       {!connected && <div className="connection-banner" role="status" aria-live="polite"><span>{connection === "disconnected" ? "Connection to the daemon was lost." : connection === "incompatible" ? "The browser and daemon versions are incompatible." : "Connecting to the daemon…"}</span>{connection === "disconnected" && client !== undefined && <button onClick={() => void reconnect()}>Reconnect</button>}</div>}
       {actionNotice && <div className="action-notice" role="status">{actionNotice}</div>}
       {error && <div className="error-banner" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError(undefined)}>×</button></div>}
-      {opened && <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>{slashCommands.length > 0 && <div className="slash-commands" role="listbox" aria-label="Slash commands">{slashCommands.map((command) => <button key={command.id} type="button" role="option" aria-selected={command === slashCommands[slashCommandIndex]} disabled={command.availability.state === "unavailable"} onClick={() => selectCommand(command)}><strong>/{command.name}</strong><span>{command.availability.state === "unavailable" ? command.availability.reason : command.description}</span></button>)}</div>}<textarea ref={composer} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (slashCommands.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) { event.preventDefault(); setSlashCommandIndex((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + slashCommands.length) % slashCommands.length); } else if (slashCommands.length > 0 && (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))) { event.preventDefault(); selectCommand(slashCommands[slashCommandIndex] as EffectiveCommand); } else if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(promptDeliveryShortcut(event)); } }} placeholder="Ask Axl…" aria-label="Message" aria-keyshortcuts="Enter Alt+Enter Control+Enter Meta+Enter" aria-expanded={slashCommands.length > 0} rows={3} disabled={busy} /><div className="composer-footer"><span className="delivery-hint" title="Enter sends or steers · Alt+Enter follows up · Ctrl/Cmd+Enter interrupts">{deliveryActive ? "↵ steer" : "↵ send"} · Alt ↵ follow up · Ctrl/⌘ ↵ interrupt</span>{pendingDeliveries > 0 && <span className="delivery-status" role="status">Delivering {pendingDeliveries}</span>}<ModelPicker choices={modelCatalog} provider={conversation.provider} model={conversation.model} thinking={conversation.thinking} openRequest={modelPickerOpenRequest} disabled={!canConfigure || busy || (preview === undefined && conversation.activeOperationId !== undefined) || !connected} onModel={(choice) => void configureModel(choice)} onThinking={(level) => void configureThinking(level)} />{conversation.activeOperationId && <button type="button" className="composer-submit stop" aria-label="Stop response" onClick={() => void interrupt()} disabled={!connected}><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.25" /></svg></button>}<button className="composer-submit send" aria-label={deliveryActive ? "Deliver during active response" : "Send message"} disabled={!draft.trim() || busy || !connected}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M14 2 8.5 14 6.4 9.6 2 7.5 14 2Z M6.4 9.6 10 6" /></svg></button></div></form>}
+      {opened && <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>{slashCommands.length > 0 && <div className="slash-commands" role="listbox" aria-label="Slash commands">{slashCommands.map((command) => <button key={command.id} type="button" role="option" aria-selected={command === slashCommands[slashCommandIndex]} disabled={command.availability.state === "unavailable"} onClick={() => selectCommand(command)}><strong>/{command.name}</strong><span>{command.availability.state === "unavailable" ? command.availability.reason : command.description}</span></button>)}</div>}{orderedPendingInputs.length > 0 && <div className="pending-inputs" role="status" aria-label="Pending prompt delivery">{orderedPendingInputs.map((pending) => <div key={pending.id}><strong>{pending.mode === "steer" ? "Steering" : pending.mode === "follow_up" ? "Follow-up" : "Interrupting"}</strong><span>{pending.text}</span></div>)}</div>}<textarea ref={composer} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (slashCommands.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) { event.preventDefault(); setSlashCommandIndex((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + slashCommands.length) % slashCommands.length); } else if (slashCommands.length > 0 && (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))) { event.preventDefault(); selectCommand(slashCommands[slashCommandIndex] as EffectiveCommand); } else if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(promptDeliveryShortcut(event)); } }} placeholder="Ask Axl…" aria-label="Message" aria-keyshortcuts="Enter Alt+Enter Control+Enter Meta+Enter" aria-expanded={slashCommands.length > 0} rows={3} disabled={busy} /><div className="composer-footer"><span className="delivery-hint" title="Enter sends or steers · Alt+Enter follows up · Ctrl/Cmd+Enter interrupts">{deliveryActive ? "↵ steer" : "↵ send"} · Alt ↵ follow up · Ctrl/⌘ ↵ interrupt</span>{pendingDeliveries > 0 && <span className="delivery-status" role="status">Delivering {pendingDeliveries}</span>}<ModelPicker choices={modelCatalog} provider={conversation.provider} model={conversation.model} thinking={conversation.thinking} openRequest={modelPickerOpenRequest} disabled={!canConfigure || busy || (preview === undefined && conversation.activeOperationId !== undefined) || !connected} onModel={(choice) => void configureModel(choice)} onThinking={(level) => void configureThinking(level)} />{conversation.activeOperationId && <button type="button" className="composer-submit stop" aria-label="Stop response" onClick={() => void interrupt()} disabled={!connected}><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.25" /></svg></button>}<button className="composer-submit send" aria-label={deliveryActive ? "Deliver during active response" : "Send message"} disabled={!draft.trim() || busy || !connected}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M14 2 8.5 14 6.4 9.6 2 7.5 14 2Z M6.4 9.6 10 6" /></svg></button></div></form>}
     </section>
     {changesOpen && <><div className="panel-resizer right" role="separator" aria-orientation="vertical" aria-label="Resize changes panel" aria-valuemin={420} aria-valuemax={900} aria-valuenow={changesWidth} tabIndex={0} onPointerDown={(event) => resizePanel("right", event)} onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); resizePanelBy("right", event.key === "ArrowLeft" ? 16 : -16); } }} /><WorkspaceChanges review={workspaceReview} loading={workspaceLoading} error={workspaceError} view={changesView} onViewChange={(view) => { setChangesView(view); persistLayout({ sidebarWidth, changesWidth, sidebarCollapsed, changesView: view }); }} onClose={() => setChangesOpen(false)} onRetry={() => void loadWorkspaceChanges()} /></>}
     {controlCenter && <Suspense fallback={null}><ControlCenter tab={controlCenter} preferences={{ sidebarWidth, changesWidth, sidebarCollapsed, changesView }} providers={providerInventory} providerLoading={providerLoading} providerError={providerError} canRefresh={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.catalog.refresh") === true} canLogout={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.auth.logout") === true} onTab={setControlCenter} onPreferences={applyWebPreferences} onRefresh={(providerId) => void refreshProviders(providerId)} onLogout={(providerId) => void logoutProvider(providerId)} onCopyLogin={(providerId) => void copyProviderLogin(providerId)} onClose={() => setControlCenter(undefined)} /></Suspense>}

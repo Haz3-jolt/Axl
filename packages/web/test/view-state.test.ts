@@ -7,6 +7,7 @@ import test from "node:test";
 import type { ConversationState, SessionSummary } from "@axl/sdk";
 import { editDiffRows } from "@axl/ui";
 import {
+  consumePendingPromptDeliveries,
   matchesSession,
   promptDeliveryShortcut,
   restoreDraft,
@@ -40,6 +41,33 @@ test("prompt delivery uses keyboard modifiers without a mode selector", () => {
     promptDeliveryShortcut({ altKey: false, ctrlKey: false, metaKey: true }),
     "interrupt",
   );
+});
+
+test("canonical user messages consume one matching pending delivery", () => {
+  const content = [{ type: "text" as const, text: "Keep going" }];
+  const pending = [
+    {
+      id: 1,
+      mode: "steer" as const,
+      text: "Keep going",
+      contentKey: JSON.stringify(content),
+      afterRecord: 0,
+    },
+    {
+      id: 2,
+      mode: "follow_up" as const,
+      text: "Keep going",
+      contentKey: JSON.stringify(content),
+      afterRecord: 0,
+    },
+  ];
+  const conversation = {
+    records: [
+      { kind: "event", event: { id: "delivered", type: "user.message", payload: { content } } },
+    ],
+  } as unknown as ConversationState;
+
+  assert.deepEqual(consumePendingPromptDeliveries(pending, conversation), [pending[1]]);
 });
 
 test("session presentation handles fallbacks, Unicode search, and failed drafts", () => {

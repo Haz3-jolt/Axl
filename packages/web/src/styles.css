@@ -135,6 +135,10 @@ h1 { margin:0; font-size:23px; line-height:1.25; letter-spacing:-.025em; }
 .slash-commands button:disabled { opacity:.45; cursor:not-allowed; }
 .slash-commands strong { min-width:92px; color:var(--text); font:500 12px/1.4 var(--font-mono); }
 .slash-commands span { color:var(--muted); font-size:11px; }
+.pending-inputs { display:flex; max-height:88px; margin:-4px 0 10px; flex-direction:column; gap:5px; overflow:auto; }
+.pending-inputs div { display:flex; min-width:0; gap:8px; padding:6px 8px; border-radius:6px; background:var(--raised); font-size:11px; }
+.pending-inputs strong { flex:0 0 auto; color:#989bea; font-weight:550; }
+.pending-inputs span { overflow:hidden; color:var(--muted); text-overflow:ellipsis; white-space:nowrap; }
 .composer textarea { display:block; width:100%; min-height:64px; resize:none; border:0; outline:0; background:transparent; color:var(--text); font-size:14px; line-height:1.5; }
 .composer textarea::placeholder { color:var(--muted); }
 .composer-footer { position:relative; display:flex; align-items:center; gap:10px; padding-top:12px; border-top:1px solid var(--line-soft); color:var(--muted); font-size:11px; }

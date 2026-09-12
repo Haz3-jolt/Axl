@@ -138,9 +138,9 @@ export type ConversationOverview = Omit<
  * This is a projection, not a queue or a complete view of inputs from other clients.
  */
 export function orderPendingTurnInputs<
-  T extends { readonly mode: "steer" | "followUp" | "interrupt" },
+  T extends { readonly mode: "steer" | "followUp" | "follow_up" | "interrupt" },
 >(inputs: readonly T[]): readonly T[] {
-  const rank = { interrupt: 0, steer: 1, followUp: 2 } as const;
+  const rank = { interrupt: 0, steer: 1, followUp: 2, follow_up: 2 } as const;
   return inputs.toSorted((a, b) => rank[a.mode] - rank[b.mode]);
 }
 
