@@ -15,12 +15,14 @@ import {
   deliverPrompt,
   type ProjectedToolCall,
   type PromptDeliveryMode,
+  type PromptDeliveryOutcome,
   type ProviderInventoryGroup,
   type SessionId,
   type SessionOpenResult,
   type SessionSubscription,
   type SessionSummary,
   type ThinkingLevel,
+  type UserContent,
   type WorkspaceDiffResult,
   type WorkspaceStatusResult,
   type WorkspaceStatusScope,
@@ -121,6 +123,13 @@ export interface WebPreview {
   readonly providers?: readonly ProviderInventoryGroup[];
   readonly resolveBlobUrl?: (sha256: string) => string | undefined;
   readonly readBlob?: (sha256: string) => Promise<Uint8Array>;
+  readonly deliverPrompt?: (
+    mode: PromptDeliveryMode,
+    content: readonly UserContent[],
+  ) => Promise<{
+    readonly outcome: PromptDeliveryOutcome;
+    readonly conversation: ConversationState;
+  }>;
   readonly workspace?: WorkspaceReview;
 }
 
@@ -393,7 +402,8 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   };
 
   const send = async (override?: PromptDeliveryMode): Promise<void> => {
-    const text = draft.trim(); if (!client || !opened || !text || busy) return;
+    const text = draft.trim();
+    if ((!client && preview?.deliverPrompt === undefined) || !opened || !text || busy) return;
     if (/^\/[a-z]/u.test(text)) {
       await runCommand(text);
       return;
@@ -409,12 +419,15 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       setPendingTurnDeliveries((current) => current + 1);
     }
     try {
-      const outcome = await deliverPrompt(
-        client,
-        opened.sessionId,
-        [{ type: "text", text }],
-        mode,
-      );
+      const content = [{ type: "text" as const, text }];
+      const delivery = preview?.deliverPrompt !== undefined
+        ? await preview.deliverPrompt(mode, content)
+        : client !== undefined
+          ? { outcome: await deliverPrompt(client, opened.sessionId, content, mode) }
+          : undefined;
+      if (delivery === undefined) return;
+      const { outcome } = delivery;
+      if ("conversation" in delivery) setConversation(delivery.conversation);
       if (outcome.state === "uncertain") {
         setDraft((current) => restoreDraft(text, current));
         setError("Delivery status is unknown. The prompt was restored for review.");
@@ -425,7 +438,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         } else if (outcome.state === "queued") {
           showActionNotice(outcome.queueState === "paused" ? "Prompt queued and paused" : "Prompt queued");
         }
-        if (outcome.state === "completed") await refreshSessions(client);
+        if (outcome.state === "completed" && client !== undefined) await refreshSessions(client);
       }
     } catch (cause) {
       setDraft((current) => restoreDraft(text, current));
