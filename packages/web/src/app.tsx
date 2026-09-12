@@ -38,6 +38,8 @@ import { filterCommands } from "./commands.ts";
 import type { ControlCenterTab } from "./control-center.tsx";
 import {
   connectWebEnvironment,
+  exportSessionArtifact,
+  importSessionArtifact,
   parseWebPreferences,
   saveWebPreferences,
   type WebBootstrap,
@@ -45,6 +47,7 @@ import {
 } from "./environment.ts";
 import { loadProviderDirectory, type ModelChoice } from "./model-catalog.ts";
 import { ModelPicker } from "./model-picker.tsx";
+import { SessionLifecycle } from "./session-lifecycle.tsx";
 import {
   consumePendingPromptDeliveries,
   directShellInput,
@@ -172,6 +175,12 @@ export interface WebPreview {
   readonly interrupt?: (
     onConversation: (conversation: ConversationState) => void,
   ) => Promise<{ readonly interrupted: boolean }>;
+  readonly renameSession?: (title: string) => Promise<void>;
+  readonly cloneSession?: () => Promise<SessionOpenResult>;
+  readonly disposeSession?: () => Promise<void>;
+  readonly deleteSession?: () => Promise<void>;
+  readonly exportSession?: () => Promise<Blob>;
+  readonly importSession?: (file: File) => Promise<SessionOpenResult>;
   readonly commands?: readonly EffectiveCommand[];
   readonly workspace?: WorkspaceReview;
 }
@@ -204,6 +213,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const [transcriptSearchOpen, setTranscriptSearchOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [controlCenter, setControlCenter] = useState<ControlCenterTab>();
+  const [sessionLifecycleOpen, setSessionLifecycleOpen] = useState(false);
   const [providerLoading, setProviderLoading] = useState(false);
   const [providerError, setProviderError] = useState<string>();
   const [transcriptQuery, setTranscriptQuery] = useState("");
@@ -228,6 +238,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const subscription = useRef<SessionSubscription | undefined>(undefined);
   const blobUrlCache = useRef(new Map<string, string>());
   const blobUrlSession = useRef<string | undefined>(undefined);
+  const openedSessionId = useRef<SessionId | undefined>(preview?.opened.sessionId);
   const selectionGeneration = useRef(0);
   const workspaceGeneration = useRef(0);
   const transcript = useRef<HTMLDivElement>(null);
@@ -237,12 +248,37 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const sidebarClose = useRef<HTMLButtonElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const artifactInput = useRef<HTMLInputElement>(null);
   const sidebarWasOpen = useRef(false);
 
   const refreshSessions = async (current: AxlClient): Promise<readonly SessionSummary[]> => {
     const result = await current.request("session.list", { scope: "all_local", order: "recent", pageSize: 100 });
     setSessions(result.sessions);
     return result.sessions;
+  };
+
+  const refreshSessionCatalog = async (current: AxlClient): Promise<void> => {
+    const next = await refreshSessions(current);
+    const selectedId = openedSessionId.current;
+    if (selectedId === undefined) return;
+    const selected = next.find((session) => session.sessionId === selectedId);
+    if (selected !== undefined) {
+      setOpened((value) => value === undefined ? value : {
+        ...value,
+        ...(selected.title === undefined ? {} : { title: selected.title }),
+        runtime: selected.runtime,
+      });
+      return;
+    }
+    selectionGeneration.current += 1;
+    workspaceGeneration.current += 1;
+    await subscription.current?.close();
+    subscription.current = undefined;
+    openedSessionId.current = undefined;
+    setOpened(undefined);
+    setConversation(EMPTY_STATE);
+    setSessionLifecycleOpen(false);
+    setError("This session was deleted by another attached client");
   };
 
   const refreshCommandDirectory = async (sessionId?: SessionId): Promise<void> => {
@@ -258,7 +294,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   ): Promise<void> => {
     const generation = ++selectionGeneration.current;
     workspaceGeneration.current += 1;
-    setBusy(true); setDirectOperation(undefined); setError(undefined); setSidebarOpen(false); setChangesOpen(false); setTranscriptSearchOpen(false); setUsageOpen(false); setControlCenter(undefined); setTranscriptQuery(""); setActivePromptId(undefined); setWorkspaceReview(undefined); setWorkspaceError(undefined); setOpened(undefined); setConversation(EMPTY_STATE);
+    setBusy(true); setDirectOperation(undefined); setError(undefined); setSidebarOpen(false); setChangesOpen(false); setTranscriptSearchOpen(false); setUsageOpen(false); setControlCenter(undefined); setSessionLifecycleOpen(false); setTranscriptQuery(""); setActivePromptId(undefined); setWorkspaceReview(undefined); setWorkspaceError(undefined); setOpened(undefined); setConversation(EMPTY_STATE);
     const previous = subscription.current;
     subscription.current = undefined;
     try {
@@ -294,6 +330,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         return;
       }
       subscription.current = nextSubscription;
+      openedSessionId.current = next.sessionId;
       setOpened(next);
       void refreshCommandDirectory(next.sessionId).catch((cause: unknown) =>
         setError(cause instanceof Error ? cause.message : "Could not load commands"),
@@ -310,7 +347,9 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     if (preview !== undefined) return;
     let disposed = false;
     let activeClient: AxlClient | undefined;
+    let catalogRefreshTimer: ReturnType<typeof setTimeout> | undefined;
     let removeStateListener = (): void => undefined;
+    let removeCatalogListener = (): void => undefined;
     void connectWebEnvironment().then(async (environment) => {
       if (disposed) { environment.client.close(); return; }
       activeClient = environment.client; setClient(environment.client); setBootstrap(environment.bootstrap);
@@ -338,6 +377,16 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       removeStateListener = environment.client.onStateChange((state) => {
         if (!disposed) setConnection(state);
       });
+      removeCatalogListener = environment.client.onSessionsChanged(() => {
+        if (disposed) return;
+        if (catalogRefreshTimer !== undefined) clearTimeout(catalogRefreshTimer);
+        catalogRefreshTimer = setTimeout(() => {
+          catalogRefreshTimer = undefined;
+          void refreshSessionCatalog(environment.client).catch((cause: unknown) =>
+            setError(cause instanceof Error ? cause.message : "Could not refresh sessions"),
+          );
+        }, 50);
+      });
       await refreshSessions(environment.client);
       if (disposed) return;
       if (environment.selectedSessionId !== undefined) {
@@ -362,6 +411,8 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       selectionGeneration.current += 1;
       workspaceGeneration.current += 1;
       removeStateListener();
+      removeCatalogListener();
+      if (catalogRefreshTimer !== undefined) clearTimeout(catalogRefreshTimer);
       subscription.current?.detach();
       commandController.current = undefined;
       activeClient?.close();
@@ -417,6 +468,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     setAttachments([]);
     setPendingInputs([]);
   }, [opened?.sessionId]);
+  useEffect(() => { openedSessionId.current = opened?.sessionId; }, [opened?.sessionId]);
   useEffect(() => setTranscriptMatch(-1), [transcriptQuery]);
   useEffect(() => setSlashCommandIndex(0), [draft]);
   useEffect(() => {
@@ -460,6 +512,172 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       const created = await client.request("session.create", { cwd: bootstrap.cwd, profile: "standard" });
       await refreshSessions(client); await openSession(client, created.sessionId);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create a session"); setBusy(false); }
+  };
+
+  const renameSession = async (title: string): Promise<void> => {
+    if (!opened) return;
+    setBusy(true); setError(undefined);
+    try {
+      if (preview?.renameSession !== undefined) await preview.renameSession(title);
+      else if (client !== undefined) await client.request("session.rename", { sessionId: opened.sessionId, title });
+      else throw new Error("Session rename is unavailable");
+      if (client !== undefined) await refreshSessions(client);
+      else setSessions((current) => current.map((session) => session.sessionId === opened.sessionId ? { ...session, title } : session));
+      setOpened((current) => current === undefined ? current : { ...current, title });
+      setSessionLifecycleOpen(false);
+      showActionNotice("Session renamed");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not rename the session");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cloneSession = async (): Promise<void> => {
+    if (!opened) return;
+    setBusy(true); setError(undefined);
+    try {
+      const cloned = preview?.cloneSession !== undefined
+        ? await preview.cloneSession()
+        : client !== undefined
+          ? await client.request("session.clone", { sessionId: opened.sessionId })
+          : undefined;
+      if (cloned === undefined) throw new Error("Session clone is unavailable");
+      if (client !== undefined) await refreshSessions(client);
+      setSessionLifecycleOpen(false);
+      if (client !== undefined) await openSession(client, cloned.sessionId, cloned);
+      else {
+        setOpened(cloned);
+        setConversation(EMPTY_STATE);
+        setSessions((current) => [{
+          sessionId: cloned.sessionId,
+          cwd: cloned.cwd,
+          ...(cloned.title === undefined ? {} : { title: cloned.title }),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          userMessageCount: 0,
+          runtime: cloned.runtime,
+          attachmentCount: 1,
+        }, ...current]);
+        showActionNotice("Session cloned");
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not clone the session");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportArtifact = async (): Promise<void> => {
+    if (!opened) return;
+    setBusy(true); setError(undefined);
+    try {
+      const artifact = preview?.exportSession !== undefined
+        ? await preview.exportSession()
+        : await exportSessionArtifact(opened.sessionId);
+      const url = URL.createObjectURL(artifact);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `axl-session-${opened.sessionId}.json`;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+      showActionNotice("Session export downloaded");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not export the session");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const importArtifact = async (file: File): Promise<void> => {
+    setBusy(true); setError(undefined);
+    try {
+      const imported = preview?.importSession !== undefined
+        ? await preview.importSession(file)
+        : await importSessionArtifact(file);
+      if (client !== undefined) await refreshSessions(client);
+      if (client !== undefined) await openSession(client, imported.sessionId, imported);
+      else {
+        setOpened(imported);
+        setConversation(EMPTY_STATE);
+        setSessions((current) => [{
+          sessionId: imported.sessionId,
+          cwd: imported.cwd,
+          ...(imported.title === undefined ? {} : { title: imported.title }),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          userMessageCount: 0,
+          runtime: imported.runtime,
+          attachmentCount: 1,
+        }, ...current]);
+        showActionNotice("Session imported");
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not import the session");
+    } finally {
+      setBusy(false);
+      if (artifactInput.current !== null) artifactInput.current.value = "";
+    }
+  };
+
+  const disposeSession = async (): Promise<void> => {
+    if (!opened) return;
+    setBusy(true); setError(undefined);
+    try {
+      if (preview?.disposeSession !== undefined) await preview.disposeSession();
+      else if (client !== undefined) await client.request("session.dispose", { sessionId: opened.sessionId });
+      else throw new Error("Session disposal is unavailable");
+      await subscription.current?.close();
+      subscription.current = undefined;
+      setConversation((current) => {
+        const { activeOperationId, ...inactive } = current;
+        void activeOperationId;
+        return { ...inactive, closed: true };
+      });
+      setOpened((current) => current === undefined ? current : { ...current, runtime: { state: "inactive" } });
+      if (client !== undefined) await refreshSessions(client);
+      setSessionLifecycleOpen(false);
+      showActionNotice("Runtime ended. Durable history was preserved.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not end the session runtime");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteSession = async (): Promise<void> => {
+    if (!opened) return;
+    const deletedSessionId = opened.sessionId;
+    setBusy(true); setError(undefined);
+    openedSessionId.current = undefined;
+    try {
+      if (preview?.deleteSession !== undefined) await preview.deleteSession();
+      else if (client !== undefined) await client.request("session.delete", { sessionId: deletedSessionId });
+      else throw new Error("Session deletion is unavailable");
+      selectionGeneration.current += 1;
+      await subscription.current?.close();
+      subscription.current = undefined;
+      openedSessionId.current = undefined;
+      setOpened(undefined);
+      setConversation(EMPTY_STATE);
+      setSessionLifecycleOpen(false);
+      const remaining = client === undefined
+        ? sessions.filter((session) => session.sessionId !== deletedSessionId)
+        : await refreshSessions(client);
+      setSessions(remaining);
+      if (client !== undefined && remaining[0] !== undefined) {
+        await openSession(client, remaining[0].sessionId);
+      } else {
+        showActionNotice("Session history deleted permanently");
+      }
+    } catch (cause) {
+      openedSessionId.current = deletedSessionId;
+      setError(cause instanceof Error ? cause.message : "Could not delete the session");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const uploadAttachment = async (attachment: ComposerAttachment): Promise<void> => {
@@ -853,21 +1071,32 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const runCommand = async (input: string): Promise<void> => {
     const controller = commandController.current;
     const previewCompact = /^\/compact(?:\s+(.*))?$/u.exec(input.trim());
+    const resolvedCommand = controller?.resolve(input);
+    const requiresSession = previewCompact !== null || resolvedCommand?.context === "session";
     if (
-      opened === undefined ||
+      (requiresSession && opened === undefined) ||
       (previewCompact === null && (controller === undefined || client === undefined)) ||
       (previewCompact !== null && preview?.compact === undefined && (controller === undefined || client === undefined))
     ) {
       setError("Commands are unavailable until the session is connected");
       return;
     }
-    const compacting = previewCompact !== null || controller?.resolve(input)?.name === "compact";
+    if (input.trim() === "/import" && resolvedCommand?.name === "import") {
+      if (resolvedCommand.availability.state === "unavailable") {
+        setError(resolvedCommand.availability.reason);
+      } else {
+        setDraft("");
+        artifactInput.current?.click();
+      }
+      return;
+    }
+    const compacting = previewCompact !== null || resolvedCommand?.name === "compact";
     const generation = selectionGeneration.current;
     directCancellationRequested.current = false;
     setDraft("");
     setBusy(true);
     setError(undefined);
-    if (compacting) {
+    if (compacting && opened !== undefined) {
       setDirectOperation({ kind: "compaction", sessionId: opened.sessionId, cancelling: false });
     }
     try {
@@ -876,7 +1105,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
             state: "completed" as const,
             command: "compact",
           })
-        : await controller?.invoke(input, opened.sessionId);
+        : await controller?.invoke(input, opened?.sessionId);
       if (generation !== selectionGeneration.current || outcome === undefined) return;
       if (outcome.state === "open-session") {
         if (client === undefined) throw new Error("Session switching is unavailable in preview mode");
@@ -886,6 +1115,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         return;
       }
       if (outcome.state === "completed") {
+        if (outcome.command === "rename" && client !== undefined) await refreshSessions(client);
         if ((outcome.command === "refresh" || outcome.command === "logout") && client !== undefined) {
           const directory = await loadProviderDirectory(client, true);
           setProviderInventory(directory.providers);
@@ -909,6 +1139,12 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         setSidebarOpen(true);
       } else if (outcome.surface === "fork") {
         showActionNotice("Choose Fork on the message where the new session should begin");
+      } else if (outcome.surface === "import") {
+        artifactInput.current?.click();
+      } else if (outcome.surface === "export") {
+        await exportArtifact();
+      } else if (outcome.surface === "dispose" || outcome.surface === "delete") {
+        setSessionLifecycleOpen(true);
       } else {
         setChangesOpen(true);
         await loadWorkspaceChanges((outcome.argument ?? "working") as WorkspaceStatusScope);
@@ -1086,7 +1322,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   };
 
   const selectedSummary = sessions.find((item) => item.sessionId === opened?.sessionId);
-  const currentTitle = selectedSummary === undefined ? "Current session" : sessionTitle(selectedSummary);
+  const currentTitle = selectedSummary === undefined ? opened?.title ?? "Current session" : sessionTitle(selectedSummary);
   const visibleSessions = sessions.filter((session) => matchesSession(session, query));
   const promptBreakpoints = useMemo(() => transcriptPromptBreakpoints(conversation), [conversation]);
   const transcriptMatches = useMemo(() => transcriptMessageMatches(conversation, transcriptQuery), [conversation, transcriptQuery]);
@@ -1104,6 +1340,19 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const canUpload = preview?.uploadBlob !== undefined || client?.connection.grantedCapabilities.includes("session.blob.start") === true;
   const canShell = preview?.shell !== undefined || client?.connection.grantedCapabilities.includes("session.shell") === true;
   const canConfigure = preview !== undefined || client?.connection.grantedCapabilities.includes("session.configure") === true;
+  const lifecycleCapabilities = new Set<string>(preview === undefined
+    ? client?.connection.grantedCapabilities ?? []
+    : [
+        ...(preview.cloneSession === undefined ? [] : ["session.clone"]),
+        ...(preview.renameSession === undefined ? [] : ["session.rename"]),
+        ...(preview.deleteSession === undefined ? [] : ["session.delete"]),
+        ...(preview.exportSession === undefined ? [] : ["session.export"]),
+        ...(preview.importSession === undefined ? [] : ["session.import"]),
+        ...(preview.disposeSession === undefined ? [] : ["session.dispose"]),
+      ]);
+  const canManageSession = ["session.clone", "session.rename", "session.delete", "session.export", "session.dispose"]
+    .some((capability) => lifecycleCapabilities.has(capability));
+  const canImport = lifecycleCapabilities.has("session.import");
 
   const jumpToMessage = (id: string): void => {
     document.getElementById(`message-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1140,14 +1389,14 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     {sidebarOpen && <button className="scrim" aria-label="Close sessions" onClick={() => setSidebarOpen(false)} />}
     <aside className={sidebarOpen ? "sidebar open" : "sidebar"} aria-label="Sessions">
       <div className="brand"><span className="brand-mark">◆</span><strong>Axl</strong><button ref={sidebarClose} className="sidebar-toggle" aria-label={sidebarOpen ? "Close sessions" : sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={toggleSidebar}><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5" /><path d="M6 2.5v11m4.5-8L8 8l2.5 2.5" /></svg></button></div>
-      <div className="workspace-actions"><span>Workspace</span><button aria-label="New session" onClick={() => void createSession()}>＋</button></div>
+      <div className="workspace-actions"><span>Workspace</span><div>{canImport && <button aria-label="Import session" title="Import session" disabled={busy} onClick={() => artifactInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m-3-3 3 3 3-3M3 13h10" /></svg></button>}<button aria-label="New session" title="New session" onClick={() => void createSession()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg></button></div><input ref={artifactInput} className="attachment-input" type="file" accept="application/json,.json" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.target.files?.[0]; if (file !== undefined) void importArtifact(file); }} /></div>
       <label className="search"><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search sessions" placeholder="Search sessions" /></label>
       <nav>{visibleSessions.map((session) => <button key={session.sessionId} aria-label={`${sessionTitle(session)}, ${session.runtime.state}`} className={session.sessionId === opened?.sessionId ? "session active" : "session"} onClick={() => client && void openSession(client, session.sessionId)}><span className={`session-icon ${session.runtime.state}`} aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 3.5h10v7H7l-3 2v-2H3z" /></svg></span><span><strong>{sessionTitle(session)}</strong><small>{session.cwd}</small></span></button>)}{visibleSessions.length === 0 && <p className="no-sessions">No matching sessions</p>}</nav>
       <button className="daemon" onClick={() => { setUsageOpen(false); setTranscriptSearchOpen(false); setControlCenter("providers"); }}><span className="daemon-status" aria-hidden="true"></span><span><strong>Local daemon</strong><small>{opened?.runtime.state ?? "Ready"} · {connection}</small></span></button>
       {!sidebarCollapsed && <div className="panel-resizer left" role="separator" aria-orientation="vertical" aria-label="Resize session sidebar" aria-valuemin={200} aria-valuemax={420} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={(event) => resizePanel("left", event)} onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); resizePanelBy("left", event.key === "ArrowLeft" ? -16 : 16); } }} />}
     </aside>
     <section className="workspace">
-      <header className="topbar"><div><span className="crumb">Sessions</span><span className="separator">›</span><strong>{opened ? currentTitle : "Select a session"}</strong></div><div className="top-actions"><button className="command-toggle" aria-label="Open command palette" title="Commands (Ctrl+K)" onClick={() => { setCommandPaletteOpen(true); void refreshCommandDirectory(opened?.sessionId).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not refresh commands")); }}>/</button><button className={controlCenter === "settings" ? "settings-toggle active" : "settings-toggle"} aria-label="Web settings" aria-expanded={controlCenter !== undefined} onClick={() => { setUsageOpen(false); setTranscriptSearchOpen(false); setControlCenter("settings"); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.25" /><path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.6 3.6l1.05 1.05M11.35 11.35l1.05 1.05M12.4 3.6l-1.05 1.05M4.65 11.35 3.6 12.4" /></svg></button>{opened && <button className={usageOpen ? "usage-toggle active" : "usage-toggle"} aria-label="Show session usage" aria-expanded={usageOpen} onClick={() => { setControlCenter(undefined); setTranscriptSearchOpen(false); setUsageOpen((open) => !open); }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 12V8M8 12V4M13 12V6" /></svg><span>Usage</span></button>}{opened && <button className={transcriptSearchOpen ? "transcript-search-toggle active" : "transcript-search-toggle"} aria-label="Search transcript" aria-expanded={transcriptSearchOpen} onClick={() => { setControlCenter(undefined); setUsageOpen(false); setTranscriptSearchOpen((open) => !open); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" /></svg></button>}{workspaceAvailable && opened && <button className={changesOpen ? "changes-toggle active" : "changes-toggle"} onClick={toggleChanges} aria-expanded={changesOpen}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10M3 8h10M3 12.5h10M5 2v3M11 6.5v3M7 11v3" /></svg><span>Changes</span>{workspaceReview && <b>{workspaceReview.status.entries.length}</b>}</button>}</div></header>
+      <header className="topbar"><div><span className="crumb">Sessions</span><span className="separator">›</span><strong>{opened ? currentTitle : "Select a session"}</strong></div><div className="top-actions"><button className="command-toggle" aria-label="Open command palette" title="Commands (Ctrl+K)" onClick={() => { setCommandPaletteOpen(true); void refreshCommandDirectory(opened?.sessionId).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not refresh commands")); }}>/</button><button className={controlCenter === "settings" ? "settings-toggle active" : "settings-toggle"} aria-label="Web settings" aria-expanded={controlCenter !== undefined} onClick={() => { setUsageOpen(false); setTranscriptSearchOpen(false); setControlCenter("settings"); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.25" /><path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.6 3.6l1.05 1.05M11.35 11.35l1.05 1.05M12.4 3.6l-1.05 1.05M4.65 11.35 3.6 12.4" /></svg></button>{opened && canManageSession && <button className={sessionLifecycleOpen ? "session-manage active" : "session-manage"} aria-label="Manage session" aria-expanded={sessionLifecycleOpen} onClick={() => { setControlCenter(undefined); setSessionLifecycleOpen(true); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg></button>}{opened && <button className={usageOpen ? "usage-toggle active" : "usage-toggle"} aria-label="Show session usage" aria-expanded={usageOpen} onClick={() => { setControlCenter(undefined); setTranscriptSearchOpen(false); setUsageOpen((open) => !open); }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 12V8M8 12V4M13 12V6" /></svg><span>Usage</span></button>}{opened && <button className={transcriptSearchOpen ? "transcript-search-toggle active" : "transcript-search-toggle"} aria-label="Search transcript" aria-expanded={transcriptSearchOpen} onClick={() => { setControlCenter(undefined); setUsageOpen(false); setTranscriptSearchOpen((open) => !open); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" /></svg></button>}{workspaceAvailable && opened && <button className={changesOpen ? "changes-toggle active" : "changes-toggle"} onClick={toggleChanges} aria-expanded={changesOpen}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10M3 8h10M3 12.5h10M5 2v3M11 6.5v3M7 11v3" /></svg><span>Changes</span>{workspaceReview && <b>{workspaceReview.status.entries.length}</b>}</button>}</div></header>
       {opened && conversation.sandbox?.enforced === false && <div className="unsafe-banner" role="alert"><strong>Unsafe session</strong><span>Sandbox enforcement is disabled. Tools run with your host permissions.</span></div>}
       {usageOpen && <section className="session-usage" aria-label="Session usage"><header><strong>Session usage</strong><button type="button" aria-label="Close session usage" onClick={() => setUsageOpen(false)}>×</button></header><p>{conversation.provider && conversation.model ? `${conversation.provider} / ${conversation.model}` : conversation.model ?? "No model selected"}{conversation.thinking ? ` · ${conversation.thinking}` : ""}</p><dl><div><dt>Input</dt><dd>{compactNumber(conversation.usage.inputTokens)}</dd></div><div><dt>Output</dt><dd>{compactNumber(conversation.usage.outputTokens)}</dd></div><div><dt>Cache read</dt><dd>{compactNumber(conversation.usage.cacheReadTokens)}</dd></div><div><dt>Cache hit</dt><dd>{usageStats.cacheHitPercent.toFixed(1)}%</dd></div><div><dt>Reasoning</dt><dd>{compactNumber(conversation.usage.reasoningTokens)}</dd></div><div><dt>Throughput</dt><dd>{usageStats.tokensPerSecond === undefined ? "Unknown" : `${usageStats.tokensPerSecond.toFixed(1)} tok/s`}</dd></div><div><dt>Recorded cost</dt><dd>${conversation.usage.costUsd.toFixed(4)}</dd></div></dl>{usageStats.unknownCostResponses > 0 && <small>{usageStats.unknownCostResponses} response{usageStats.unknownCostResponses === 1 ? " has" : "s have"} no cost data.</small>}{stateHistory.length > 0 && <details className="state-history"><summary>Configuration history</summary><ol>{stateHistory.map((entry) => <li key={entry.id}><span><strong>{entry.label}</strong><small>{entry.detail}</small></span><time>{new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></li>)}</ol></details>}</section>}
       {transcriptSearchOpen && <div className="transcript-search" role="search"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" /></svg><input autoFocus type="search" aria-label="Search transcript" placeholder="Search transcript" value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); moveTranscriptMatch(event.shiftKey ? -1 : 1); } }} /><span>{transcriptQuery.trim() ? `${transcriptMatches.length === 0 ? 0 : Math.max(0, transcriptMatch + 1)} / ${transcriptMatches.length}` : ""}</span><button type="button" aria-label="Previous result" disabled={transcriptMatches.length === 0} onClick={() => moveTranscriptMatch(-1)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4" /></svg></button><button type="button" aria-label="Next result" disabled={transcriptMatches.length === 0} onClick={() => moveTranscriptMatch(1)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></button><button type="button" aria-label="Close transcript search" onClick={() => { setTranscriptSearchOpen(false); setTranscriptQuery(""); }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg></button></div>}
@@ -1163,5 +1412,6 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     </section>
     {changesOpen && <><div className="panel-resizer right" role="separator" aria-orientation="vertical" aria-label="Resize changes panel" aria-valuemin={420} aria-valuemax={900} aria-valuenow={changesWidth} tabIndex={0} onPointerDown={(event) => resizePanel("right", event)} onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); resizePanelBy("right", event.key === "ArrowLeft" ? 16 : -16); } }} /><WorkspaceChanges review={workspaceReview} loading={workspaceLoading} error={workspaceError} view={changesView} onViewChange={(view) => { setChangesView(view); persistLayout({ sidebarWidth, changesWidth, sidebarCollapsed, changesView: view }); }} onClose={() => setChangesOpen(false)} onRetry={() => void loadWorkspaceChanges()} /></>}
     {controlCenter && <Suspense fallback={null}><ControlCenter tab={controlCenter} preferences={{ sidebarWidth, changesWidth, sidebarCollapsed, changesView }} providers={providerInventory} providerLoading={providerLoading} providerError={providerError} canRefresh={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.catalog.refresh") === true} canLogout={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.auth.logout") === true} onTab={setControlCenter} onPreferences={applyWebPreferences} onRefresh={(providerId) => void refreshProviders(providerId)} onLogout={(providerId) => void logoutProvider(providerId)} onCopyLogin={(providerId) => void copyProviderLogin(providerId)} onClose={() => setControlCenter(undefined)} /></Suspense>}
+    {sessionLifecycleOpen && selectedSummary && <SessionLifecycle session={selectedSummary} busy={busy} capabilities={lifecycleCapabilities} onRename={(title) => void renameSession(title)} onClone={() => void cloneSession()} onExport={() => void exportArtifact()} onDispose={() => void disposeSession()} onDelete={() => void deleteSession()} onClose={() => setSessionLifecycleOpen(false)} />}
   </main>;
 }

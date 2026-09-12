@@ -755,6 +755,113 @@ test("publishes a capability-filtered command catalog", async (context) => {
   assert.equal(session.commands[0]?.availability.state, "available");
 });
 
+test("renames and permanently deletes sessions with catalog invalidation", async (context) => {
+  const fixture = await startDaemon(context);
+  const writer = await connectUnixClient(fixture.socketPath);
+  const observer = await connectUnixClient(fixture.socketPath, {
+    identity: { kind: "web", version: "1.0.0", instanceId: "catalog-observer" },
+    requestedCapabilities: ["session.list"],
+  });
+  context.after(() => writer.close());
+  context.after(() => observer.close());
+  const generations: number[] = [];
+  observer.onSessionsChanged((delivery) => generations.push(delivery.generation));
+
+  const created = await writer.request("session.create", { cwd: fixture.cwd });
+  await waitFor(() => generations.length > 0, "created session catalog notification");
+  const beforeRename = generations.at(-1) ?? 0;
+  const renameKey = "00000000-0000-4000-8000-000000000201";
+  const renamed = await writer.request(
+    "session.rename",
+    {
+      sessionId: created.sessionId,
+      title: "Focused work",
+    },
+    { idempotencyKey: renameKey },
+  );
+  assert.equal(renamed.title, "Focused work");
+  assert.deepEqual(
+    await writer.request(
+      "session.rename",
+      {
+        sessionId: created.sessionId,
+        title: "Focused work",
+      },
+      { idempotencyKey: renameKey },
+    ),
+    renamed,
+  );
+  await waitFor(
+    () => (generations.at(-1) ?? 0) > beforeRename,
+    "renamed session catalog notification",
+  );
+  const listed = await observer.request("session.list", {
+    scope: "all_local",
+    order: "recent",
+    pageSize: 50,
+  });
+  assert.equal(listed.sessions[0]?.title, "Focused work");
+  assert.equal(
+    (
+      await observer.request("session.list", {
+        scope: "all_local",
+        query: "focused work",
+        order: "recent",
+        pageSize: 50,
+      })
+    ).sessions[0]?.sessionId,
+    created.sessionId,
+  );
+  assert.equal(
+    (await writer.request("session.resume", { sessionId: created.sessionId })).title,
+    "Focused work",
+  );
+  const cloned = await writer.request("session.clone", { sessionId: created.sessionId });
+  assert.equal(cloned.title, "Focused work");
+
+  const checkpoint = join(fixture.dataDirectory, "checkpoints", created.sessionId);
+  await mkdir(checkpoint, { recursive: true });
+  await writeFile(join(checkpoint, "fixture"), "checkpoint");
+  const beforeDelete = generations.at(-1) ?? 0;
+  const deleteKey = "00000000-0000-4000-8000-000000000202";
+  const deleted = await writer.request(
+    "session.delete",
+    { sessionId: created.sessionId },
+    {
+      idempotencyKey: deleteKey,
+    },
+  );
+  assert.deepEqual(deleted, { deleted: true, historyPreserved: false });
+  assert.deepEqual(
+    await writer.request(
+      "session.delete",
+      { sessionId: created.sessionId },
+      {
+        idempotencyKey: deleteKey,
+      },
+    ),
+    deleted,
+  );
+  await writer.request("session.delete", { sessionId: cloned.sessionId });
+  await waitFor(
+    () => (generations.at(-1) ?? 0) > beforeDelete,
+    "deleted session catalog notification",
+  );
+  assert.deepEqual(
+    await observer.request("session.list", {
+      scope: "all_local",
+      order: "recent",
+      pageSize: 50,
+    }),
+    { sessions: [] },
+  );
+  await assert.rejects(
+    readFile(join(fixture.dataDirectory, "sessions", `${created.sessionId}.jsonl`)),
+    { code: "ENOENT" },
+  );
+  await assert.rejects(readFile(join(checkpoint, "fixture")), { code: "ENOENT" });
+});
+
 test("reports the daemon security mode", async (context) => {
   const sandboxed = await startDaemon(context);
   const sandboxedClient = await connectUnixClient(sandboxed.socketPath, {

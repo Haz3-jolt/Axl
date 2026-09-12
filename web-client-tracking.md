@@ -35,7 +35,7 @@ The branch now contains the first complete local-session slice:
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
 - The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
-- Provider auth, staged Chat/Code creation, the remaining shared-command migration, paused-item requeue, lifecycle and workspace workflows, and full protocol capability parity remain.
+- Provider auth, staged Chat/Code creation, the remaining shared-command migration, paused-item requeue, workspace workflows, and full protocol capability parity remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
 
@@ -91,10 +91,10 @@ The normal local chat path is available. These items close the remaining gap bet
 
 ### Session lifecycle and artifacts
 
-13. [ ] Add session clone and rename workflows.
-14. [ ] Add explicit delete and dispose flows with clear durable-history consequences.
-15. [ ] Add import and export through reviewed browser download or injected trusted-host artifact handoff.
-16. [ ] Refresh session metadata after lifecycle changes from another attached client.
+13. [x] Add session clone and canonical rename workflows.
+14. [x] Add explicit delete and dispose flows with clear durable-history consequences.
+15. [x] Add bounded import and export through authenticated trusted-host artifact handoff and browser download/upload.
+16. [x] Refresh session metadata after lifecycle changes from another attached client.
 
 ### Workspace authority
 
@@ -341,11 +341,11 @@ The browser should support every capability granted to its connection.
 - [x] `session.list`
 - [x] `session.resume`
 - [x] `session.fork`
-- [ ] `session.clone`
-- [ ] `session.rename`
-- [ ] `session.delete`
-- [ ] `session.export`
-- [ ] `session.import`
+- [x] `session.clone`
+- [x] `session.rename`
+- [x] `session.delete`
+- [x] `session.export`
+- [x] `session.import`
 - [x] `session.send.prompt`
 - [ ] `session.steer`
 - [ ] `session.follow_up`
@@ -353,7 +353,7 @@ The browser should support every capability granted to its connection.
 - [ ] `session.queue.enqueue`
 - [ ] `session.queue.requeue`
 - [x] `session.interrupt`
-- [ ] `session.dispose`
+- [x] `session.dispose`
 
 ### Runtime and interaction
 
@@ -424,7 +424,7 @@ Do not request a capability before its interaction, error behavior, and security
 - [x] Separate browser preferences from session configuration and trusted host actions.
 - [x] Define durable preference storage that survives random local gateway ports without placing authority credentials in application storage.
 - [x] Expose browser-owned layout and change-review preferences through a focused Web settings surface.
-- [ ] Refresh session catalog metadata after another client changes it.
+- [x] Refresh session catalog metadata after another client changes it.
 - [ ] Replace hardcoded English copy with a typed localization owner when the first second locale is implemented.
 - [ ] Show errors inside the dialog or picker that initiated the action.
 - [ ] Keep disabled features absent from menus, empty states, prompts, and background work.

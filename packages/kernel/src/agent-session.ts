@@ -855,6 +855,13 @@ export class AgentSession {
     return this.append(operationId, type, payload);
   }
 
+  rename(operationId: OperationId, title: string): Promise<CanonicalEvent<"session.renamed">> {
+    if (this.activeOperation !== null) {
+      throw new OperationConflictError(`Operation ${this.activeOperation} owns this branch`);
+    }
+    return this.append(operationId, "session.renamed", { title });
+  }
+
   recordSessionError(
     operationId: OperationId,
     payload: EventPayloadMap["session.error"],

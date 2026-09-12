@@ -18,6 +18,7 @@ export type EventPresentationSurface =
 export const EVENT_PRESENTATION_SURFACES = Object.freeze({
   "session.created": "state",
   "session.resumed": "state",
+  "session.renamed": "state",
   "session.closed": "transcript",
   "user.message": "transcript",
   "queue.enqueued": "transcript",

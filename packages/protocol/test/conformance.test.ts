@@ -125,6 +125,7 @@ test("language-neutral fixtures validate every non-success server message shape"
     "event",
     "hello",
     "presence",
+    "sessions_changed",
   ]);
   for (const message of messages) {
     const roundTrip = JSON.parse(encodeWireMessage(message)) as unknown;

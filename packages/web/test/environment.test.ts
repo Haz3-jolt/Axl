@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseBootstrap } from "../src/environment.ts";
+import { importSessionArtifact, parseBootstrap } from "../src/environment.ts";
 
 const valid = {
   cwd: "/workspace",
@@ -16,6 +16,13 @@ const valid = {
     changesView: "files",
   },
 };
+
+test("rejects oversized session imports before upload", async () => {
+  await assert.rejects(
+    importSessionArtifact({ size: 64 * 1024 * 1024 + 1 } as File),
+    /between 1 byte and 64 MiB/,
+  );
+});
 
 test("validates persisted browser layout preferences", () => {
   assert.deepEqual(parseBootstrap(valid), valid);

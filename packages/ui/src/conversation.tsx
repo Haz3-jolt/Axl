@@ -292,6 +292,7 @@ function EventRow({ item, tool, queue, interruption, interaction, attribution, r
       return <SystemNotice title="Unsupported session event" detail={item.event.type} tone="warning" />;
     case "session.created":
     case "session.resumed":
+    case "session.renamed":
     case "queue.requeued":
     case "queue.started":
     case "queue.paused":

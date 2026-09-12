@@ -321,6 +321,9 @@ A first-party command uses the same registration path after that public daemon A
 | `/resume` | SDK session-list and resume workflow. |
 | `/fork` | SDK message selection followed by daemon fork operation. |
 | `/clone` | Daemon session operation. |
+| `/rename` | Canonical daemon session rename. |
+| `/dispose` | Daemon runtime disposal with durable history retained. |
+| `/delete` | Confirmed permanent deletion of session history. |
 | `/import` | Injected artifact handoff followed by daemon import. |
 | `/export` | Daemon export followed by injected artifact handoff. |
 | `/stash` | Client presentation extension over local draft state. |

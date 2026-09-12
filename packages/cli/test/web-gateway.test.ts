@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,12 @@ import test from "node:test";
 
 import { WIRE_PROTOCOL_VERSION } from "@axl/protocol";
 import WebSocket from "ws";
-import { startWebGateway, verifyWebAssets } from "../src/web-gateway.ts";
+import {
+  encodeWebSessionArtifact,
+  startWebGateway,
+  verifyWebAssets,
+  writeWebSessionArtifact,
+} from "../src/web-gateway.ts";
 
 test("web assets fail closed when missing, altered, or incompatible", async (context) => {
   const directory = await mkdtemp(join(tmpdir(), "axl-web-assets-"));
@@ -36,6 +41,40 @@ test("web assets fail closed when missing, altered, or incompatible", async (con
     JSON.stringify({ ...metadata, wireVersion: 0 }),
   );
   await assert.rejects(verifyWebAssets(directory), /missing or incompatible/);
+});
+
+test("browser session artifacts round-trip only manifest-declared files", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "axl-web-artifact-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const source = join(directory, "source");
+  const target = join(directory, "target");
+  const digest = createHash("sha256").update("attachment").digest("hex");
+  await mkdir(join(source, "blobs"), { recursive: true });
+  await writeFile(
+    join(source, "manifest.json"),
+    JSON.stringify({
+      format: "axl.session",
+      version: 1,
+      sourceSessionId: "123e4567-e89b-42d3-a456-426614174000",
+      sourceSha256: "a".repeat(64),
+      eventCount: 1,
+      blobDigests: [digest],
+    }),
+  );
+  await writeFile(join(source, "events.jsonl"), "event\n");
+  await writeFile(join(source, "blobs", digest), "attachment");
+
+  const artifact = await encodeWebSessionArtifact(source);
+  await writeWebSessionArtifact(artifact, target);
+  assert.equal(await readFile(join(target, "events.jsonl"), "utf8"), "event\n");
+  assert.equal(await readFile(join(target, "blobs", digest), "utf8"), "attachment");
+
+  const invalid = JSON.parse(artifact.toString("utf8")) as { files: Record<string, string> };
+  invalid.files.unexpected = "";
+  await assert.rejects(
+    writeWebSessionArtifact(Buffer.from(JSON.stringify(invalid)), join(directory, "invalid")),
+    /unexpected files/,
+  );
 });
 
 test("the gateway exchanges one launch token and authenticates one daemon bridge", async (context) => {

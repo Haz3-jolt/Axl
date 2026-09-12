@@ -132,6 +132,12 @@ export class WorkspaceCheckpointStore {
     return this.paths(sessionId).git;
   }
 
+  remove(sessionId: SessionId): Promise<void> {
+    return this.serialized(sessionId, () =>
+      rm(this.paths(sessionId).root, { recursive: true, force: true }),
+    );
+  }
+
   private async serialized<Result>(
     sessionId: SessionId,
     operation: () => Promise<Result>,

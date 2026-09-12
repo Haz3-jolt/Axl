@@ -155,6 +155,7 @@ const eventPayloads = {
     status: "completed",
     result: { summary: "done" },
   },
+  "session.renamed": { title: "Focused work" },
 } satisfies { readonly [Type in EventType]: EventPayloadMap[Type] };
 
 const events = Object.entries(eventPayloads).map(([type, payload], index) =>
@@ -249,6 +250,8 @@ const params = {
   "session.blob.abort": { sessionId, uploadId: "upload-1" },
   "session.blob.read": { sessionId, sha256: digest, offset: 0, length: 4 },
   "session.dispose": { sessionId },
+  "session.rename": { sessionId, title: "Focused work" },
+  "session.delete": { sessionId },
 } satisfies { readonly [Method in RpcMethod]: RpcParams<Method> };
 
 const opened = {
@@ -468,6 +471,8 @@ const results = {
   "session.blob.abort": { aborted: true },
   "session.blob.read": { data: "YWJjZA==", offset: 0, nextOffset: 4, eof: true },
   "session.dispose": { disposed: true, historyPreserved: true },
+  "session.rename": { title: "Focused work", eventId },
+  "session.delete": { deleted: true, historyPreserved: false },
 } satisfies { readonly [Method in RpcMethod]: RpcResult<Method> };
 
 const requests = Object.entries(params).map(([method, methodParams], index) => ({
@@ -536,7 +541,13 @@ const serverMessages = [
     kind: "hello",
     wireVersion: WIRE_PROTOCOL_VERSION,
     daemonInstanceId: "daemon-1",
-    capabilities: ["session.create", "session.subscribe", "session.activity", "session.presence"],
+    capabilities: [
+      "session.create",
+      "session.subscribe",
+      "session.activity",
+      "session.presence",
+      "session.list",
+    ],
     limits: { maxMessageBytes: 1_048_576, maxPendingRequests: 64 },
   },
   {
@@ -559,6 +570,7 @@ const serverMessages = [
     sessionId,
     frame: { operationId, sequence: 1, type: "text_delta", text: "working" },
   },
+  { kind: "sessions_changed", generation: 1 },
   {
     kind: "presence",
     attachments: [

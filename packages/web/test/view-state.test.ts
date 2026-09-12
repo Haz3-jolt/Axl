@@ -90,6 +90,7 @@ test("canonical user messages consume one matching pending delivery", () => {
 
 test("session presentation handles fallbacks, Unicode search, and failed drafts", () => {
   assert.equal(sessionTitle(session), "Fix 🚀 launch");
+  assert.equal(sessionTitle({ ...session, title: "Release work" }), "Release work");
   assert.equal(sessionTitle({} as SessionSummary), "New session");
   assert.equal(matchesSession(session, "🚀 LAUNCH"), true);
   assert.equal(matchesSession(session, "مرحبا"), true);

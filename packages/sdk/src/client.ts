@@ -25,6 +25,7 @@ import {
   type RpcResult,
   type ServerMessage,
   type SessionId,
+  type SessionsChangedDelivery,
   type WireActivity,
   type WireEvent,
 } from "@axl/protocol";
@@ -138,6 +139,7 @@ export class AxlClient {
   private readonly eventListeners = new Set<(event: WireEvent) => void>();
   private readonly activityListeners = new Set<(event: WireActivity) => void>();
   private readonly presenceListeners = new Set<(presence: PresenceDelivery) => void>();
+  private readonly sessionCatalogListeners = new Set<(delivery: SessionsChangedDelivery) => void>();
   private readonly disconnectListeners = new Set<(error: Error) => void>();
   private readonly reconnectListeners = new Set<() => void | Promise<void>>();
   private readonly stateListeners = new Set<(state: ConnectionState) => void>();
@@ -387,6 +389,11 @@ export class AxlClient {
     this.presenceListeners.add(listener);
     if (this.latestPresence !== undefined) listener(this.latestPresence);
     return () => this.presenceListeners.delete(listener);
+  }
+
+  onSessionsChanged(listener: (delivery: SessionsChangedDelivery) => void): () => void {
+    this.sessionCatalogListeners.add(listener);
+    return () => this.sessionCatalogListeners.delete(listener);
   }
 
   onDisconnect(listener: (error: Error) => void): () => void {
@@ -644,6 +651,20 @@ export class AxlClient {
       }
       this.latestPresence = message;
       for (const listener of this.presenceListeners) listener(message);
+    } else if (message.kind === "sessions_changed") {
+      if (
+        this.initialized !== undefined &&
+        !this.initialized.grantedCapabilities.includes("session.list")
+      ) {
+        this.fail(
+          new AxlClientError(
+            "protocol_error",
+            "Daemon sent session metadata without granting the capability",
+          ),
+        );
+        return;
+      }
+      for (const listener of this.sessionCatalogListeners) listener(message);
     }
   }
 

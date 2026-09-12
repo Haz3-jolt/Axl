@@ -46,6 +46,26 @@ const catalog: CommandListResult = {
       requiredCapabilities: ["session.compact"],
       availability: { state: "available" },
     },
+    {
+      id: "core.rename",
+      name: "rename",
+      aliases: [],
+      description: "Rename the session",
+      context: "session",
+      argument: { required: true, hint: "title" },
+      requiredCapabilities: ["session.rename"],
+      availability: { state: "available" },
+    },
+    {
+      id: "core.import",
+      name: "import",
+      aliases: [],
+      description: "Import a session",
+      context: "global",
+      argument: { required: false },
+      requiredCapabilities: ["session.import"],
+      availability: { state: "available" },
+    },
   ],
 };
 
@@ -81,6 +101,14 @@ test("command controller loads, searches, and invokes typed operations", async (
     state: "completed",
     command: "compact",
   });
+  assert.deepEqual(await commands.invoke("/rename Focused work", sessionId), {
+    state: "completed",
+    command: "rename",
+  });
+  assert.deepEqual(await commands.invoke("/import", sessionId), {
+    state: "focus",
+    surface: "import",
+  });
   assert.deepEqual(requests, [
     { method: "command.list", params: { sessionId } },
     { method: "session.reload", params: { sessionId } },
@@ -88,6 +116,7 @@ test("command controller loads, searches, and invokes typed operations", async (
       method: "session.compact",
       params: { sessionId, instructions: "keep decisions" },
     },
+    { method: "session.rename", params: { sessionId, title: "Focused work" } },
   ]);
 });
 
