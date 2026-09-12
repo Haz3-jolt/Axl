@@ -8,6 +8,7 @@ import type { ConversationState, SessionSummary } from "@axl/sdk";
 import { editDiffRows } from "@axl/ui";
 import {
   consumePendingPromptDeliveries,
+  directShellInput,
   matchesSession,
   promptDeliveryShortcut,
   restoreDraft,
@@ -23,6 +24,23 @@ const session = {
   firstUserMessage: "First prompt",
   lastUserMessage: "Fix 🚀 launch",
 } as SessionSummary;
+
+test("direct shell input preserves include and exclude semantics", () => {
+  assert.deepEqual(directShellInput("! printf once "), {
+    command: "printf once",
+    excluded: false,
+  });
+  assert.deepEqual(directShellInput("!! git status"), {
+    command: "git status",
+    excluded: true,
+  });
+  assert.deepEqual(directShellInput("!!! literal-bang"), {
+    command: "! literal-bang",
+    excluded: true,
+  });
+  assert.equal(directShellInput("ordinary prompt"), undefined);
+  assert.deepEqual(directShellInput("!"), { command: "", excluded: false });
+});
 
 test("prompt delivery uses keyboard modifiers without a mode selector", () => {
   assert.equal(

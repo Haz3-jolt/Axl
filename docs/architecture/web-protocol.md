@@ -427,6 +427,8 @@ The SDK `deliverPrompt` workflow maps explicit prompt, steer, follow-up, interru
 
 `session.shell` is correlated by its caller-supplied operation ID but is never retried automatically. Its SDK wrapper returns either `{ state: "completed", result }` or `{ state: "uncertain", operationId }`. If transport loss prevents the SDK from proving a canonical `user.shell` result, it preserves the command for explicit user review. `session.interrupt` may cancel the active shell operation, but cancellation does not imply that prior shell side effects were rolled back.
 
+The web client invokes manual compaction through the shared `/compact [instructions]` command and presents its in-progress, cancellation, and failure states locally until canonical `context.compacted` evidence arrives. Direct shell input uses `!command` to include output in model context and `!!command` to exclude it. Both operations remain daemon-owned and are cancelled only through `session.interrupt`.
+
 A profile is accepted only when the daemon can enforce, persist, log, and restore it. Web chat maps to the zero-tool `chat` profile. `minimal` provides Bash and editing, `standard` provides the normal tool set, and `exec` is Bash-only. The non-chat profiles use the code interface.
 
 ## Merged version-7 reconciliation

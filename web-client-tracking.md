@@ -35,7 +35,7 @@ The branch now contains the first complete local-session slice:
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
 - The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
-- Provider auth, staged Chat/Code creation, the shared command plane, active-turn delivery modes, attachment upload, and full protocol capability parity remain.
+- Provider auth, staged Chat/Code creation, the remaining shared-command migration, paused-item requeue, lifecycle and workspace workflows, and full protocol capability parity remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
 
@@ -86,8 +86,8 @@ The normal local chat path is available. These items close the remaining gap bet
 ### Attachments and direct operations
 
 10. [x] Add browser attachment selection, bounded chunked blob upload, abort, retry, progress, and prompt-reference insertion. Bytes and object URLs remain out of durable browser storage.
-11. [ ] Add manual compaction with optional instructions, progress, cancellation, and failure recovery.
-12. [ ] Add direct shell invocation with explicit uncertain-outcome handling and no automatic replay.
+11. [x] Add manual compaction with optional instructions, progress, cancellation, and failure recovery.
+12. [x] Add direct shell invocation with explicit uncertain-outcome handling and no automatic replay.
 
 ### Session lifecycle and artifacts
 
@@ -212,9 +212,9 @@ This is a protocol and ownership change and requires architecture review before 
 - [ ] Add a provider directory with observable loading, ready, partial-failure, refresh, auth-change, reconnect, and disposal states.
 - [ ] Add staged new-session intent shared by direct controls and slash commands.
 - [ ] Add session-configuration mutation ordering, optimistic intent, effective values, and field-scoped failures.
-- [ ] Add attachment upload, abort, retry, and retrieval helpers over blob RPCs.
+- [x] Add attachment upload, abort, retry, and retrieval helpers over blob RPCs.
 - [ ] Add high-level steer, follow-up, interrupt, and interrupt-and-deliver methods with draft-safe semantics.
-- [ ] Keep direct shell's explicit uncertain-outcome behavior.
+- [x] Keep direct shell's explicit uncertain-outcome behavior.
 - [ ] Move reusable client behavior out of the React shell.
 - [ ] Keep SDK caches disposable and daemon state authoritative.
 
@@ -326,9 +326,9 @@ The browser command interface must use the shared live command directory.
 
 Additional input forms:
 
-- [ ] `!command` executes through `session.shell` and includes output in model context.
-- [ ] `!!command` executes through `session.shell` and excludes output from model context.
-- [ ] Shell uncertainty is visible and never automatically retried.
+- [x] `!command` executes through `session.shell` and includes output in model context.
+- [x] `!!command` executes through `session.shell` and excludes output from model context.
+- [x] Shell uncertainty is visible and never automatically retried.
 - [ ] Choosing an argument-requiring command enters argument mode instead of executing malformed input.
 
 ## Protocol capability adoption
@@ -357,8 +357,8 @@ The browser should support every capability granted to its connection.
 
 ### Runtime and interaction
 
-- [ ] `session.compact`
-- [ ] `session.shell`
+- [x] `session.compact`
+- [x] `session.shell`
 - [ ] `session.reload`
 - [x] `session.configure`
 - [x] `session.interaction.respond` for explicit MCP interactions, not routine sandboxed tool approval
@@ -368,10 +368,10 @@ The browser should support every capability granted to its connection.
 
 ### Blobs and workspace
 
-- [ ] `session.blob.start`
-- [ ] `session.blob.chunk`
-- [ ] `session.blob.commit`
-- [ ] `session.blob.abort`
+- [x] `session.blob.start`
+- [x] `session.blob.chunk`
+- [x] `session.blob.commit`
+- [x] `session.blob.abort`
 - [x] `session.blob.read`
 - [ ] `session.workspace.list`
 - [ ] `session.workspace.read`
@@ -407,7 +407,7 @@ Do not request a capability before its interaction, error behavior, and security
 - [x] Render shell, read, edit, search, fetch, MCP, workflow, and bounded generic tool cards.
 - [x] Show complete structured tool inputs and useful result metadata when expanded.
 - [x] Provide a bounded route to inspect truncated tool output stored as a session-owned blob.
-- [ ] Render image attachments as media rather than metadata text. Shared rendering and production blob retrieval are implemented; browser upload remains.
+- [x] Render image attachments as media and support browser upload through daemon-owned blob references.
 - [x] Show a clear incomplete-response warning for `stopReason: "length"`.
 - [x] Attribute cost to the provider, model, and thinking level that produced each usage record.
 - [x] Distinguish unknown cost from zero cost.

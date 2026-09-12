@@ -16,6 +16,18 @@ export interface PendingPromptDelivery {
   readonly afterRecord: number;
 }
 
+export interface DirectShellInput {
+  readonly command: string;
+  readonly excluded: boolean;
+}
+
+export function directShellInput(input: string): DirectShellInput | undefined {
+  const value = input.trim();
+  if (!value.startsWith("!")) return undefined;
+  const excluded = value.startsWith("!!");
+  return { command: value.slice(excluded ? 2 : 1).trim(), excluded };
+}
+
 export function consumePendingPromptDeliveries(
   pendingInputs: readonly PendingPromptDelivery[],
   conversation: ConversationState,
