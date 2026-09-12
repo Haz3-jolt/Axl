@@ -8,13 +8,13 @@ import type {
   WorkspaceDiffResult,
 } from "@axl/sdk";
 
-export type SelectedPromptDelivery = "auto" | Exclude<PromptDeliveryMode, "prompt">;
-
-export function resolvePromptDelivery(
-  selected: SelectedPromptDelivery,
-  active: boolean,
-): PromptDeliveryMode {
-  return selected === "auto" ? (active ? "steer" : "prompt") : selected;
+export function promptDeliveryShortcut(modifiers: {
+  readonly altKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+}): PromptDeliveryMode | undefined {
+  if (modifiers.ctrlKey || modifiers.metaKey) return "interrupt";
+  return modifiers.altKey ? "follow_up" : undefined;
 }
 
 function messageText(
