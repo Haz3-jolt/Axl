@@ -64,6 +64,53 @@ Work in small vertical slices. Mark an item complete only after focused tests an
 8. [x] Keep paired queue, tool, and interaction events folded; expose bounded configuration and lifecycle history in the session usage panel.
 9. [x] Run focused unit/browser checks, production build and asset verification, the Impeccable detector, then `pnpm check`.
 
+## Active functional parity scratchpad
+
+The normal local chat path is available. These items close the remaining gap between that path and the daemon capabilities expected by first-party clients.
+
+### Shared command discovery
+
+1. [ ] Implement issue #389's daemon-owned command catalog without adding a generic built-in `command.invoke` path.
+2. [ ] Add the reusable SDK command controller that maps catalog entries to existing typed RPCs and focused workflows.
+3. [ ] Replace the TUI static shared-command table with the SDK controller while keeping terminal-only presentation commands local.
+4. [ ] Add the web command palette and slash discovery UI. It must search the effective directory, explain unavailable commands, collect bounded arguments, and open focused interfaces without duplicating command business logic.
+5. [ ] Refresh the command directory after reconnect, session replacement, reload, configuration changes, and catalog invalidation. Reject stale invocation safely.
+
+### Prompt delivery
+
+6. [ ] Add draft-safe steer and follow-up submission.
+7. [ ] Add daemon-owned queue, requeue, paused-state recovery, and delivery outcome controls.
+8. [ ] Add atomic interrupt-and-deliver. Never simulate it with Stop followed by Send.
+9. [ ] Preserve drafts and show accepted, delivered, queued, paused, rejected, interrupted, failed, and uncertain outcomes accurately.
+
+### Attachments and direct operations
+
+10. [ ] Add browser attachment selection, bounded blob upload, abort, retry, and prompt-reference insertion. Keep bytes and object URLs out of durable browser storage.
+11. [ ] Add manual compaction with optional instructions, progress, cancellation, and failure recovery.
+12. [ ] Add direct shell invocation with explicit uncertain-outcome handling and no automatic replay.
+
+### Session lifecycle and artifacts
+
+13. [ ] Add session clone and rename workflows.
+14. [ ] Add explicit delete and dispose flows with clear durable-history consequences.
+15. [ ] Add import and export through reviewed browser download or injected trusted-host artifact handoff.
+16. [ ] Refresh session metadata after lifecycle changes from another attached client.
+
+### Workspace authority
+
+17. [ ] Add capability-gated workspace list and read interfaces using daemon generation checks.
+18. [ ] Add checkpoint enablement and inspection without exposing browser filesystem authority.
+
+### Provider credentials
+
+19. [ ] Complete issue #372's trusted-process-host credential interaction contract.
+20. [ ] Add provider login and reauthentication UI only after the trusted host can collect secrets without exposing them to browser JavaScript, storage, URLs, logs, or canonical events.
+
+### Completion gate
+
+21. [ ] Run focused workflow tests for every action and failure path, then desktop and mobile browser smoke tests.
+22. [ ] Run installed-package verification, the Impeccable detector, `pnpm check`, and an authorized real-provider smoke test before declaring full first-party parity.
+
 ## CLI contract
 
 - [x] Bare `axl` launches the TUI.
