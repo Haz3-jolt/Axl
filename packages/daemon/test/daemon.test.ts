@@ -3066,6 +3066,58 @@ test("daemon-owned queued prompts are canonical and execute in priority order", 
   assert.deepEqual(forkSubscription.projector.state.queue, []);
 });
 
+test("queue restore atomically returns pending input and interrupts active work", async (context) => {
+  const paused = pausedActivityPort();
+  const { socketPath, cwd } = await startDaemon(context, paused.port);
+  const client = await connectUnixClient(socketPath);
+  const observer = await connectUnixClient(socketPath, {
+    identity: { kind: "web", version: "0.0.0", instanceId: randomUUID() },
+  });
+  context.after(() => {
+    client.close();
+    observer.close();
+  });
+  const created = await client.request("session.create", { cwd });
+  const observed = await subscribeSession(observer, created.sessionId);
+  context.after(() => observed.close());
+  const active = client.request("session.send", {
+    sessionId: created.sessionId,
+    delivery: "prompt",
+    content: [{ type: "text", text: "active" }],
+  });
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  await client.request("session.steer", {
+    sessionId: created.sessionId,
+    content: [{ type: "text", text: "steer me" }],
+  });
+  const queued = await client.request("session.queue.enqueue", {
+    sessionId: created.sessionId,
+    content: [{ type: "text", text: "later" }],
+    priority: "back",
+  });
+
+  const restored = await client.request("session.queue.restore", {
+    sessionId: created.sessionId,
+    interrupt: true,
+  });
+  assert.equal(restored.interrupted, true);
+  assert.deepEqual(
+    restored.items.map((item) => [item.source, item.content]),
+    [
+      ["steer", [{ type: "text", text: "steer me" }]],
+      ["queue", [{ type: "text", text: "later" }]],
+    ],
+  );
+  paused.finish();
+  await active;
+  await waitFor(
+    () =>
+      observed.projector.state.queue.find((item) => item.queueItemId === queued.queueItemId)
+        ?.status === "aborted",
+    "restored queue projection",
+  );
+});
+
 test("queued prompts become paused after restart and require explicit re-queueing", async (context) => {
   const paused = pausedActivityPort();
   const fixture = await startDaemon(context, paused.port);
@@ -3099,14 +3151,36 @@ test("queued prompts become paused after restart and require explicit re-queuein
   await restarted.start();
   context.after(() => restarted.stop());
   const recovered = await connectUnixClient(fixture.socketPath);
-  context.after(() => recovered.close());
+  const observer = await connectUnixClient(fixture.socketPath, {
+    identity: { kind: "web", version: "0.0.0", instanceId: randomUUID() },
+  });
+  context.after(() => {
+    recovered.close();
+    observer.close();
+  });
   await recovered.request("session.resume", { sessionId: created.sessionId });
   const subscription = await subscribeSession(recovered, created.sessionId);
-  context.after(() => subscription.close());
+  const observedSubscription = await subscribeSession(observer, created.sessionId);
+  context.after(() => Promise.all([subscription.close(), observedSubscription.close()]));
   const pausedItem = subscription.projector.state.queue.find(
     (item) => item.queueItemId === queued.queueItemId,
   );
   assert.equal(pausedItem?.status, "paused");
+  assert.equal(
+    observedSubscription.projector.state.queue.find(
+      (item) => item.queueItemId === queued.queueItemId,
+    )?.status,
+    "paused",
+  );
+
+  const reconnected = await connectUnixClient(fixture.socketPath);
+  context.after(() => reconnected.close());
+  await subscription.reconnect(reconnected);
+  assert.equal(
+    subscription.projector.state.queue.find((item) => item.queueItemId === queued.queueItemId)
+      ?.status,
+    "paused",
+  );
 
   await recovered.request("session.queue.requeue", {
     sessionId: created.sessionId,
@@ -3116,8 +3190,30 @@ test("queued prompts become paused after restart and require explicit re-queuein
   await waitFor(
     () =>
       subscription.projector.state.queue.find((item) => item.queueItemId === queued.queueItemId)
-        ?.status === "completed",
-    "re-queued prompt completion",
+        ?.status === "completed" &&
+      observedSubscription.projector.state.queue.find(
+        (item) => item.queueItemId === queued.queueItemId,
+      )?.status === "completed",
+    "cross-client re-queued prompt completion",
+  );
+  await assert.rejects(
+    recovered.request("session.queue.requeue", {
+      sessionId: created.sessionId,
+      queueItemId: queued.queueItemId,
+      priority: "back",
+    }),
+    (cause: unknown) =>
+      cause instanceof AxlClientError &&
+      cause.code === "queue_not_paused" &&
+      cause.message === "Only a paused queued prompt can be re-queued",
+  );
+  await assert.rejects(
+    recovered.request("session.queue.requeue", {
+      sessionId: created.sessionId,
+      queueItemId: parseEventId("00000000-0000-4000-8000-000000000999"),
+      priority: "back",
+    }),
+    (cause: unknown) => cause instanceof AxlClientError && cause.code === "unknown_queue_item",
   );
 });
 

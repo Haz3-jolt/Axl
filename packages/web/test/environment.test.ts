@@ -46,10 +46,11 @@ test("validates persisted browser layout preferences", () => {
   );
 });
 
-test("browser requests only implemented provider, queue, and presence capabilities", () => {
+test("browser requests requeue but omits unsupported login and presence capabilities", () => {
   assert.equal(WEB_REQUESTED_CAPABILITIES.includes("provider.auth.login"), false);
   assert.equal(WEB_REQUESTED_CAPABILITIES.includes("provider.auth.status"), true);
-  assert.equal(WEB_REQUESTED_CAPABILITIES.includes("session.queue.requeue"), false);
+  assert.equal(WEB_REQUESTED_CAPABILITIES.includes("session.queue.requeue"), true);
+  assert.equal(WEB_REQUESTED_CAPABILITIES.includes("session.queue.restore"), true);
   assert.equal(WEB_REQUESTED_CAPABILITIES.includes("session.presence"), false);
 });
 

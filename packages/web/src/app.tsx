@@ -32,6 +32,7 @@ import {
   type WorkspaceReviewSnapshot,
   type WorkspaceStatusScope,
   orderPendingTurnInputs,
+  restoreQueuedPrompts,
   subscribeSession,
   uploadBlob as uploadSessionBlob,
 } from "@axl/sdk";
@@ -55,6 +56,8 @@ import {
 } from "./environment.ts";
 import { loadProviderDirectory, type ModelChoice } from "./model-catalog.ts";
 import { ModelPicker } from "./model-picker.tsx";
+import { RequeueDialog } from "./requeue-dialog.tsx";
+import { pausedQueueItems } from "./requeue.ts";
 import { SessionLifecycle } from "./session-lifecycle.tsx";
 import {
   consumePendingPromptDeliveries,
@@ -246,6 +249,9 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const [usageOpen, setUsageOpen] = useState(false);
   const [controlCenter, setControlCenter] = useState<ControlCenterTab>();
   const [sessionLifecycleOpen, setSessionLifecycleOpen] = useState(false);
+  const [requeueOpen, setRequeueOpen] = useState(false);
+  const [requeueBusyItemId, setRequeueBusyItemId] = useState<EventId>();
+  const [requeueError, setRequeueError] = useState<string>();
   const [providerLoading, setProviderLoading] = useState(false);
   const [providerError, setProviderError] = useState<string>();
   const [providerLogin, setProviderLogin] = useState<{
@@ -338,6 +344,8 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     setConversation(EMPTY_STATE);
     setChangesOpen(false);
     setSessionLifecycleOpen(false);
+    setRequeueOpen(false);
+    setRequeueError(undefined);
     setError("This session was deleted by another attached client");
   };
 
@@ -355,7 +363,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     const generation = ++selectionGeneration.current;
     workspaceRequestGeneration.current += 1;
     workspaceController.current = undefined;
-    setBusy(true); setDirectOperation(undefined); setError(undefined); setSidebarOpen(false); setChangesOpen(false); setTranscriptSearchOpen(false); setUsageOpen(false); setControlCenter(undefined); setSessionLifecycleOpen(false); setTranscriptQuery(""); setActivePromptId(undefined); setWorkspaceReview(undefined); setWorkspaceBrowser({ path: "", entries: [], loaded: false }); setWorkspaceScope("working"); setWorkspaceCheckpointEnabled(undefined); setWorkspaceError(undefined); setOpened(undefined); setConversation(EMPTY_STATE);
+    setBusy(true); setDirectOperation(undefined); setError(undefined); setSidebarOpen(false); setChangesOpen(false); setTranscriptSearchOpen(false); setUsageOpen(false); setControlCenter(undefined); setSessionLifecycleOpen(false); setRequeueOpen(false); setRequeueBusyItemId(undefined); setRequeueError(undefined); setTranscriptQuery(""); setActivePromptId(undefined); setWorkspaceReview(undefined); setWorkspaceBrowser({ path: "", entries: [], loaded: false }); setWorkspaceScope("working"); setWorkspaceCheckpointEnabled(undefined); setWorkspaceError(undefined); setOpened(undefined); setConversation(EMPTY_STATE);
     const previous = subscription.current;
     subscription.current = undefined;
     try {
@@ -567,11 +575,19 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         setControlCenter(undefined);
         setUsageOpen(false);
         setTranscriptSearchOpen(true);
+      } else if (event.altKey && event.key === "ArrowUp" && opened !== undefined) {
+        event.preventDefault();
+        void restoreQueuedInputs(false);
       } else if (event.key === "Escape") {
-        setCommandPaletteOpen(false);
-        setTranscriptSearchOpen(false);
-        setControlCenter(undefined);
-        setSidebarOpen(false);
+        if (commandPaletteOpen || transcriptSearchOpen || controlCenter !== undefined || sidebarOpen || requeueOpen) {
+          setCommandPaletteOpen(false);
+          setTranscriptSearchOpen(false);
+          setControlCenter(undefined);
+          setSidebarOpen(false);
+          setRequeueOpen(false);
+        } else if (opened !== undefined && (conversation.activeOperationId !== undefined || pendingInputs.length > 0 || conversation.queue.some((item) => item.status === "queued" || item.status === "paused"))) {
+          void restoreQueuedInputs(true);
+        }
       }
     };
     addEventListener("keydown", keydown);
@@ -580,7 +596,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       if (transcriptNavigationTimer.current !== undefined) clearTimeout(transcriptNavigationTimer.current);
       if (actionNoticeTimer.current !== undefined) clearTimeout(actionNoticeTimer.current);
     };
-  }, [opened]);
+  }, [opened, commandPaletteOpen, transcriptSearchOpen, controlCenter, sidebarOpen, requeueOpen, conversation.activeOperationId, conversation.queue, pendingInputs.length]);
 
   const createSession = async (): Promise<void> => {
     if (!client || !bootstrap) return;
@@ -1293,6 +1309,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     }
     const compacting = previewCompact !== null || resolvedCommand?.name === "compact";
     const generation = selectionGeneration.current;
+    let restoreComposerFocus = true;
     directCancellationRequested.current = false;
     setDraft("");
     setBusy(true);
@@ -1367,6 +1384,10 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         setSidebarOpen(true);
       } else if (outcome.surface === "fork") {
         showActionNotice("Choose Fork on the message where the new session should begin");
+      } else if (outcome.surface === "requeue") {
+        restoreComposerFocus = false;
+        setRequeueError(undefined);
+        setRequeueOpen(true);
       } else if (outcome.surface === "import") {
         artifactInput.current?.click();
       } else if (outcome.surface === "attach") {
@@ -1390,8 +1411,66 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         setBusy(false);
         if (compacting) setDirectOperation(undefined);
         directCancellationRequested.current = false;
-        queueMicrotask(() => composer.current?.focus());
+        if (restoreComposerFocus) queueMicrotask(() => composer.current?.focus());
       }
+    }
+  };
+
+  const restoreQueuedInputs = async (interrupt: boolean): Promise<void> => {
+    if (client === undefined || opened === undefined) return;
+    const generation = selectionGeneration.current;
+    setError(undefined);
+    try {
+      const result = await restoreQueuedPrompts(client, opened.sessionId, interrupt);
+      if (generation !== selectionGeneration.current) return;
+      const texts = result.items.map((item) =>
+        item.content.filter((part) => part.type === "text").map((part) => part.text).join("\n"),
+      );
+      setDraft((current) => [...texts, current].filter(Boolean).join("\n\n"));
+      const blobs = result.items.flatMap((item) =>
+        item.content.flatMap((part) => part.type === "blob" ? [part.blob] : []),
+      );
+      setAttachments((current) => [
+        ...blobs.filter((blob) => !current.some((item) => item.reference?.sha256 === blob.sha256)).map((blob) => ({
+          id: ++attachmentSequence.current,
+          file: new File([], blob.name ?? "attachment", { type: blob.mediaType }),
+          status: "ready" as const,
+          progress: 1,
+          reference: blob,
+        })),
+        ...current,
+      ]);
+      setPendingInputs([]);
+      showActionNotice(
+        result.items.length === 0
+          ? interrupt && result.interrupted ? "Response interrupted" : "No queued prompts"
+          : `${result.items.length} queued prompt${result.items.length === 1 ? "" : "s"} restored`,
+      );
+      queueMicrotask(() => composer.current?.focus());
+    } catch (cause) {
+      if (generation === selectionGeneration.current)
+        setError(cause instanceof Error ? cause.message : "Could not restore queued prompts");
+    }
+  };
+
+  const requeueItem = async (queueItemId: EventId): Promise<void> => {
+    const controller = commandController.current;
+    const sessionId = opened?.sessionId;
+    if (controller === undefined || sessionId === undefined) return;
+    const generation = selectionGeneration.current;
+    setRequeueBusyItemId(queueItemId);
+    setRequeueError(undefined);
+    try {
+      await controller.invoke(`/requeue ${queueItemId}`, sessionId);
+      if (generation !== selectionGeneration.current) return;
+      setRequeueOpen(false);
+      showActionNotice("Prompt requeued");
+    } catch (cause) {
+      if (generation === selectionGeneration.current) {
+        setRequeueError(cause instanceof Error ? cause.message : "Could not requeue the prompt");
+      }
+    } finally {
+      if (generation === selectionGeneration.current) setRequeueBusyItemId(undefined);
     }
   };
 
@@ -1607,6 +1686,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const transcriptMatches = useMemo(() => transcriptMessageMatches(conversation, transcriptQuery), [conversation, transcriptQuery]);
   const usageStats = useMemo(() => sessionUsageStats(conversation), [conversation]);
   const stateHistory = useMemo(() => sessionStateHistory(conversation), [conversation]);
+  const pausedQueue = useMemo(() => pausedQueueItems(conversation.queue), [conversation.queue]);
   const slashCommands = useMemo(
     () => (/^\/[a-z0-9-]*$/u.test(draft.trim()) ? filterCommands(commands, draft).slice(0, 6) : []),
     [commands, draft],
@@ -1699,10 +1779,11 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       {actionNotice && <div className="action-notice" role="status">{actionNotice}</div>}
       {error && <div className="error-banner" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError(undefined)}>×</button></div>}
       {directOperation && <div className="direct-operation" role="status" aria-live="polite"><progress aria-label={directOperation.kind === "compaction" ? "Compaction progress" : "Shell command progress"} /><span><strong>{directOperation.kind === "compaction" ? "Compacting context" : "Running shell command"}</strong><small>{directOperation.kind === "compaction" ? "Summarizing older context into a durable checkpoint." : "The sandboxed command result will appear in the transcript."}</small></span><button type="button" disabled={directOperation.cancelling} onClick={() => void cancelDirectOperation()}>{directOperation.cancelling ? "Cancelling…" : "Cancel"}</button></div>}
-      {opened && <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>{slashCommands.length > 0 && <div className="slash-commands" role="listbox" aria-label="Slash commands">{slashCommands.map((command) => <button key={command.id} type="button" role="option" aria-selected={command === slashCommands[slashCommandIndex]} disabled={command.availability.state === "unavailable"} onClick={() => selectCommand(command)}><strong>/{command.name}</strong><span>{command.availability.state === "unavailable" ? command.availability.reason : command.description}</span></button>)}</div>}<input ref={fileInput} className="attachment-input" type="file" multiple tabIndex={-1} aria-hidden="true" onChange={(event) => { attachFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />{attachments.length > 0 && <div className="composer-attachments" aria-label="Prompt attachments">{attachments.map((attachment) => <div key={attachment.id} className={`composer-attachment ${attachment.status}`}><span className="attachment-glyph" aria-hidden="true">◇</span><span className="attachment-copy"><strong title={attachment.file.name}>{attachment.file.name}</strong><small>{attachment.status === "uploading" ? `Uploading ${Math.round(attachment.progress * 100)}%` : attachment.status === "failed" ? attachment.error : `${Math.ceil(attachment.file.size / 1024)} KB · Ready`}</small></span>{attachment.status === "failed" && <button type="button" onClick={() => void uploadAttachment(attachment)}>Retry</button>}<button type="button" aria-label={attachment.status === "uploading" ? `Cancel upload ${attachment.file.name}` : `Remove ${attachment.file.name}`} onClick={() => removeAttachment(attachment.id)}>×</button></div>)}</div>}{orderedPendingInputs.length > 0 && <div className="pending-inputs" role="status" aria-label="Pending prompt delivery">{orderedPendingInputs.map((pending) => <div key={pending.id}><strong>{pending.mode === "steer" ? "Steering" : pending.mode === "follow_up" ? "Follow-up" : "Interrupting"}</strong><span>{pending.text}</span></div>)}</div>}<textarea ref={composer} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (slashCommands.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) { event.preventDefault(); setSlashCommandIndex((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + slashCommands.length) % slashCommands.length); } else if (slashCommands.length > 0 && (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))) { event.preventDefault(); selectCommand(slashCommands[slashCommandIndex] as EffectiveCommand); } else if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(promptDeliveryShortcut(event)); } }} placeholder="Ask Axl…" aria-label="Message" aria-keyshortcuts="Enter Alt+Enter Control+Enter Meta+Enter" aria-expanded={slashCommands.length > 0} rows={3} disabled={busy} /><div className="composer-footer"><button type="button" className="attach-button" aria-label="Attach files" title="Attach files" disabled={!canUpload || busy || !connected} onClick={() => fileInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 8.5 4.2-4.2a2.1 2.1 0 0 1 3 3l-5.5 5.5a3.5 3.5 0 0 1-5-5l5.4-5.4" /></svg></button>{canShell && <button type="button" className="shell-button" aria-label="Run shell command" title="Run shell command (! includes output, !! excludes it)" disabled={busy || !connected} onClick={() => { setDraft((current) => current || "! "); queueMicrotask(() => composer.current?.focus()); }}>&gt;_</button>}<span className="delivery-hint" title="Enter sends or steers · Alt+Enter follows up · Ctrl/Cmd+Enter interrupts">{deliveryActive ? "↵ steer" : "↵ send"} · Alt ↵ follow up · Ctrl/⌘ ↵ interrupt</span>{pendingDeliveries > 0 && <span className="delivery-status" role="status">Delivering {pendingDeliveries}</span>}<ModelPicker choices={modelCatalog} provider={conversation.provider} model={conversation.model} thinking={conversation.thinking} openRequest={modelPickerOpenRequest} disabled={!canConfigure || busy || (preview === undefined && conversation.activeOperationId !== undefined) || !connected} onModel={(choice) => void configureModel(choice)} onThinking={(level) => void configureThinking(level)} />{conversation.activeOperationId && directOperation === undefined && <button type="button" className="composer-submit stop" aria-label="Stop response" onClick={() => void interrupt()} disabled={!connected}><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.25" /></svg></button>}<button className="composer-submit send" aria-label={deliveryActive ? "Deliver during active response" : "Send message"} disabled={(!draft.trim() && readyAttachmentCount === 0) || attachmentUploading || busy || !connected}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M14 2 8.5 14 6.4 9.6 2 7.5 14 2Z M6.4 9.6 10 6" /></svg></button></div></form>}
+      {opened && <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>{slashCommands.length > 0 && <div className="slash-commands" role="listbox" aria-label="Slash commands">{slashCommands.map((command) => <button key={command.id} type="button" role="option" aria-selected={command === slashCommands[slashCommandIndex]} disabled={command.availability.state === "unavailable"} onClick={() => selectCommand(command)}><strong>/{command.name}</strong><span>{command.availability.state === "unavailable" ? command.availability.reason : command.description}</span></button>)}</div>}<input ref={fileInput} className="attachment-input" type="file" multiple tabIndex={-1} aria-hidden="true" onChange={(event) => { attachFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />{attachments.length > 0 && <div className="composer-attachments" aria-label="Prompt attachments">{attachments.map((attachment) => <div key={attachment.id} className={`composer-attachment ${attachment.status}`}><span className="attachment-glyph" aria-hidden="true">◇</span><span className="attachment-copy"><strong title={attachment.file.name}>{attachment.file.name}</strong><small>{attachment.status === "uploading" ? `Uploading ${Math.round(attachment.progress * 100)}%` : attachment.status === "failed" ? attachment.error : `${Math.ceil((attachment.reference?.sizeBytes ?? attachment.file.size) / 1024)} KB · Ready`}</small></span>{attachment.status === "failed" && <button type="button" onClick={() => void uploadAttachment(attachment)}>Retry</button>}<button type="button" aria-label={attachment.status === "uploading" ? `Cancel upload ${attachment.file.name}` : `Remove ${attachment.file.name}`} onClick={() => removeAttachment(attachment.id)}>×</button></div>)}</div>}{orderedPendingInputs.length > 0 && <div className="pending-inputs" role="status" aria-label="Pending prompt delivery">{orderedPendingInputs.map((pending) => <div key={pending.id}><strong>{pending.mode === "steer" ? "Steering" : pending.mode === "follow_up" ? "Follow-up" : "Interrupting"}</strong><span>{pending.text}</span></div>)}</div>}<textarea ref={composer} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (slashCommands.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) { event.preventDefault(); setSlashCommandIndex((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + slashCommands.length) % slashCommands.length); } else if (slashCommands.length > 0 && (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))) { event.preventDefault(); selectCommand(slashCommands[slashCommandIndex] as EffectiveCommand); } else if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(promptDeliveryShortcut(event)); } }} placeholder="Ask Axl…" aria-label="Message" aria-keyshortcuts="Enter Alt+Enter Control+Enter Meta+Enter" aria-expanded={slashCommands.length > 0} rows={3} disabled={busy} /><div className="composer-footer"><button type="button" className="attach-button" aria-label="Attach files" title="Attach files" disabled={!canUpload || busy || !connected} onClick={() => fileInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 8.5 4.2-4.2a2.1 2.1 0 0 1 3 3l-5.5 5.5a3.5 3.5 0 0 1-5-5l5.4-5.4" /></svg></button>{canShell && <button type="button" className="shell-button" aria-label="Run shell command" title="Run shell command (! includes output, !! excludes it)" disabled={busy || !connected} onClick={() => { setDraft((current) => current || "! "); queueMicrotask(() => composer.current?.focus()); }}>&gt;_</button>}<span className="delivery-hint" title="Enter sends or steers · Alt+Enter follows up · Ctrl/Cmd+Enter interrupts">{deliveryActive ? "↵ steer" : "↵ send"} · Alt ↵ follow up · Ctrl/⌘ ↵ interrupt</span>{pendingDeliveries > 0 && <span className="delivery-status" role="status">Delivering {pendingDeliveries}</span>}<ModelPicker choices={modelCatalog} provider={conversation.provider} model={conversation.model} thinking={conversation.thinking} openRequest={modelPickerOpenRequest} disabled={!canConfigure || busy || (preview === undefined && conversation.activeOperationId !== undefined) || !connected} onModel={(choice) => void configureModel(choice)} onThinking={(level) => void configureThinking(level)} />{conversation.activeOperationId && directOperation === undefined && <button type="button" className="composer-submit stop" aria-label="Stop response" onClick={() => void interrupt()} disabled={!connected}><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.25" /></svg></button>}<button className="composer-submit send" aria-label={deliveryActive ? "Deliver during active response" : "Send message"} disabled={(!draft.trim() && readyAttachmentCount === 0) || attachmentUploading || busy || !connected}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M14 2 8.5 14 6.4 9.6 2 7.5 14 2Z M6.4 9.6 10 6" /></svg></button></div></form>}
     </section>
     {changesOpen && <><div className="panel-resizer right" role="separator" aria-orientation="vertical" aria-label="Resize workspace panel" aria-valuemin={420} aria-valuemax={900} aria-valuenow={changesWidth} tabIndex={0} onPointerDown={(event) => resizePanel("right", event)} onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); resizePanelBy("right", event.key === "ArrowLeft" ? 16 : -16); } }} /><WorkspacePanel tab={workspaceTab} canBrowse={canBrowseWorkspace} canReview={canReviewWorkspace} canCheckpoint={canCheckpointWorkspace} browser={workspaceBrowser} review={workspaceReview} scope={workspaceScope} checkpointEnabled={workspaceCheckpointEnabled} checkpointDisabled={busy || conversation.activeOperationId !== undefined} loading={workspaceLoading} error={workspaceError} view={changesView} onTab={(tab) => { setWorkspaceTab(tab); setWorkspaceError(undefined); if (tab === "files" && !workspaceBrowser.loaded) void loadWorkspaceDirectory(""); if (tab === "changes" && workspaceReview === undefined) void loadWorkspaceChanges(workspaceScope); }} onOpenDirectory={(path) => void loadWorkspaceDirectory(path)} onOpenFile={(path) => void loadWorkspaceFile(path)} onLoadMoreEntries={() => void loadWorkspaceDirectory(workspaceBrowser.path, true)} onLoadMoreFile={() => { if (workspaceBrowser.file) void loadWorkspaceFile(workspaceBrowser.file.path, true); }} onScope={(scope) => void loadWorkspaceChanges(scope)} onCheckpoint={(enabled) => void configureWorkspaceCheckpoint(enabled)} onViewChange={(view) => { setChangesView(view); persistLayout({ sidebarWidth, changesWidth, sidebarCollapsed, changesView: view }); }} onClose={() => setChangesOpen(false)} onRetry={refreshWorkspace} /></>}
     {controlCenter && <Suspense fallback={null}><ControlCenter tab={controlCenter} preferences={{ sidebarWidth, changesWidth, sidebarCollapsed, changesView }} theme={theme} providers={providerInventory} providerLoading={providerLoading} providerError={providerError} providerLogin={providerLogin} canRefresh={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.catalog.refresh") === true} canLogin={canLoginProvider} canLogout={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.auth.logout") === true} onTab={setControlCenter} onPreferences={applyWebPreferences} onTheme={setTheme} onRefresh={(providerId) => void refreshProviders(providerId)} onLogin={(providerId, method) => void startProviderLogin(providerId, method)} onCancelLogin={cancelProviderLogin} onLogout={(providerId) => void logoutProvider(providerId)} onCopyLogin={(providerId, method) => void copyProviderLogin(providerId, method)} onClose={() => setControlCenter(undefined)} /></Suspense>}
     {sessionLifecycleOpen && selectedSummary && <SessionLifecycle session={selectedSummary} busy={busy} capabilities={lifecycleCapabilities} onRename={(title) => void renameSession(title)} onClone={() => void cloneSession()} onExport={() => void exportArtifact()} onDispose={() => void disposeSession()} onDelete={() => void deleteSession()} onClose={() => setSessionLifecycleOpen(false)} />}
+    {requeueOpen && <RequeueDialog items={pausedQueue} busyItemId={requeueBusyItemId} error={requeueError} onRequeue={(queueItemId) => void requeueItem(queueItemId)} onClose={() => { setRequeueOpen(false); setRequeueError(undefined); }} />}
   </main>;
 }

@@ -13,17 +13,16 @@ import { StringDecoder } from "node:string_decoder";
 
 import {
   type AttachmentPresence,
-  type DaemonHostStatus,
-  type HostContext,
-  type HostResponse,
-  HOST_CONTROL_VERSION,
-  parseHostRequest,
   type CanonicalEvent,
   CanonicalEventSizeError,
   type ClientIdentity,
+  type DaemonHostStatus,
   type EventCursor,
   type EventId,
   encodeWireMessage,
+  HOST_CONTROL_VERSION,
+  type HostContext,
+  type HostResponse,
   hashCanonicalRequest,
   isKnownRpcErrorCode,
   isRetryableMutationMethod,
@@ -32,6 +31,7 @@ import {
   MAX_CANONICAL_EVENT_BYTES,
   MAX_WIRE_MESSAGE_BYTES,
   ProtocolValidationError,
+  parseHostRequest,
   parseOperationId,
   parseRpcResult,
   parseSessionId,
@@ -948,7 +948,8 @@ export class AxlDaemon {
         : undefined;
     const affectedOperationId =
       normalized.method === "session.interrupt" ||
-      normalized.method === "session.interruptAndDeliver"
+      normalized.method === "session.interruptAndDeliver" ||
+      (normalized.method === "session.queue.restore" && normalized.params.interrupt)
         ? this.interruptTargetOperationId(normalized.params.sessionId)
         : undefined;
     const interactionId =
@@ -1157,6 +1158,15 @@ export class AxlDaemon {
           request.params.queueItemId,
           request.params.priority,
           this.mutationOperationId(acceptance),
+        );
+      case "session.queue.restore":
+        return this.sessions.restoreQueue(
+          request.params.sessionId,
+          request.params.interrupt,
+          this.mutationOperationId(acceptance),
+          acceptance?.affectedOperationId === undefined
+            ? undefined
+            : parseOperationId(acceptance.affectedOperationId, "affectedOperationId"),
         );
       case "session.shell":
         return this.sessions.shell(

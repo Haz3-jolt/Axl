@@ -1175,7 +1175,7 @@ test("Escape interrupts a running or admitted operation", async (context) => {
   app.stop();
 });
 
-test("an idle Escape result is visible and is not polled", async (context) => {
+test("an idle queue restore result is visible and is not polled", async (context) => {
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
   const { output, text } = captureOutput();
@@ -1183,13 +1183,17 @@ test("an idle Escape result is visible and is not polled", async (context) => {
   const rpc = context.mock.method(client, "request");
   const app = await AxlApp.start({ client, input, output, cwd: directory, color: false });
   context.after(() => app.stop());
-  const before = rpc.mock.calls.filter((call) => call.arguments[0] === "session.interrupt").length;
+  const before = rpc.mock.calls.filter(
+    (call) => call.arguments[0] === "session.queue.restore",
+  ).length;
 
-  await (app as unknown as { interrupt(): Promise<void> }).interrupt();
+  await (
+    app as unknown as { restoreQueuedInputs(interrupt: boolean): Promise<void> }
+  ).restoreQueuedInputs(false);
 
-  await until(() => text().includes("no active operation to interrupt"), "interrupt notice");
+  await until(() => text().includes("no queued prompts"), "queue restore notice");
   assert.equal(
-    rpc.mock.calls.filter((call) => call.arguments[0] === "session.interrupt").length,
+    rpc.mock.calls.filter((call) => call.arguments[0] === "session.queue.restore").length,
     before + 1,
   );
 });
@@ -1660,7 +1664,7 @@ test("bang commands run through daemon shell authority", async (context) => {
   app.stop();
 });
 
-test("Escape interrupts shell passthrough and preserves queued prompts", async (context) => {
+test("Escape interrupts shell passthrough and restores queued prompts", async (context) => {
   let shellAborted = false;
   const prompts: string[] = [];
   const recordingPort: ModelPort = {
@@ -1708,8 +1712,9 @@ test("Escape interrupts shell passthrough and preserves queued prompts", async (
   await until(() => text().includes("queued follow-up"), "queued shell follow-up");
   input.write("\x1b[27u");
   await until(() => shellAborted, "shell interruption");
-  await until(() => prompts.length === 1, "queued prompt delivery");
-  assert.deepEqual(prompts, ["keep this prompt"]);
+  await until(() => text().includes("restored 1 queued prompt"), "queued prompt restoration");
+  assert.deepEqual(prompts, []);
+  assert.match(text(), /keep this prompt/);
   app.stop();
 });
 
@@ -2689,7 +2694,7 @@ test("Escape cancels compaction without replacing context", async (context) => {
   input.write("/compact\r");
   await until(() => summarizing && text().includes("Compacting context"), "summary started");
   input.write("\x1b");
-  await until(() => text().includes("Compaction cancelled"), "compaction cancellation");
+  await until(() => text().includes("interrupted"), "compaction cancellation");
   assert.equal(subscription.projector.overview.lastCompaction, undefined);
   assert.doesNotMatch(text(), /Request failed/);
 });

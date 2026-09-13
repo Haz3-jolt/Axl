@@ -37,7 +37,7 @@ The branch now contains the first complete local-session slice:
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
 - The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
-- Ordinary session creation and shared-command routing work. Staged Chat/Code creation, paused-item requeue, presence presentation, and several hardening tests remain.
+- Ordinary session creation, shared-command routing, paused-item requeue, and queue restoration work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Staged Chat/Code creation, presence presentation, and several hardening tests remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
 
@@ -47,7 +47,7 @@ The visual foundation, ordinary local conversation path, provider authentication
 
 Active remaining work:
 
-1. Add explicit paused-item requeue controls and browser presence presentation.
+1. Add browser presence presentation.
 2. Add staged Chat/Code creation, including explicit workspace and tool-profile semantics.
 3. Move the provider directory and remaining configuration sequencing into reusable SDK controllers.
 4. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
@@ -83,7 +83,7 @@ The normal local chat path is available. These items close the remaining gap bet
 ### Prompt delivery
 
 6. [x] Add draft-safe steer and follow-up submission through the shared SDK delivery workflow.
-7. [ ] Finish daemon-owned queue controls. SDK queue-next, queue-last, automatic late-steer fallback, and paused outcomes are implemented; explicit paused-item requeue remains.
+7. [x] Finish daemon-owned queue controls with queue-next, queue-last, automatic late-steer fallback, paused outcomes, focused paused-item requeue, restore-all, and clear-and-interrupt behavior.
 8. [x] Add atomic interrupt-and-deliver. It uses `session.interruptAndDeliver` and is never simulated with Stop followed by Send.
 9. [x] Preserve drafts on rejection or uncertain transport outcomes and present accepted, completed, queued, paused, interrupted, failed, and uncertain states accurately.
 
@@ -356,7 +356,8 @@ The browser should support every capability granted to its connection.
 - [x] `session.follow_up`
 - [x] `session.interrupt_deliver`
 - [x] `session.queue.enqueue`
-- [ ] `session.queue.requeue`
+- [x] `session.queue.requeue`
+- [x] `session.queue.restore`
 - [x] `session.interrupt`
 - [x] `session.dispose`
 

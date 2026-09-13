@@ -44,7 +44,7 @@ The daemon owns commands that change or inspect shared runtime state:
 
 - session creation, configuration, branching, cloning, import, export, and disposal
 - model, provider, thinking, request, profile, and tool configuration
-- send, steer, follow-up, queue, requeue, interrupt, and interrupt-and-deliver
+- send, steer, follow-up, queue, requeue, restore queued input, interrupt, and interrupt-and-deliver
 - compaction and runtime reload
 - provider status, catalog refresh, and logout
 - workspace status, review, diff, and checkpoint behavior

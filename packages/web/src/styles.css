@@ -294,6 +294,24 @@ h1 { margin:0; font-size:23px; line-height:1.25; letter-spacing:-.025em; }
 .control-scrim { position:fixed; z-index:20; display:grid; inset:0; place-items:center; padding:24px; background:var(--scrim); }
 .control-center { display:grid; grid-template-rows:52px minmax(0,1fr); width:min(720px,100%); max-height:min(680px,calc(100dvh - 48px)); overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--panel); box-shadow:0 28px 80px var(--shadow); }
 .control-center > header { display:flex; align-items:center; justify-content:space-between; padding:0 10px 0 18px; border-bottom:1px solid var(--line-soft); }
+.requeue-dialog { width:min(560px,100%); max-height:calc(100dvh - 48px); overflow:auto; border:1px solid var(--line); border-radius:12px; background:var(--panel); box-shadow:0 28px 80px var(--shadow); }
+.requeue-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 12px 14px 18px; border-bottom:1px solid var(--line-soft); }
+.requeue-dialog > header strong,.requeue-dialog > header small { display:block; }
+.requeue-dialog > header strong { color:var(--text); font-size:13px; }
+.requeue-dialog > header small { margin-top:3px; color:var(--subtle); font-size:10px; }
+.requeue-dialog > header button { width:30px; height:30px; border:0; border-radius:6px; background:transparent; color:var(--muted); cursor:pointer; }
+.requeue-dialog > header button:hover:not(:disabled) { background:var(--selected); color:var(--text); }
+.requeue-dialog ul { margin:0; padding:6px 18px 18px; list-style:none; }
+.requeue-dialog li { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; border-bottom:1px solid var(--line-soft); }
+.requeue-dialog li > span { min-width:0; }
+.requeue-dialog li strong,.requeue-dialog li small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.requeue-dialog li strong { color:var(--text-soft); font-size:12px; font-weight:500; }
+.requeue-dialog li small { margin-top:4px; color:var(--subtle); font-size:10px; }
+.requeue-dialog li button { flex:none; min-height:32px; padding:0 10px; border:1px solid var(--line); border-radius:6px; background:var(--raised); color:var(--text-soft); cursor:pointer; }
+.requeue-dialog button:disabled { opacity:.45; cursor:not-allowed; }
+.requeue-empty,.requeue-error { margin:16px 18px; font-size:12px; }
+.requeue-empty { color:var(--muted); }
+.requeue-error { color:#e47b83; }
 .session-lifecycle { width:min(520px,100%); max-height:calc(100dvh - 48px); overflow:auto; border:1px solid var(--line); border-radius:12px; background:var(--panel); box-shadow:0 28px 80px var(--shadow); }
 .session-lifecycle > header { display:flex; min-width:0; align-items:center; justify-content:space-between; padding:13px 10px 13px 18px; border-bottom:1px solid var(--line-soft); }
 .session-lifecycle > header div { min-width:0; }
