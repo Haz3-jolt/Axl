@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useRef, type JSX } from "react";
-import type { ThinkingLevel } from "@axl/sdk";
-import type { ModelChoice } from "./model-catalog.ts";
+import type { ModelChoice, ThinkingLevel } from "@axl/sdk";
 
 export function ModelPicker({
   choices,
@@ -11,6 +10,7 @@ export function ModelPicker({
   model,
   thinking,
   disabled,
+  error,
   openRequest,
   onModel,
   onThinking,
@@ -20,6 +20,7 @@ export function ModelPicker({
   readonly model: string | undefined;
   readonly thinking: ThinkingLevel | undefined;
   readonly disabled: boolean;
+  readonly error?: string;
   readonly openRequest?: number;
   readonly onModel: (choice: ModelChoice) => void;
   readonly onThinking: (level: ThinkingLevel) => void;
@@ -45,9 +46,11 @@ export function ModelPicker({
         {choices.length === 0 && <p className="model-empty">No models available</p>}
         {choices.map((choice) => {
           const active = choice.providerId === provider && choice.modelId === model;
-          return <button key={`${choice.providerId}:${choice.modelId}`} type="button" className={active ? "selected" : ""} disabled={disabled} onClick={() => { onModel(choice); close(); }}><i aria-hidden="true">{active ? "✓" : ""}</i><span><strong>{choice.displayName}</strong><small>{choice.providerId}</small></span></button>;
+          const unavailable = choice.availability.status === "unavailable";
+          return <button key={`${choice.providerId}:${choice.modelId}`} type="button" className={active ? "selected" : ""} disabled={disabled || unavailable} title={choice.availability.reason} onClick={() => { onModel(choice); close(); }}><i aria-hidden="true">{active ? "✓" : ""}</i><span><strong>{choice.displayName}</strong><small>{unavailable ? choice.availability.reason ?? "Unavailable" : choice.providerId}</small></span></button>;
         })}
       </div>
+      {error && <p className="model-error" role="alert">{error}</p>}
       {levels.length > 0 && <><div className="model-menu-rule" /><p className="model-menu-label">Reasoning effort</p><div className="effort-options">{levels.map((level) => <button key={level} type="button" className={level === thinking ? "selected" : ""} disabled={disabled} onClick={() => { onThinking(level); close(); }}><i aria-hidden="true">{level === thinking ? "✓" : ""}</i><span>{level}</span></button>)}</div></>}
     </div>
   </details>;
