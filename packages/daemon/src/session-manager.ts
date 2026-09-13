@@ -227,6 +227,13 @@ function reinsertQueueItem<Value>(
   for (const [id, item] of existing) items.set(id, item);
 }
 
+function truncateUtf8(value: string, maxBytes: number): string {
+  const bytes = new TextEncoder().encode(value);
+  return bytes.byteLength <= maxBytes
+    ? value
+    : new TextDecoder().decode(bytes.subarray(0, maxBytes), { stream: true });
+}
+
 function userMessageText(event: CanonicalEvent): string | undefined {
   if (event.type !== "user.message") return undefined;
   const text = event.payload.content
@@ -234,7 +241,7 @@ function userMessageText(event: CanonicalEvent): string | undefined {
     .map((item) => item.text)
     .join("\n")
     .trim();
-  return text || undefined;
+  return text ? truncateUtf8(text, 4096) : undefined;
 }
 
 export type StoredSessionSummary = Omit<SessionSummary, "runtime" | "attachmentCount">;

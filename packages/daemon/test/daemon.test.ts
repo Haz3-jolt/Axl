@@ -2296,6 +2296,28 @@ test("lists, forks, clones, and resumes sessions", async (context) => {
   assert.equal(resumedClone.events[0]?.type, "session.created");
 });
 
+test("session summaries truncate oversized prompts on UTF-8 boundaries", async (context) => {
+  const fixture = await startDaemon(context);
+  const client = await connectUnixClient(fixture.socketPath);
+  context.after(() => client.close());
+  const created = await client.request("session.create", { cwd: fixture.cwd });
+  const prefix = "a".repeat(4094);
+  await client.request("session.send", {
+    sessionId: created.sessionId,
+    delivery: "prompt",
+    content: [{ type: "text", text: `${prefix}🙂tail` }],
+  });
+
+  const listed = await client.request("session.list", {
+    scope: "all_local",
+    order: "recent",
+    pageSize: 50,
+  });
+  assert.equal(listed.sessions[0]?.firstUserMessage, prefix);
+  assert.equal(listed.sessions[0]?.lastUserMessage, prefix);
+  assert.equal(Buffer.byteLength(listed.sessions[0]?.lastUserMessage ?? ""), 4094);
+});
+
 test("pages and filters daemon-owned session summaries", async (context) => {
   const fixture = await startDaemon(context);
   const client = await connectUnixClient(fixture.socketPath);
