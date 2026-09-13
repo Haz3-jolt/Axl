@@ -73,8 +73,8 @@ export function NewSessionDialog({
         <section className="new-session-step" aria-labelledby="session-mode-label">
           <header><strong id="session-mode-label">Choose a session type</strong><small>Chat stays focused. Code adds a workspace and tools.</small></header>
           <div className="session-mode" role="group" aria-label="Session mode">
-            <button type="button" disabled={busy} aria-pressed={draft.mode === "chat"} onClick={() => onChange({ mode: "chat" })}><span><strong>Chat</strong><small>Talk without workspace access</small></span><i aria-hidden="true" /></button>
-            <button type="button" disabled={busy} aria-pressed={draft.mode === "code"} onClick={() => onChange({ mode: "code" })}><span><strong>Code</strong><small>Work inside one workspace</small></span><i aria-hidden="true" /></button>
+            <button type="button" disabled={busy} aria-pressed={draft.mode === "chat"} onClick={() => onChange({ mode: "chat" })}><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h13v8h-7l-4 3v-3h-2z" /></svg><span><strong>Chat</strong><small>Talk without workspace access</small></span></button>
+            <button type="button" disabled={busy} aria-pressed={draft.mode === "code"} onClick={() => onChange({ mode: "code" })}><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 5-5 5 5 5m6-10 5 5-5 5m-2-12L9 17" /></svg><span><strong>Code</strong><small>Work inside one workspace</small></span></button>
           </div>
         </section>
         {draft.mode === "code" && <section className="new-session-step"><label className="new-session-workspace"><span><strong>Workspace</strong><small>Required for Code sessions</small></span><input value={draft.workspace ?? ""} disabled={busy} onChange={(event) => onChange({ workspace: event.target.value })} placeholder="/path/to/workspace" autoComplete="off" spellCheck={false} /></label></section>}
