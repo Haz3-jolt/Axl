@@ -2331,29 +2331,37 @@ export class AxlApp {
       if (this.client.state === "connected" || this.client.state === "loading_snapshot") {
         context.attachmentId = this.client.connection.attachmentId;
       }
-      status = await host.status(context);
-      const confirmed =
-        status.confirmationRequired &&
-        (confirmedByShortcut ||
-          (await this.confirmShutdown("Shut down shared daemon?", [
-            "Active work will be interrupted and all clients disconnected.",
-            ...status.sessions.map(
-              (session) =>
-                `${session.sessionId} · ${session.busy ? "active" : "idle"} · ${session.cwd}`,
-            ),
-            ...status.attachments.map(
-              (attachment) =>
-                `${attachment.kind} client ${attachment.attachmentId} · sessions ${attachment.sessionIds.join(", ") || "none"}`,
-            ),
-            `Pending requests: ${status.pendingRequests}`,
-          ])));
-      if (this.stopped || (status.confirmationRequired && !confirmed)) return;
-      this.quitting = true;
-      this.reconnectGeneration += 1;
-      this.notice = this.view.palette.dim("· interrupting work and shutting down daemon…");
-      this.redraw();
-      await host.shutdown(status, { ...context, interrupt: true, confirmed });
-      this.stop();
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        status = await host.status(context);
+        const confirmed =
+          status.confirmationRequired &&
+          (confirmedByShortcut ||
+            (await this.confirmShutdown("Shut down shared daemon?", [
+              "Active work will be interrupted and all clients disconnected.",
+              ...status.sessions.map(
+                (session) =>
+                  `${session.sessionId} · ${session.busy ? "active" : "idle"} · ${session.cwd}`,
+              ),
+              ...status.attachments.map(
+                (attachment) =>
+                  `${attachment.kind} client ${attachment.attachmentId} · sessions ${attachment.sessionIds.join(", ") || "none"}`,
+              ),
+              `Pending requests: ${status.pendingRequests}`,
+            ])));
+        if (this.stopped || (status.confirmationRequired && !confirmed)) return;
+        this.quitting = true;
+        this.reconnectGeneration += 1;
+        this.notice = this.view.palette.dim("· interrupting work and shutting down daemon…");
+        this.redraw();
+        try {
+          await host.shutdown(status, { ...context, interrupt: true, confirmed });
+          this.stop();
+          return;
+        } catch (error) {
+          if (!(error instanceof AxlClientError) || error.code !== "state_changed" || attempt === 2)
+            throw error;
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Daemon shutdown failed";
       this.notice = this.view.palette.error(`✖ ${sanitizeTerminalText(message)}`);

@@ -33,7 +33,7 @@ import type {
   Usage,
 } from "@axl/protocol";
 import { DEFAULT_MODEL_REQUEST_SETTINGS } from "@axl/protocol";
-import { subscribeSession } from "@axl/sdk";
+import { AxlClientError, subscribeSession } from "@axl/sdk";
 import { connectUnixClient, createUnixDaemonHost } from "@axl/sdk/unix";
 
 import { AxlApp, saveClipboardImage, stripAnsi } from "../src/index.ts";
@@ -1727,15 +1727,26 @@ test("Escape interrupts shell passthrough and restores queued prompts", async (c
   app.stop();
 });
 
-test("editing, /quit, and busy notices behave", async (context) => {
+test("editing and /quit recover from a stale shutdown status", async (context) => {
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
   const { output, text } = captureOutput();
+  const host = createUnixDaemonHost(socketPath);
+  let shutdownAttempts = 0;
   let exited = false;
 
   await AxlApp.start({
     client: await connectUnixClient(socketPath),
-    daemonHost: createUnixDaemonHost(socketPath),
+    daemonHost: {
+      status: (shutdownContext) => host.status(shutdownContext),
+      shutdown: (status, options) => {
+        shutdownAttempts += 1;
+        if (shutdownAttempts === 1)
+          return Promise.reject(new AxlClientError("state_changed", "Daemon state changed"));
+        return host.shutdown(status, options);
+      },
+      force: (instanceId) => host.force(instanceId),
+    },
     input,
     output,
     cwd: directory,
@@ -1750,6 +1761,7 @@ test("editing, /quit, and busy notices behave", async (context) => {
 
   input.write("/quit\r");
   await until(() => exited, "quit");
+  assert.equal(shutdownAttempts, 2);
 });
 
 test("Ctrl+Z suspends and resumes without detaching the session", async (context) => {
