@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import type { EffectiveCommand } from "@axl/sdk";
+import { trapDialogFocus } from "./dialog-focus.ts";
 
 import { filterCommands } from "./commands.ts";
 
@@ -41,20 +42,7 @@ export function CommandPalette({
       onClose();
       return;
     }
-    if (event.key !== "Tab" || dialog.current === null) return;
-    const controls = [
-      ...dialog.current.querySelectorAll<HTMLElement>("input:not(:disabled), button:not(:disabled)"),
-    ];
-    const first = controls[0];
-    const last = controls.at(-1);
-    if (first === undefined || last === undefined) return;
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    trapDialogFocus(event, dialog.current);
   };
 
   const choose = (command: EffectiveCommand | undefined): void => {

@@ -8,6 +8,7 @@ import type {
   NewSessionDraftUpdate,
   ThinkingLevel,
 } from "@axl/sdk";
+import { trapDialogFocus } from "./dialog-focus.ts";
 import { ModelPicker } from "./model-picker.tsx";
 import { WebToolControls } from "./web-tool-controls.tsx";
 
@@ -45,22 +46,7 @@ export function NewSessionDialog({
       onClose();
       return;
     }
-    if (event.key !== "Tab" || dialog.current === null) return;
-    const controls = [
-      ...dialog.current.querySelectorAll<HTMLElement>(
-        "button:not(:disabled), input:not(:disabled), select:not(:disabled), summary",
-      ),
-    ];
-    const first = controls[0];
-    const last = controls.at(-1);
-    if (first === undefined || last === undefined) return;
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    trapDialogFocus(event, dialog.current);
   };
 
   const selected = models.find(
@@ -79,20 +65,27 @@ export function NewSessionDialog({
 
   return <div className="control-scrim">
     <section className="new-session-dialog" ref={dialog} role="dialog" aria-modal="true" aria-labelledby="new-session-title" onKeyDown={handleKeyDown}>
-      <header><span><strong id="new-session-title">New session</strong><small>Choose how Axl should work.</small></span><button type="button" aria-label="Close" disabled={busy} onClick={onClose}>×</button></header>
+      <header>
+        <span><strong id="new-session-title">New session</strong><small>Set the working context before Axl starts.</small></span>
+        <button type="button" aria-label="Close" disabled={busy} onClick={onClose}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8" /></svg></button>
+      </header>
       <div className="new-session-body">
-        <div className="session-mode" role="group" aria-label="Session mode">
-          <button type="button" disabled={busy} aria-pressed={draft.mode === "chat"} onClick={() => onChange({ mode: "chat" })}><strong>Chat</strong><small>Conversation without workspace tools</small></button>
-          <button type="button" disabled={busy} aria-pressed={draft.mode === "code"} onClick={() => onChange({ mode: "code" })}><strong>Code</strong><small>Work in an explicit workspace</small></button>
-        </div>
-        {draft.mode === "code" && <label className="new-session-workspace"><span>Workspace</span><input value={draft.workspace ?? ""} disabled={busy} onChange={(event) => onChange({ workspace: event.target.value })} placeholder="/path/to/workspace" autoComplete="off" spellCheck={false} /></label>}
-        <div className="new-session-model"><span>Model and effort</span><ModelPicker choices={models} provider={draft.providerId} model={draft.modelId} thinking={draft.thinkingLevel} openRequest={modelPickerOpenRequest} disabled={busy} onModel={updateModel} onThinking={updateThinking} /></div>
-        {selected === undefined && <small className="new-session-default">The daemon will choose its configured model and effort.</small>}
-        {draft.mode === "code" && <WebToolControls webSearch={draft.webSearch} webFetch={draft.webFetch} staged disabled={busy} onChange={(field, value) => onChange(field === "webSearch" ? { webSearch: value } : { webFetch: value })} />}
+        <section className="new-session-step" aria-labelledby="session-mode-label">
+          <header><strong id="session-mode-label">Choose a session type</strong><small>Chat stays focused. Code adds a workspace and tools.</small></header>
+          <div className="session-mode" role="group" aria-label="Session mode">
+            <button type="button" disabled={busy} aria-pressed={draft.mode === "chat"} onClick={() => onChange({ mode: "chat" })}><span><strong>Chat</strong><small>Talk without workspace access</small></span><i aria-hidden="true" /></button>
+            <button type="button" disabled={busy} aria-pressed={draft.mode === "code"} onClick={() => onChange({ mode: "code" })}><span><strong>Code</strong><small>Work inside one workspace</small></span><i aria-hidden="true" /></button>
+          </div>
+        </section>
+        {draft.mode === "code" && <section className="new-session-step"><label className="new-session-workspace"><span><strong>Workspace</strong><small>Required for Code sessions</small></span><input value={draft.workspace ?? ""} disabled={busy} onChange={(event) => onChange({ workspace: event.target.value })} placeholder="/path/to/workspace" autoComplete="off" spellCheck={false} /></label></section>}
+        <section className="new-session-step">
+          <div className="new-session-model"><span><strong>Model and effort</strong><small>{selected === undefined ? "Use the daemon defaults or choose now" : `${selected.providerDisplayName} · ${selected.displayName}`}</small></span><ModelPicker choices={models} provider={draft.providerId} model={draft.modelId} thinking={draft.thinkingLevel} openRequest={modelPickerOpenRequest} disabled={busy} onModel={updateModel} onThinking={updateThinking} /></div>
+        </section>
+        {draft.mode === "code" && <section className="new-session-step"><WebToolControls webSearch={draft.webSearch} webFetch={draft.webFetch} staged disabled={busy} onChange={(field, value) => onChange(field === "webSearch" ? { webSearch: value } : { webFetch: value })} /></section>}
         {error && <p className="new-session-error" role="alert">{error}</p>}
         {unavailableReason && <p className="new-session-error" role="status">{unavailableReason}</p>}
       </div>
-      <footer><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary" title={unavailableReason} disabled={busy || unavailableReason !== undefined || (draft.mode === "code" && !draft.workspace?.trim())} onClick={onSubmit}>{busy ? "Creating…" : `Create ${draft.mode === "chat" ? "Chat" : "Code"}`}</button></footer>
+      <footer><span>Your choices are applied together when the session starts.</span><div><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary" title={unavailableReason} disabled={busy || unavailableReason !== undefined || (draft.mode === "code" && !draft.workspace?.trim())} onClick={onSubmit}>{busy ? "Creating…" : `Create ${draft.mode === "chat" ? "Chat" : "Code"}`}</button></div></footer>
     </section>
   </div>;
 }
