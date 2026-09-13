@@ -7,16 +7,30 @@ export type WebTheme = "system" | "light" | "dark";
 
 export function webPresentationCommands({
   canLogin,
+  openNewSession,
   openProviders,
   openTheme,
   setTheme,
 }: {
   readonly canLogin: boolean;
+  readonly openNewSession: (mode?: "chat" | "code") => void;
   readonly openProviders: () => void;
   readonly openTheme: () => void;
   readonly setTheme: (theme: WebTheme) => void;
 }): readonly PresentationCommand[] {
   return [
+    {
+      id: "web.new",
+      name: "new",
+      description: "Create a Chat or Code session",
+      argument: { required: false, hint: "chat | code" },
+      run: (argument?: string) => {
+        if (argument !== undefined && argument !== "chat" && argument !== "code") {
+          throw new Error("Session mode must be chat or code");
+        }
+        openNewSession(argument);
+      },
+    },
     ...(canLogin
       ? [
           {

@@ -37,7 +37,7 @@ The branch now contains the first complete local-session slice:
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
 - The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
-- Ordinary session creation, shared-command routing, paused-item requeue, queue restoration, and browser presence work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Staged Chat/Code creation and several hardening tests remain.
+- Ordinary and staged Chat/Code creation, shared-command routing, paused-item requeue, queue restoration, and browser presence work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Provider/configuration ownership and several hardening tests remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
 
@@ -47,8 +47,8 @@ The visual foundation, ordinary local conversation path, provider authentication
 
 Active remaining work:
 
-1. Add staged Chat/Code creation, including explicit workspace and tool-profile semantics.
-2. Move the provider directory and remaining configuration sequencing into reusable SDK controllers.
+1. Move the provider directory and remaining configuration sequencing into reusable SDK controllers.
+2. Complete model/provider UX and search/fetch configuration.
 3. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
 
 Deferred work is labeled in place. It includes extension-driven command invalidation, `axl web --dev`, IndexedDB cursor persistence, localization, long-session React measurement, and pre-stable CLI flag renames.
@@ -214,7 +214,7 @@ This is a protocol and ownership change and requires architecture review before 
 - [x] Add command discovery, execution, explicit refresh, and typed outcome projection.
 - [ ] Add event-driven command-catalog invalidation when daemon extension registration exists.
 - [ ] Move the provider directory into the SDK with observable loading, ready, partial-failure, refresh, auth-change, reconnect, and disposal states. The current web-owned directory preserves partial results and supports explicit refresh.
-- [ ] Add staged new-session intent shared by direct controls and slash commands.
+- [x] Add staged new-session intent shared by direct controls and slash commands.
 - [ ] Add session-configuration mutation ordering, optimistic intent, effective values, and field-scoped failures.
 - [x] Add attachment upload, abort, retry, and retrieval helpers over blob RPCs.
 - [x] Add high-level steer, follow-up, interrupt, and interrupt-and-deliver methods with draft-safe semantics.
@@ -235,14 +235,14 @@ request settings
 web tool configuration
 ```
 
-- [ ] Chat creation requires no workspace and sends no model-visible tools.
-- [ ] Code creation requires an explicit resolved workspace.
-- [ ] Direct controls and slash commands update the same staged object.
-- [ ] Submit staged intent atomically through `session.create`.
-- [ ] Preserve daemon defaults for fields the user did not explicitly select.
-- [ ] Render a running session's exact profile as identity rather than a lossy Chat/Code toggle.
-- [ ] Never display `minimal` or `exec` as mutable `standard` Code.
-- [ ] Keep workspace navigation absent from Chat.
+- [x] Chat creation requires no workspace choice and sends no model-visible tools.
+- [x] Code creation requires an explicit workspace resolved by the daemon.
+- [x] Direct controls and slash commands update the same staged object.
+- [x] Submit staged intent atomically through `session.create`.
+- [x] Preserve daemon defaults for fields the user did not explicitly select.
+- [x] Render a running session's exact profile as identity rather than a lossy Chat/Code toggle.
+- [x] Never display `minimal` or `exec` as mutable `standard` Code.
+- [x] Keep workspace navigation absent from Chat.
 
 ## Model and thinking selection
 
@@ -255,7 +255,7 @@ web tool configuration
 - [x] Reject ambiguous bare model IDs.
 - [x] Derive thinking choices from the selected model's supported levels.
 - [x] Preserve the daemon thinking default until the user explicitly changes it.
-- [ ] Stage model and thinking choices before creation and configure them after creation.
+- [x] Stage model and thinking choices before creation and submit them atomically.
 - [x] Show effective clamped thinking values.
 - [x] Keep model and thinking controls out of generic Web settings.
 
@@ -466,11 +466,11 @@ This sequence is historical planning context, not a completion checklist. Curren
 
 ### Behavior
 
-- [ ] TUI and browser converge on one session under simultaneous use.
+- [x] TUI and browser converge on one session under simultaneous use.
 - [x] Reconnect neither loses nor duplicates canonical events through SDK cursor and snapshot replacement semantics.
 - [x] Session switching cannot display state from the prior session.
-- [ ] Chat has no workspace or tool interface.
-- [ ] Code requires an explicit workspace.
+- [x] Chat has no workspace or tool interface.
+- [x] Code requires an explicit workspace.
 - [x] Model identity remains provider-qualified.
 - [x] Thinking choices match model support.
 - [x] Active-turn delivery modes remain distinct.
