@@ -37,7 +37,11 @@ import {
 } from "@axl/sdk";
 
 import { CommandPalette } from "./command-palette.tsx";
-import { filterCommands, webPresentationCommands } from "./commands.ts";
+import {
+  filterCommands,
+  type WebTheme,
+  webPresentationCommands,
+} from "./commands.ts";
 import type { ControlCenterTab } from "./control-center.tsx";
 import {
   browserProviderHost,
@@ -80,6 +84,16 @@ const DEFAULT_LAYOUT: WebPreferences = {
   changesView: "files",
 };
 const PREVIEW_LAYOUT_KEY = "axl.preview.layout";
+const WEB_THEME_KEY = "axl.web.theme";
+
+function storedWebTheme(): WebTheme {
+  try {
+    const value = localStorage.getItem(WEB_THEME_KEY);
+    return value === "light" || value === "dark" ? value : "system";
+  } catch {
+    return "system";
+  }
+}
 
 function compactNumber(value: number): string {
   return value >= 1000 ? `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}k` : String(value);
@@ -224,6 +238,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const [sidebarWidth, setSidebarWidth] = useState(initialLayout.sidebarWidth);
   const [changesWidth, setChangesWidth] = useState(initialLayout.changesWidth);
   const [changesView, setChangesView] = useState<"files" | "all">(initialLayout.changesView);
+  const [theme, setTheme] = useState<WebTheme>(storedWebTheme);
   const [changesOpen, setChangesOpen] = useState(false);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspacePanelTab>("changes");
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceStatusScope>("working");
@@ -277,6 +292,22 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const fileInput = useRef<HTMLInputElement>(null);
   const artifactInput = useRef<HTMLInputElement>(null);
   const sidebarWasOpen = useRef(false);
+
+  useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const apply = (): void => {
+      document.documentElement.dataset.theme = theme === "system" ? (media.matches ? "dark" : "light") : theme;
+    };
+    apply();
+    try {
+      localStorage.setItem(WEB_THEME_KEY, theme);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the theme preference");
+    }
+    if (theme !== "system") return;
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [theme]);
 
   const refreshSessions = async (current: AxlClient): Promise<readonly SessionSummary[]> => {
     const result = await current.request("session.list", { scope: "all_local", order: "recent", pageSize: 100 });
@@ -388,14 +419,20 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       activeClient = environment.client; setClient(environment.client); setBootstrap(environment.bootstrap);
       if (environment.client.connection.grantedCapabilities.includes("command.list")) {
         commandController.current = new CommandController(environment.client, () =>
-          webPresentationCommands(
-            environment.bootstrap.hostCapabilities.includes("provider.auth.login"),
-            () => {
+          webPresentationCommands({
+            canLogin: environment.bootstrap.hostCapabilities.includes("provider.auth.login"),
+            openProviders: () => {
               setUsageOpen(false);
               setTranscriptSearchOpen(false);
               setControlCenter("providers");
             },
-          ),
+            openTheme: () => {
+              setUsageOpen(false);
+              setTranscriptSearchOpen(false);
+              setControlCenter("settings");
+            },
+            setTheme,
+          }),
         );
       }
       setSidebarWidth(environment.bootstrap.preferences.sidebarWidth);
@@ -1665,7 +1702,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       {opened && <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>{slashCommands.length > 0 && <div className="slash-commands" role="listbox" aria-label="Slash commands">{slashCommands.map((command) => <button key={command.id} type="button" role="option" aria-selected={command === slashCommands[slashCommandIndex]} disabled={command.availability.state === "unavailable"} onClick={() => selectCommand(command)}><strong>/{command.name}</strong><span>{command.availability.state === "unavailable" ? command.availability.reason : command.description}</span></button>)}</div>}<input ref={fileInput} className="attachment-input" type="file" multiple tabIndex={-1} aria-hidden="true" onChange={(event) => { attachFiles(Array.from(event.target.files ?? [])); event.target.value = ""; }} />{attachments.length > 0 && <div className="composer-attachments" aria-label="Prompt attachments">{attachments.map((attachment) => <div key={attachment.id} className={`composer-attachment ${attachment.status}`}><span className="attachment-glyph" aria-hidden="true">◇</span><span className="attachment-copy"><strong title={attachment.file.name}>{attachment.file.name}</strong><small>{attachment.status === "uploading" ? `Uploading ${Math.round(attachment.progress * 100)}%` : attachment.status === "failed" ? attachment.error : `${Math.ceil(attachment.file.size / 1024)} KB · Ready`}</small></span>{attachment.status === "failed" && <button type="button" onClick={() => void uploadAttachment(attachment)}>Retry</button>}<button type="button" aria-label={attachment.status === "uploading" ? `Cancel upload ${attachment.file.name}` : `Remove ${attachment.file.name}`} onClick={() => removeAttachment(attachment.id)}>×</button></div>)}</div>}{orderedPendingInputs.length > 0 && <div className="pending-inputs" role="status" aria-label="Pending prompt delivery">{orderedPendingInputs.map((pending) => <div key={pending.id}><strong>{pending.mode === "steer" ? "Steering" : pending.mode === "follow_up" ? "Follow-up" : "Interrupting"}</strong><span>{pending.text}</span></div>)}</div>}<textarea ref={composer} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (slashCommands.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) { event.preventDefault(); setSlashCommandIndex((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + slashCommands.length) % slashCommands.length); } else if (slashCommands.length > 0 && (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey))) { event.preventDefault(); selectCommand(slashCommands[slashCommandIndex] as EffectiveCommand); } else if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(promptDeliveryShortcut(event)); } }} placeholder="Ask Axl…" aria-label="Message" aria-keyshortcuts="Enter Alt+Enter Control+Enter Meta+Enter" aria-expanded={slashCommands.length > 0} rows={3} disabled={busy} /><div className="composer-footer"><button type="button" className="attach-button" aria-label="Attach files" title="Attach files" disabled={!canUpload || busy || !connected} onClick={() => fileInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 8.5 4.2-4.2a2.1 2.1 0 0 1 3 3l-5.5 5.5a3.5 3.5 0 0 1-5-5l5.4-5.4" /></svg></button>{canShell && <button type="button" className="shell-button" aria-label="Run shell command" title="Run shell command (! includes output, !! excludes it)" disabled={busy || !connected} onClick={() => { setDraft((current) => current || "! "); queueMicrotask(() => composer.current?.focus()); }}>&gt;_</button>}<span className="delivery-hint" title="Enter sends or steers · Alt+Enter follows up · Ctrl/Cmd+Enter interrupts">{deliveryActive ? "↵ steer" : "↵ send"} · Alt ↵ follow up · Ctrl/⌘ ↵ interrupt</span>{pendingDeliveries > 0 && <span className="delivery-status" role="status">Delivering {pendingDeliveries}</span>}<ModelPicker choices={modelCatalog} provider={conversation.provider} model={conversation.model} thinking={conversation.thinking} openRequest={modelPickerOpenRequest} disabled={!canConfigure || busy || (preview === undefined && conversation.activeOperationId !== undefined) || !connected} onModel={(choice) => void configureModel(choice)} onThinking={(level) => void configureThinking(level)} />{conversation.activeOperationId && directOperation === undefined && <button type="button" className="composer-submit stop" aria-label="Stop response" onClick={() => void interrupt()} disabled={!connected}><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.25" /></svg></button>}<button className="composer-submit send" aria-label={deliveryActive ? "Deliver during active response" : "Send message"} disabled={(!draft.trim() && readyAttachmentCount === 0) || attachmentUploading || busy || !connected}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M14 2 8.5 14 6.4 9.6 2 7.5 14 2Z M6.4 9.6 10 6" /></svg></button></div></form>}
     </section>
     {changesOpen && <><div className="panel-resizer right" role="separator" aria-orientation="vertical" aria-label="Resize workspace panel" aria-valuemin={420} aria-valuemax={900} aria-valuenow={changesWidth} tabIndex={0} onPointerDown={(event) => resizePanel("right", event)} onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); resizePanelBy("right", event.key === "ArrowLeft" ? 16 : -16); } }} /><WorkspacePanel tab={workspaceTab} canBrowse={canBrowseWorkspace} canReview={canReviewWorkspace} canCheckpoint={canCheckpointWorkspace} browser={workspaceBrowser} review={workspaceReview} scope={workspaceScope} checkpointEnabled={workspaceCheckpointEnabled} checkpointDisabled={busy || conversation.activeOperationId !== undefined} loading={workspaceLoading} error={workspaceError} view={changesView} onTab={(tab) => { setWorkspaceTab(tab); setWorkspaceError(undefined); if (tab === "files" && !workspaceBrowser.loaded) void loadWorkspaceDirectory(""); if (tab === "changes" && workspaceReview === undefined) void loadWorkspaceChanges(workspaceScope); }} onOpenDirectory={(path) => void loadWorkspaceDirectory(path)} onOpenFile={(path) => void loadWorkspaceFile(path)} onLoadMoreEntries={() => void loadWorkspaceDirectory(workspaceBrowser.path, true)} onLoadMoreFile={() => { if (workspaceBrowser.file) void loadWorkspaceFile(workspaceBrowser.file.path, true); }} onScope={(scope) => void loadWorkspaceChanges(scope)} onCheckpoint={(enabled) => void configureWorkspaceCheckpoint(enabled)} onViewChange={(view) => { setChangesView(view); persistLayout({ sidebarWidth, changesWidth, sidebarCollapsed, changesView: view }); }} onClose={() => setChangesOpen(false)} onRetry={refreshWorkspace} /></>}
-    {controlCenter && <Suspense fallback={null}><ControlCenter tab={controlCenter} preferences={{ sidebarWidth, changesWidth, sidebarCollapsed, changesView }} providers={providerInventory} providerLoading={providerLoading} providerError={providerError} providerLogin={providerLogin} canRefresh={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.catalog.refresh") === true} canLogin={canLoginProvider} canLogout={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.auth.logout") === true} onTab={setControlCenter} onPreferences={applyWebPreferences} onRefresh={(providerId) => void refreshProviders(providerId)} onLogin={(providerId, method) => void startProviderLogin(providerId, method)} onCancelLogin={cancelProviderLogin} onLogout={(providerId) => void logoutProvider(providerId)} onCopyLogin={(providerId, method) => void copyProviderLogin(providerId, method)} onClose={() => setControlCenter(undefined)} /></Suspense>}
+    {controlCenter && <Suspense fallback={null}><ControlCenter tab={controlCenter} preferences={{ sidebarWidth, changesWidth, sidebarCollapsed, changesView }} theme={theme} providers={providerInventory} providerLoading={providerLoading} providerError={providerError} providerLogin={providerLogin} canRefresh={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.catalog.refresh") === true} canLogin={canLoginProvider} canLogout={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.auth.logout") === true} onTab={setControlCenter} onPreferences={applyWebPreferences} onTheme={setTheme} onRefresh={(providerId) => void refreshProviders(providerId)} onLogin={(providerId, method) => void startProviderLogin(providerId, method)} onCancelLogin={cancelProviderLogin} onLogout={(providerId) => void logoutProvider(providerId)} onCopyLogin={(providerId, method) => void copyProviderLogin(providerId, method)} onClose={() => setControlCenter(undefined)} /></Suspense>}
     {sessionLifecycleOpen && selectedSummary && <SessionLifecycle session={selectedSummary} busy={busy} capabilities={lifecycleCapabilities} onRename={(title) => void renameSession(title)} onClone={() => void cloneSession()} onExport={() => void exportArtifact()} onDispose={() => void disposeSession()} onDelete={() => void deleteSession()} onClose={() => setSessionLifecycleOpen(false)} />}
   </main>;
 }

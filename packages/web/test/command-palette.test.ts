@@ -32,21 +32,45 @@ const commands: readonly EffectiveCommand[] = [
   },
 ];
 
-test("trusted web login contributes a direct presentation command", async () => {
-  let opened = 0;
-  const commands = webPresentationCommands(true, () => {
-    opened += 1;
+test("web presentation commands open login and configure appearance", async () => {
+  let providersOpened = 0;
+  let themeOpened = 0;
+  let theme = "";
+  const commands = webPresentationCommands({
+    canLogin: true,
+    openProviders: () => {
+      providersOpened += 1;
+    },
+    openTheme: () => {
+      themeOpened += 1;
+    },
+    setTheme: (value) => {
+      theme = value;
+    },
   });
 
   assert.deepEqual(
     commands.map((command) => command.name),
-    ["login"],
+    ["login", "theme"],
   );
-  await commands[0]?.run();
-  assert.equal(opened, 1);
+  await commands.find((command) => command.name === "login")?.run();
+  await commands.find((command) => command.name === "theme")?.run();
+  await commands.find((command) => command.name === "theme")?.run("light");
+  assert.equal(providersOpened, 1);
+  assert.equal(themeOpened, 1);
+  assert.equal(theme, "light");
+  await assert.rejects(
+    async () => commands.find((command) => command.name === "theme")?.run("sepia"),
+    /Theme must be system, light, or dark/,
+  );
   assert.deepEqual(
-    webPresentationCommands(false, () => undefined),
-    [],
+    webPresentationCommands({
+      canLogin: false,
+      openProviders: () => undefined,
+      openTheme: () => undefined,
+      setTheme: () => undefined,
+    }).map((command) => command.name),
+    ["theme"],
   );
 });
 

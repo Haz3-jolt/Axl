@@ -4,7 +4,8 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/inter/wght-italic.css";
 
-:root {
+:root,
+:root[data-theme="dark"] {
   color-scheme: dark;
   font-family: "Inter Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
@@ -18,8 +19,42 @@
   --line: #29292e;
   --line-soft: #202024;
   --text: #f0f0f2;
+  --text-soft: #dedee2;
   --muted: #96969d;
   --subtle: #626268;
   --accent: #6267c8;
+  --accent-strong: #9699e6;
   --green: #2fc779;
+  --surface-hover: #111113;
+  --surface-active: #141416;
+  --code-bg: #0d0d0f;
+  --input-bg: #101012;
+  --scrim: rgba(0, 0, 0, 0.58);
+  --shadow: rgba(0, 0, 0, 0.48);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  color: #202126;
+  background: #f7f7f8;
+  --bg: #f7f7f8;
+  --sidebar: #f0f0f2;
+  --panel: #ffffff;
+  --raised: #f3f3f5;
+  --selected: #e8e8ed;
+  --line: #d4d4da;
+  --line-soft: #e3e3e7;
+  --text: #202126;
+  --text-soft: #35363d;
+  --muted: #62636c;
+  --subtle: #85868e;
+  --accent: #555ab8;
+  --accent-strong: #4e53ad;
+  --green: #188653;
+  --surface-hover: #e9e9ed;
+  --surface-active: #e1e1e7;
+  --code-bg: #f0f0f3;
+  --input-bg: #ffffff;
+  --scrim: rgba(29, 30, 36, 0.28);
+  --shadow: rgba(37, 38, 45, 0.18);
 }

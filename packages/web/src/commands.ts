@@ -3,20 +3,47 @@
 
 import type { EffectiveCommand, PresentationCommand } from "@axl/sdk";
 
-export function webPresentationCommands(
-  canLogin: boolean,
-  openProviders: () => void,
-): readonly PresentationCommand[] {
-  return canLogin
-    ? [
-        {
-          id: "web.login",
-          name: "login",
-          description: "Authenticate a provider",
-          run: openProviders,
-        },
-      ]
-    : [];
+export type WebTheme = "system" | "light" | "dark";
+
+export function webPresentationCommands({
+  canLogin,
+  openProviders,
+  openTheme,
+  setTheme,
+}: {
+  readonly canLogin: boolean;
+  readonly openProviders: () => void;
+  readonly openTheme: () => void;
+  readonly setTheme: (theme: WebTheme) => void;
+}): readonly PresentationCommand[] {
+  return [
+    ...(canLogin
+      ? [
+          {
+            id: "web.login",
+            name: "login",
+            description: "Authenticate a provider",
+            run: openProviders,
+          },
+        ]
+      : []),
+    {
+      id: "web.theme",
+      name: "theme",
+      description: "Choose system, light, or dark appearance",
+      argument: { required: false, hint: "system | light | dark" },
+      run: (argument?: string) => {
+        if (argument === undefined) {
+          openTheme();
+          return;
+        }
+        if (argument !== "system" && argument !== "light" && argument !== "dark") {
+          throw new Error("Theme must be system, light, or dark");
+        }
+        setTheme(argument);
+      },
+    },
+  ];
 }
 
 export function filterCommands(

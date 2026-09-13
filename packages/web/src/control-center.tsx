@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, type JSX } from "react";
 import type { ProviderInventoryGroup, ProviderLoginMethod } from "@axl/sdk";
+import type { WebTheme } from "./commands.ts";
 import type { WebPreferences } from "./environment.ts";
 
 export type ControlCenterTab = "settings" | "providers";
@@ -24,6 +25,7 @@ function loginLabel(method: ProviderLoginMethod, reconnect: boolean, copy: boole
 export function ControlCenter({
   tab,
   preferences,
+  theme,
   providers,
   providerLoading,
   providerError,
@@ -33,6 +35,7 @@ export function ControlCenter({
   canLogout,
   onTab,
   onPreferences,
+  onTheme,
   onRefresh,
   onLogin,
   onCancelLogin,
@@ -42,6 +45,7 @@ export function ControlCenter({
 }: {
   readonly tab: ControlCenterTab;
   readonly preferences: WebPreferences;
+  readonly theme: WebTheme;
   readonly providers: readonly ProviderInventoryGroup[];
   readonly providerLoading: boolean;
   readonly providerError?: string | undefined;
@@ -54,6 +58,7 @@ export function ControlCenter({
   readonly canLogout: boolean;
   readonly onTab: (tab: ControlCenterTab) => void;
   readonly onPreferences: (preferences: WebPreferences) => void;
+  readonly onTheme: (theme: WebTheme) => void;
   readonly onRefresh: (providerId?: string) => void;
   readonly onLogin: (providerId: string, method: ProviderLoginMethod) => void;
   readonly onCancelLogin: () => void;
@@ -96,7 +101,7 @@ export function ControlCenter({
         <div className="setting-row"><span><strong>Default changes view</strong><small>Choose how workspace changes open</small></span><div className="setting-segments"><button className={preferences.changesView === "files" ? "active" : ""} onClick={() => onPreferences({ ...preferences, changesView: "files" })}>Files</button><button className={preferences.changesView === "all" ? "active" : ""} onClick={() => onPreferences({ ...preferences, changesView: "all" })}>All</button></div></div>
         <label className="setting-range"><span><strong>Session rail width</strong><small>{preferences.sidebarWidth}px</small></span><input type="range" min="200" max="420" step="8" value={preferences.sidebarWidth} onChange={(event) => onPreferences({ ...preferences, sidebarWidth: Number(event.target.value) })} /></label>
         <label className="setting-range"><span><strong>Changes panel width</strong><small>{preferences.changesWidth}px</small></span><input type="range" min="420" max="900" step="8" value={preferences.changesWidth} onChange={(event) => onPreferences({ ...preferences, changesWidth: Number(event.target.value) })} /></label>
-        <div className="setting-row static"><span><strong>Appearance</strong><small>Dark theme · motion follows your system preference</small></span></div>
+        <div className="setting-row"><span><strong>Appearance</strong><small>Follow your device or choose a fixed theme</small></span><div className="setting-segments" aria-label="Appearance"><button className={theme === "system" ? "active" : ""} aria-pressed={theme === "system"} onClick={() => onTheme("system")}>System</button><button className={theme === "light" ? "active" : ""} aria-pressed={theme === "light"} onClick={() => onTheme("light")}>Light</button><button className={theme === "dark" ? "active" : ""} aria-pressed={theme === "dark"} onClick={() => onTheme("dark")}>Dark</button></div></div>
       </div> : <div className="providers-pane">
         <div className="providers-heading"><span><strong>Model providers</strong><small>Authentication and catalog state from the daemon</small></span><button onClick={() => onRefresh()} disabled={!canRefresh || providerLoading}>{providerLoading ? "Refreshing…" : "Refresh all"}</button></div>
         {providerError && <p className="provider-error" role="alert">{providerError}</p>}
