@@ -50,6 +50,8 @@ export interface WebGatewayOptions {
   readonly providerHost?: TrustedProviderHost;
   readonly launchToken?: Buffer;
   readonly pathToken?: Buffer;
+  /** Test seams may shorten, but never widen, the fixed 60-second attachment idle limit. */
+  readonly webSocketIdleTimeoutMs?: number;
 }
 
 export interface WebPreferences {
@@ -386,6 +388,9 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
   const launchToken = options.launchToken ?? randomBytes(32);
   const pathToken = options.pathToken ?? randomBytes(16);
   const browserCredential = randomBytes(32);
+  const webSocketIdleTimeoutMs = Math.min(options.webSocketIdleTimeoutMs ?? 60_000, 60_000);
+  if (!Number.isSafeInteger(webSocketIdleTimeoutMs) || webSocketIdleTimeoutMs < 1)
+    throw new Error("WebSocket idle timeout must be a positive integer");
   const prefix = `/a/${pathToken.toString("base64url")}/`;
   const cookieName = "axl_web";
   let launchAvailable = true;
@@ -644,12 +649,25 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
     let windowStarted = performance.now();
     let pendingMessages = 0;
     let pendingBytes = 0;
+    let idleTimer = setTimeout(
+      () => webSocket.close(1008, "Heartbeat timeout"),
+      webSocketIdleTimeoutMs,
+    );
+    const resetIdleTimer = (): void => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(
+        () => webSocket.close(1008, "Heartbeat timeout"),
+        webSocketIdleTimeoutMs,
+      );
+    };
     const close = (): void => {
+      clearTimeout(idleTimer);
       webSockets.delete(webSocket);
       daemon.destroy();
       if (webSocket.readyState < 2) webSocket.close(1000, "Attachment closed");
     };
     webSocket.on("message", (data, binary) => {
+      resetIdleTimer();
       if (binary || Buffer.byteLength(data.toString()) > MAX_WIRE_MESSAGE_BYTES)
         return webSocket.close(1009, "Text message limit exceeded");
       const now = performance.now();

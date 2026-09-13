@@ -109,6 +109,65 @@ test("the gateway exchanges one launch token and authenticates one daemon bridge
   });
   context.after(() => new Promise<void>((resolve) => daemon.close(() => resolve())));
 
+  const expiredToken = Buffer.alloc(32, 7);
+  const expiredGateway = await startWebGateway({
+    socketPath,
+    assetDirectory: directory,
+    stateDirectory: directory,
+    cwd: "/workspace",
+    packageVersion: "0.0.0-test",
+    launchToken: expiredToken,
+    pathToken: Buffer.alloc(16, 7),
+  });
+  const actualNow = Date.now;
+  try {
+    const future = actualNow() + 61_000;
+    Date.now = () => future;
+    const expiredUrl = new URL("auth/exchange", expiredGateway.origin);
+    const expired = await fetch(expiredUrl, {
+      method: "POST",
+      headers: { origin: expiredUrl.origin, "content-type": "application/json" },
+      body: JSON.stringify({ token: expiredToken.toString("base64url") }),
+    });
+    assert.equal(expired.status, 401);
+  } finally {
+    Date.now = actualNow;
+    await expiredGateway.close();
+  }
+
+  const idleToken = Buffer.alloc(32, 8);
+  const idleGateway = await startWebGateway({
+    socketPath,
+    assetDirectory: directory,
+    stateDirectory: directory,
+    cwd: "/workspace",
+    packageVersion: "0.0.0-test",
+    launchToken: idleToken,
+    pathToken: Buffer.alloc(16, 8),
+    webSocketIdleTimeoutMs: 40,
+  });
+  try {
+    const idleUrl = new URL(idleGateway.origin);
+    const idleOrigin = idleUrl.origin;
+    const idleExchange = await fetch(new URL("auth/exchange", idleGateway.origin), {
+      method: "POST",
+      headers: { origin: idleOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ token: idleToken.toString("base64url") }),
+    });
+    const idleCookie = idleExchange.headers.get("set-cookie")?.split(";", 1)[0];
+    assert.ok(idleCookie);
+    const idleSocket = new WebSocket(new URL("ws", idleGateway.origin), {
+      headers: { origin: idleOrigin, cookie: idleCookie },
+    });
+    const idleClose = new Promise<number>((resolve, reject) => {
+      idleSocket.once("close", (code) => resolve(code));
+      idleSocket.once("error", reject);
+    });
+    assert.equal(await idleClose, 1008);
+  } finally {
+    await idleGateway.close();
+  }
+
   const providerLogins: Array<{ providerId: string; method: string }> = [];
   let resolveSlowLoginStarted = (): void => undefined;
   const slowLoginStarted = new Promise<void>((resolve) => {
@@ -377,6 +436,20 @@ test("the gateway exchanges one launch token and authenticates one daemon bridge
   );
   oversized.send("x".repeat(MAX_WIRE_MESSAGE_BYTES + 1));
   assert.equal(await oversizedClose, 1009);
+
+  const fragmented = new WebSocket(new URL("ws", gateway.origin), {
+    headers: { origin, cookie: cookieHeader },
+  });
+  await new Promise<void>((resolve, reject) => {
+    fragmented.once("open", resolve);
+    fragmented.once("error", reject);
+  });
+  const fragmentedClose = new Promise<number>((resolve) =>
+    fragmented.once("close", (code) => resolve(code)),
+  );
+  fragmented.send("x".repeat(Math.ceil(MAX_WIRE_MESSAGE_BYTES / 2)), { fin: false });
+  fragmented.send("x".repeat(Math.ceil(MAX_WIRE_MESSAGE_BYTES / 2) + 1), { fin: true });
+  assert.equal(await fragmentedClose, 1009);
 
   const healthy = new WebSocket(new URL("ws", gateway.origin), {
     headers: { origin, cookie: cookieHeader },
