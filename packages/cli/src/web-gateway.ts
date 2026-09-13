@@ -432,6 +432,8 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
   const validOrigin = (request: IncomingMessage): boolean =>
     request.headers.host === expectedHost && request.headers.origin === expectedOrigin;
   const server = createServer(async (request, response) => {
+    request.once("end", () => request.socket.setTimeout(0));
+    response.once("finish", () => request.socket.setTimeout(5_000));
     let relative = "";
     try {
       if (
@@ -608,11 +610,15 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
     }
   });
 
+  server.headersTimeout = 5_000;
+  server.requestTimeout = 5_000;
   server.on("connection", (socket) => {
+    socket.setTimeout(5_000, () => socket.destroy());
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
   });
   server.on("upgrade", (request, socket, head) => {
+    (socket as Socket).setTimeout(0);
     if (
       request.url !== `${prefix}ws` ||
       !validOrigin(request) ||
@@ -633,7 +639,11 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
     let buffer = "";
     const decoder = new StringDecoder("utf8");
     let messages = 0;
-    let windowStarted = Date.now();
+    let burstTokens = 20;
+    let lastMessageAt = performance.now();
+    let windowStarted = performance.now();
+    let pendingMessages = 0;
+    let pendingBytes = 0;
     const close = (): void => {
       webSockets.delete(webSocket);
       daemon.destroy();
@@ -642,12 +652,15 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
     webSocket.on("message", (data, binary) => {
       if (binary || Buffer.byteLength(data.toString()) > MAX_WIRE_MESSAGE_BYTES)
         return webSocket.close(1009, "Text message limit exceeded");
-      const now = Date.now();
+      const now = performance.now();
       if (now - windowStarted > 10_000) {
         windowStarted = now;
         messages = 0;
       }
-      if (++messages > 100) return webSocket.close(1008, "Rate limit exceeded");
+      burstTokens = Math.min(20, burstTokens + ((now - lastMessageAt) * 10) / 1_000);
+      lastMessageAt = now;
+      if (++messages > 100 || burstTokens < 1) return webSocket.close(1008, "Rate limit exceeded");
+      burstTokens -= 1;
       daemon.write(data.toString());
     });
     daemon.on("data", (chunk) => {
@@ -658,12 +671,19 @@ export async function startWebGateway(options: WebGatewayOptions): Promise<WebGa
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
         if (!line) continue;
+        const lineBytes = Buffer.byteLength(line);
         if (
-          Buffer.byteLength(line) > MAX_WIRE_MESSAGE_BYTES ||
-          webSocket.bufferedAmount > 4 * 1024 * 1024
+          lineBytes > MAX_WIRE_MESSAGE_BYTES ||
+          pendingMessages >= 1_024 ||
+          pendingBytes + lineBytes > 4 * 1024 * 1024
         )
           return webSocket.close(1009, "Attachment is too slow");
-        webSocket.send(line);
+        pendingMessages += 1;
+        pendingBytes += lineBytes;
+        webSocket.send(line, () => {
+          pendingMessages -= 1;
+          pendingBytes -= lineBytes;
+        });
       }
     });
     daemon.once("error", () => webSocket.close(1011, "Daemon connection failed"));

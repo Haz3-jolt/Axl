@@ -29,6 +29,7 @@ export function ModelPicker({
   readonly onThinking: (level: ThinkingLevel) => void;
 }): JSX.Element {
   const details = useRef<HTMLDetailsElement>(null);
+  const summary = useRef<HTMLElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const selected = choices.find(
@@ -65,8 +66,16 @@ export function ModelPicker({
         if (event.currentTarget.open) focusPicker();
         else setQuery("");
       }}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !event.currentTarget.open) return;
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        summary.current?.focus();
+      }}
     >
       <summary
+        ref={summary}
         aria-label="Choose model and effort"
         aria-keyshortcuts="Control+L Meta+L"
         title="Choose model (Ctrl/⌘+L)"

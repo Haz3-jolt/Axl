@@ -4,12 +4,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
+import { request as httpRequest } from "node:http";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { WIRE_PROTOCOL_VERSION } from "@axl/protocol";
+import { MAX_WIRE_MESSAGE_BYTES, WIRE_PROTOCOL_VERSION } from "@axl/protocol";
 import WebSocket from "ws";
 import {
   encodeWebSessionArtifact,
@@ -96,14 +97,18 @@ test("the gateway exchanges one launch token and authenticates one daemon bridge
     }),
   );
 
-  const daemon = createServer((socket) => socket.on("data", (data) => socket.write(data)));
+  const daemon = createServer((socket) =>
+    socket.on("data", (data) => {
+      if (data.toString() === "outbound-flood\n") socket.write("x\n".repeat(1_025));
+      else socket.write(data);
+    }),
+  );
   await new Promise<void>((resolve, reject) => {
     daemon.once("error", reject);
     daemon.listen(socketPath, resolve);
   });
   context.after(() => new Promise<void>((resolve) => daemon.close(() => resolve())));
 
-  const launchToken = Buffer.alloc(32, 1);
   const providerLogins: Array<{ providerId: string; method: string }> = [];
   let resolveSlowLoginStarted = (): void => undefined;
   const slowLoginStarted = new Promise<void>((resolve) => {
@@ -145,27 +150,71 @@ test("the gateway exchanges one launch token and authenticates one daemon bridge
         });
       },
     },
-    launchToken,
     pathToken: Buffer.alloc(16, 2),
   });
   context.after(() => gateway.close());
-  const origin = new URL(gateway.origin).origin;
+  const gatewayUrl = new URL(gateway.origin);
+  const origin = gatewayUrl.origin;
+  assert.equal(gatewayUrl.hostname, "127.0.0.1");
+  const launchUrl = new URL(gateway.launchUrl);
+  assert.equal(launchUrl.search, "");
+  const launchToken = new URLSearchParams(launchUrl.hash.slice(1)).get("token");
+  assert.ok(launchToken);
+  assert.equal(Buffer.from(launchToken, "base64url").byteLength, 32);
+
   const exchangeUrl = new URL("auth/exchange", gateway.origin);
+  for (const rejectedOrigin of [undefined, "null", "http://localhost:1234"]) {
+    const response = await fetch(exchangeUrl, {
+      method: "POST",
+      headers: {
+        ...(rejectedOrigin === undefined ? {} : { origin: rejectedOrigin }),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ token: launchToken }),
+    });
+    assert.equal(response.status, 401);
+  }
+  const wrongHostStatus = await new Promise<number | undefined>((resolve, reject) => {
+    const request = httpRequest(
+      exchangeUrl,
+      { method: "POST", headers: { host: `localhost:${gatewayUrl.port}`, origin } },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode);
+      },
+    );
+    request.once("error", reject);
+    request.end(JSON.stringify({ token: launchToken }));
+  });
+  assert.equal(wrongHostStatus, 404);
+
   const exchange = await fetch(exchangeUrl, {
     method: "POST",
     headers: { origin, "content-type": "application/json" },
-    body: JSON.stringify({ token: launchToken.toString("base64url") }),
+    body: JSON.stringify({ token: launchToken }),
   });
   assert.equal(exchange.status, 200);
   const sessionCookie = exchange.headers.get("set-cookie");
   assert.ok(sessionCookie?.includes("HttpOnly"));
+  assert.ok(sessionCookie?.includes("SameSite=Strict"));
+  assert.ok(sessionCookie?.includes(`Path=${gatewayUrl.pathname}`));
+  assert.equal(sessionCookie?.includes("Domain="), false);
+  assert.equal(
+    exchange.headers.get("content-security-policy")?.includes("frame-ancestors 'none'"),
+    true,
+  );
+  assert.equal(exchange.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(exchange.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(exchange.headers.get("cache-control"), "no-store");
+  assert.equal(exchange.headers.get("cross-origin-opener-policy"), "same-origin");
+  assert.equal(exchange.headers.get("cross-origin-resource-policy"), "same-origin");
   if (sessionCookie === null) throw new Error("Gateway did not issue a session cookie");
   const cookieHeader = sessionCookie.split(";", 1)[0] ?? "";
 
   const replay = await fetch(exchangeUrl, {
     method: "POST",
     headers: { origin, "content-type": "application/json" },
-    body: JSON.stringify({ token: launchToken.toString("base64url") }),
+    body: JSON.stringify({ token: launchToken }),
   });
   assert.equal(replay.status, 401);
 
@@ -273,6 +322,28 @@ test("the gateway exchanges one launch token and authenticates one daemon bridge
   assert.equal((await cancelledLogin).status, 400);
   assert.equal(slowLoginAborted, true);
 
+  const rejectWebSocket = async (url: URL, headers: Record<string, string>): Promise<void> => {
+    await new Promise<void>((resolve, reject) => {
+      const rejected = new WebSocket(url, { headers });
+      rejected.once("open", () => {
+        rejected.close();
+        reject(new Error("Gateway accepted an unauthorized WebSocket"));
+      });
+      rejected.once("error", () => resolve());
+      rejected.once("unexpected-response", (_request, response) => {
+        response.resume();
+        resolve();
+      });
+    });
+  };
+  await rejectWebSocket(new URL("ws", gateway.origin), { origin });
+  await rejectWebSocket(new URL("ws", gateway.origin), { cookie: cookieHeader });
+  await rejectWebSocket(new URL("ws", gateway.origin), {
+    origin: "null",
+    cookie: cookieHeader,
+  });
+  await rejectWebSocket(new URL("wrong", gateway.origin), { origin, cookie: cookieHeader });
+
   const socket = new WebSocket(new URL("ws", gateway.origin), {
     headers: { origin, cookie: cookieHeader },
   });
@@ -287,5 +358,110 @@ test("the gateway exchanges one launch token and authenticates one daemon bridge
     ),
     "ping",
   );
-  socket.close();
+  assert.equal(socket.extensions, "");
+  const binaryClose = new Promise<number>((resolve) =>
+    socket.once("close", (code) => resolve(code)),
+  );
+  socket.send(Buffer.from([1]));
+  assert.equal(await binaryClose, 1009);
+
+  const oversized = new WebSocket(new URL("ws", gateway.origin), {
+    headers: { origin, cookie: cookieHeader },
+  });
+  await new Promise<void>((resolve, reject) => {
+    oversized.once("open", resolve);
+    oversized.once("error", reject);
+  });
+  const oversizedClose = new Promise<number>((resolve) =>
+    oversized.once("close", (code) => resolve(code)),
+  );
+  oversized.send("x".repeat(MAX_WIRE_MESSAGE_BYTES + 1));
+  assert.equal(await oversizedClose, 1009);
+
+  const healthy = new WebSocket(new URL("ws", gateway.origin), {
+    headers: { origin, cookie: cookieHeader },
+  });
+  await new Promise<void>((resolve, reject) => {
+    healthy.once("open", resolve);
+    healthy.once("error", reject);
+  });
+  const flooded = new WebSocket(new URL("ws", gateway.origin), {
+    headers: { origin, cookie: cookieHeader },
+  });
+  await new Promise<void>((resolve, reject) => {
+    flooded.once("open", resolve);
+    flooded.once("error", reject);
+  });
+  const floodClose = new Promise<number>((resolve) =>
+    flooded.once("close", (code) => resolve(code)),
+  );
+  for (let index = 0; index < 21; index += 1) flooded.send("ping\n");
+  assert.equal(await floodClose, 1008);
+
+  const slowReader = new WebSocket(new URL("ws", gateway.origin), {
+    headers: { origin, cookie: cookieHeader },
+  });
+  await new Promise<void>((resolve, reject) => {
+    slowReader.once("open", resolve);
+    slowReader.once("error", reject);
+  });
+  const slowReaderClose = new Promise<number>((resolve) =>
+    slowReader.once("close", (code) => resolve(code)),
+  );
+  slowReader.send("outbound-flood\n");
+  assert.equal(await slowReaderClose, 1009);
+  const healthyReply = new Promise<string>((resolve) =>
+    healthy.once("message", (data) => resolve(data.toString())),
+  );
+  healthy.send("healthy\n");
+  assert.equal(await healthyReply, "healthy");
+  const healthyClose = new Promise<void>((resolve) => healthy.once("close", () => resolve()));
+  healthy.close();
+  await healthyClose;
+
+  const attachments = await Promise.all(
+    Array.from({ length: 16 }, async () => {
+      const attachment = new WebSocket(new URL("ws", gateway.origin), {
+        headers: { origin, cookie: cookieHeader },
+      });
+      await new Promise<void>((resolve, reject) => {
+        attachment.once("open", resolve);
+        attachment.once("error", reject);
+      });
+      return attachment;
+    }),
+  );
+  await rejectWebSocket(new URL("ws", gateway.origin), { origin, cookie: cookieHeader });
+  await Promise.all(
+    attachments.map(
+      (attachment) =>
+        new Promise<void>((resolve) => {
+          attachment.once("close", () => resolve());
+          attachment.close();
+        }),
+    ),
+  );
+
+  const waitForTimeout = (requestText: string): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const stalled = createConnection(Number(gatewayUrl.port), gatewayUrl.hostname);
+      const timer = setTimeout(() => {
+        stalled.destroy();
+        reject(new Error("Gateway did not time out a stalled HTTP request"));
+      }, 8_000);
+      stalled.once("connect", () => stalled.write(requestText));
+      stalled.once("close", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      stalled.once("error", reject);
+    });
+  const stalledAt = performance.now();
+  await Promise.all([
+    waitForTimeout(`GET ${gatewayUrl.pathname} HTTP/1.1\r\nHost:`),
+    waitForTimeout(
+      `POST ${gatewayUrl.pathname}preferences HTTP/1.1\r\nHost: ${gatewayUrl.host}\r\nOrigin: ${origin}\r\nCookie: ${cookieHeader}\r\nContent-Length: 10\r\n\r\n{`,
+    ),
+  ]);
+  assert.ok(performance.now() - stalledAt >= 4_000);
 });

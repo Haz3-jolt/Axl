@@ -1467,12 +1467,49 @@ test("uploads image blobs in chunks without persisting bytes in JSONL", async (c
     uploadId: started.uploadId,
   })) as { sha256: string; mediaType: string; sizeBytes: number; name: string };
   assert.equal(blob.mediaType, "image/png");
+  const observer = await connectUnixClient(socketPath);
+  const observerSubscription = await subscribeSession(observer, created.sessionId);
+  context.after(async () => {
+    await observerSubscription.close().catch(() => undefined);
+    observer.close();
+  });
   await client.request("session.send", {
     sessionId: created.sessionId,
     delivery: "prompt",
     content: [{ type: "blob", blob }],
   });
-  const range = (await client.request("session.blob.read", {
+  await waitFor(
+    () => observerSubscription.projector.state.records.length === 3,
+    "attachment projection in second client",
+  );
+  assert.deepEqual(
+    observerSubscription.projector.state.records
+      .filter((record) => record.kind === "event" && record.event.type === "user.message")
+      .flatMap((record) =>
+        record.kind === "event" && record.event.type === "user.message"
+          ? record.event.payload.content
+          : [],
+      ),
+    [{ type: "blob", blob }],
+  );
+  await observerSubscription.close();
+  observer.close();
+
+  const reloaded = await connectUnixClient(socketPath);
+  context.after(() => reloaded.close());
+  const reloadedSubscription = await subscribeSession(reloaded, created.sessionId);
+  context.after(() => reloadedSubscription.close());
+  assert.deepEqual(
+    reloadedSubscription.projector.state.records
+      .filter((record) => record.kind === "event" && record.event.type === "user.message")
+      .flatMap((record) =>
+        record.kind === "event" && record.event.type === "user.message"
+          ? record.event.payload.content
+          : [],
+      ),
+    [{ type: "blob", blob }],
+  );
+  const range = (await reloaded.request("session.blob.read", {
     sessionId: created.sessionId,
     sha256: blob.sha256,
     offset: 0,

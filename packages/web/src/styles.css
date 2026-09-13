@@ -16,6 +16,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px 
 .command-backdrop { position:fixed; z-index:20; inset:0; display:grid; place-items:start center; padding:12vh 20px 20px; background:var(--scrim); }
 .command-palette { width:min(620px,100%); overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--raised); box-shadow:0 24px 70px var(--shadow); }
 .command-palette > input { width:100%; padding:15px 16px; border:0; border-bottom:1px solid var(--line); outline:0; background:transparent; color:var(--text); font-size:14px; }
+.command-error { margin:10px 16px 0; color:#cf8d93; font-size:11px; line-height:1.45; }
 .command-list { display:flex; max-height:min(440px,65vh); padding:6px; flex-direction:column; overflow:auto; }
 .command-list > p { margin:18px; color:var(--muted); text-align:center; }
 .command-list button { display:flex; padding:10px; border:0; border-radius:7px; flex-direction:column; gap:4px; background:transparent; text-align:left; cursor:pointer; }
@@ -377,6 +378,7 @@ h1 { margin:0; font-size:23px; line-height:1.25; letter-spacing:-.025em; }
 .session-lifecycle input { min-width:0; flex:1; height:36px; padding:0 10px; border:1px solid var(--line); border-radius:6px; outline:0; background:var(--input-bg); color:var(--text); font-size:13px; }
 .session-lifecycle input:focus { border-color:#777be0; box-shadow:0 0 0 2px rgba(119,123,224,.16); }
 .session-lifecycle form button,.delete-confirm button { min-height:36px; padding:0 12px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--text-soft); cursor:pointer; }
+.lifecycle-error { margin:12px 18px 0; color:#cf8d93; font-size:11px; line-height:1.45; }
 .lifecycle-actions { display:grid; padding:6px 18px 18px; }
 .lifecycle-actions > button { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:16px; padding:12px 4px; border:0; border-bottom:1px solid var(--line-soft); background:transparent; color:var(--text-soft); text-align:left; cursor:pointer; }
 .lifecycle-actions > button:hover:not(:disabled),.lifecycle-actions > button:focus-visible { color:var(--text); outline:0; }
