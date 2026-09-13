@@ -36,7 +36,12 @@ import {
   loginProviderFromTrustedHost,
   startLocalDaemon,
 } from "@axl/runtime";
-import { type AxlClient, AxlClientError, subscribeSession } from "@axl/sdk";
+import {
+  type AxlClient,
+  AxlClientError,
+  subscribeSession,
+  type TrustedProviderHost,
+} from "@axl/sdk";
 import { connectUnixClient, createUnixDaemonHost } from "@axl/sdk/unix";
 
 import { inspectLegacyDaemon, type LegacyDaemonStatus, stopLegacyDaemon } from "./legacy-daemon.ts";
@@ -1075,7 +1080,11 @@ async function main(): Promise<void> {
   const webGateways = new Set<{ readonly close: () => Promise<void> }>();
   const openWebForTarget =
     (target: LocalDaemonTarget) =>
-    async (sessionId: SessionId, cwd: string): Promise<string> => {
+    async (
+      sessionId: SessionId,
+      cwd: string,
+      providerHost: TrustedProviderHost,
+    ): Promise<string> => {
       const { startWebGateway } = await import("./web-gateway.ts");
       const gateway = await startWebGateway({
         socketPath: target.socketPath,
@@ -1083,6 +1092,7 @@ async function main(): Promise<void> {
         cwd,
         assetDirectory: resolve(dirname(fileURLToPath(import.meta.url)), WEB_ASSET_RELATIVE_PATH),
         packageVersion: AXL_VERSION,
+        providerHost,
       });
       try {
         await openBrowser(`${gateway.launchUrl}&session=${encodeURIComponent(sessionId)}`);
