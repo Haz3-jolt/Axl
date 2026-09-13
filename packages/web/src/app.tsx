@@ -14,6 +14,9 @@ import {
   type InteractionAction,
   type JsonObject,
   MAX_UPLOAD_BLOB_BYTES,
+  NewSessionController,
+  type NewSessionDraft,
+  type NewSessionDraftUpdate,
   deliverPrompt,
   parseOperationId,
   type ProjectedToolCall,
@@ -57,6 +60,7 @@ import {
 } from "./environment.ts";
 import { loadProviderDirectory, type ModelChoice } from "./model-catalog.ts";
 import { ModelPicker } from "./model-picker.tsx";
+import { NewSessionDialog } from "./new-session-dialog.tsx";
 import { presenceDescription, sessionPeers } from "./presence.ts";
 import { RequeueDialog } from "./requeue-dialog.tsx";
 import { pausedQueueItems } from "./requeue.ts";
@@ -254,6 +258,12 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const [requeueOpen, setRequeueOpen] = useState(false);
   const [requeueBusyItemId, setRequeueBusyItemId] = useState<EventId>();
   const [requeueError, setRequeueError] = useState<string>();
+  const newSessionController = useRef(new NewSessionController());
+  const [newSessionDraft, setNewSessionDraft] = useState<NewSessionDraft>(
+    newSessionController.current.draft,
+  );
+  const [newSessionOpen, setNewSessionOpen] = useState(false);
+  const [newSessionError, setNewSessionError] = useState<string>();
   const [presence, setPresence] = useState<readonly AttachmentPresence[]>([]);
   const [providerLoading, setProviderLoading] = useState(false);
   const [providerError, setProviderError] = useState<string>();
@@ -349,6 +359,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     setSessionLifecycleOpen(false);
     setRequeueOpen(false);
     setRequeueError(undefined);
+    setNewSessionOpen(false);
     setError("This session was deleted by another attached client");
   };
 
@@ -366,7 +377,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     const generation = ++selectionGeneration.current;
     workspaceRequestGeneration.current += 1;
     workspaceController.current = undefined;
-    setBusy(true); setDirectOperation(undefined); setError(undefined); setSidebarOpen(false); setChangesOpen(false); setTranscriptSearchOpen(false); setUsageOpen(false); setControlCenter(undefined); setSessionLifecycleOpen(false); setRequeueOpen(false); setRequeueBusyItemId(undefined); setRequeueError(undefined); setTranscriptQuery(""); setActivePromptId(undefined); setWorkspaceReview(undefined); setWorkspaceBrowser({ path: "", entries: [], loaded: false }); setWorkspaceScope("working"); setWorkspaceCheckpointEnabled(undefined); setWorkspaceError(undefined); setOpened(undefined); setConversation(EMPTY_STATE);
+    setBusy(true); setDirectOperation(undefined); setError(undefined); setSidebarOpen(false); setChangesOpen(false); setTranscriptSearchOpen(false); setUsageOpen(false); setControlCenter(undefined); setSessionLifecycleOpen(false); setRequeueOpen(false); setRequeueBusyItemId(undefined); setRequeueError(undefined); setNewSessionOpen(false); setTranscriptQuery(""); setActivePromptId(undefined); setWorkspaceReview(undefined); setWorkspaceBrowser({ path: "", entries: [], loaded: false }); setWorkspaceScope("working"); setWorkspaceCheckpointEnabled(undefined); setWorkspaceError(undefined); setOpened(undefined); setConversation(EMPTY_STATE);
     const previous = subscription.current;
     subscription.current = undefined;
     try {
@@ -433,6 +444,15 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         commandController.current = new CommandController(environment.client, () =>
           webPresentationCommands({
             canLogin: environment.bootstrap.hostCapabilities.includes("provider.auth.login"),
+            openNewSession: (mode) => {
+              const draft =
+                mode === undefined
+                  ? newSessionController.current.draft
+                  : newSessionController.current.update({ mode });
+              setNewSessionDraft(draft);
+              setNewSessionError(undefined);
+              setNewSessionOpen(true);
+            },
             openProviders: () => {
               setUsageOpen(false);
               setTranscriptSearchOpen(false);
@@ -485,13 +505,8 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       if (environment.selectedSessionId !== undefined) {
         await openSession(environment.client, environment.selectedSessionId);
       } else {
-        const created = await environment.client.request("session.create", {
-          cwd: environment.bootstrap.cwd,
-          profile: "standard",
-        });
-        if (disposed) return;
-        await refreshSessions(environment.client);
-        if (!disposed) await openSession(environment.client, created.sessionId);
+        setNewSessionDraft(newSessionController.current.reset("chat"));
+        setNewSessionOpen(true);
       }
     }).catch((cause: unknown) => {
       if (!disposed) {
@@ -590,12 +605,13 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         event.preventDefault();
         void restoreQueuedInputs(false);
       } else if (event.key === "Escape") {
-        if (commandPaletteOpen || transcriptSearchOpen || controlCenter !== undefined || sidebarOpen || requeueOpen) {
+        if (commandPaletteOpen || transcriptSearchOpen || controlCenter !== undefined || sidebarOpen || requeueOpen || newSessionOpen) {
           setCommandPaletteOpen(false);
           setTranscriptSearchOpen(false);
           setControlCenter(undefined);
           setSidebarOpen(false);
           setRequeueOpen(false);
+          if (!busy) setNewSessionOpen(false);
         } else if (opened !== undefined && (conversation.activeOperationId !== undefined || pendingInputs.length > 0 || conversation.queue.some((item) => item.status === "queued" || item.status === "paused"))) {
           void restoreQueuedInputs(true);
         }
@@ -607,15 +623,37 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       if (transcriptNavigationTimer.current !== undefined) clearTimeout(transcriptNavigationTimer.current);
       if (actionNoticeTimer.current !== undefined) clearTimeout(actionNoticeTimer.current);
     };
-  }, [opened, commandPaletteOpen, transcriptSearchOpen, controlCenter, sidebarOpen, requeueOpen, conversation.activeOperationId, conversation.queue, pendingInputs.length]);
+  }, [opened, commandPaletteOpen, transcriptSearchOpen, controlCenter, sidebarOpen, requeueOpen, newSessionOpen, busy, conversation.activeOperationId, conversation.queue, pendingInputs.length]);
+
+  const openNewSession = (mode?: NewSessionDraft["mode"]): void => {
+    const draft =
+      mode === undefined
+        ? newSessionController.current.draft
+        : newSessionController.current.update({ mode });
+    setNewSessionDraft(draft);
+    setNewSessionError(undefined);
+    setNewSessionOpen(true);
+  };
+
+  const updateNewSession = (update: NewSessionDraftUpdate): void => {
+    setNewSessionDraft(newSessionController.current.update(update));
+    setNewSessionError(undefined);
+  };
 
   const createSession = async (): Promise<void> => {
     if (!client || !bootstrap) return;
-    setBusy(true); setError(undefined);
+    setBusy(true);
+    setNewSessionError(undefined);
     try {
-      const created = await client.request("session.create", { cwd: bootstrap.cwd, profile: "standard" });
-      await refreshSessions(client); await openSession(client, created.sessionId);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create a session"); setBusy(false); }
+      const created = await newSessionController.current.create(client, bootstrap.cwd);
+      await refreshSessions(client);
+      await openSession(client, created.sessionId, created);
+      setNewSessionOpen(false);
+      setNewSessionDraft(newSessionController.current.reset("chat"));
+    } catch (cause) {
+      setNewSessionError(cause instanceof Error ? cause.message : "Could not create a session");
+      setBusy(false);
+    }
   };
 
   const renameSession = async (title: string): Promise<void> => {
@@ -1717,16 +1755,17 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const canConfigure = preview !== undefined || client?.connection.grantedCapabilities.includes("session.configure") === true;
   const canLoginProvider = preview?.loginProvider !== undefined ||
     bootstrap?.hostCapabilities.includes("provider.auth.login") === true;
-  const canBrowseWorkspace = preview?.workspaceClient !== undefined || (
+  const codeSession = opened?.profile !== "chat";
+  const canBrowseWorkspace = codeSession && (preview?.workspaceClient !== undefined || (
     client?.connection.grantedCapabilities.includes("session.workspace.list") === true &&
     client.connection.grantedCapabilities.includes("session.workspace.read")
-  );
-  const canReviewWorkspace = preview?.workspace !== undefined || preview?.workspaceClient !== undefined || (
+  ));
+  const canReviewWorkspace = codeSession && (preview?.workspace !== undefined || preview?.workspaceClient !== undefined || (
     client?.connection.grantedCapabilities.includes("session.workspace.status") === true &&
     client.connection.grantedCapabilities.includes("session.workspace.diff")
-  );
-  const canCheckpointWorkspace = preview?.workspaceClient !== undefined ||
-    client?.connection.grantedCapabilities.includes("session.workspace.checkpoint") === true;
+  ));
+  const canCheckpointWorkspace = codeSession && (preview?.workspaceClient !== undefined ||
+    client?.connection.grantedCapabilities.includes("session.workspace.checkpoint") === true);
   const lifecycleCapabilities = new Set<string>(preview === undefined
     ? client?.connection.grantedCapabilities ?? []
     : [
@@ -1776,19 +1815,19 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     {sidebarOpen && <button className="scrim" aria-label="Close sessions" onClick={() => setSidebarOpen(false)} />}
     <aside className={sidebarOpen ? "sidebar open" : "sidebar"} aria-label="Sessions">
       <div className="brand"><span className="brand-mark">◆</span><strong>Axl</strong><button ref={sidebarClose} className="sidebar-toggle" aria-label={sidebarOpen ? "Close sessions" : sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={toggleSidebar}><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5" /><path d="M6 2.5v11m4.5-8L8 8l2.5 2.5" /></svg></button></div>
-      <div className="workspace-actions"><span>Workspace</span><div>{canImport && <button aria-label="Import session" title="Import session" disabled={busy} onClick={() => artifactInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m-3-3 3 3 3-3M3 13h10" /></svg></button>}<button aria-label="New session" title="New session" onClick={() => void createSession()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg></button></div><input ref={artifactInput} className="attachment-input" type="file" accept="application/json,.json" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.target.files?.[0]; if (file !== undefined) void importArtifact(file); }} /></div>
+      <div className="workspace-actions"><span>Workspace</span><div>{canImport && <button aria-label="Import session" title="Import session" disabled={busy} onClick={() => artifactInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m-3-3 3 3 3-3M3 13h10" /></svg></button>}<button aria-label="New session" title="New session" disabled={busy} onClick={() => openNewSession()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg></button></div><input ref={artifactInput} className="attachment-input" type="file" accept="application/json,.json" tabIndex={-1} aria-hidden="true" onChange={(event) => { const file = event.target.files?.[0]; if (file !== undefined) void importArtifact(file); }} /></div>
       <label className="search"><span aria-hidden="true">⌕</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search sessions" placeholder="Search sessions" /></label>
       <nav>{visibleSessions.map((session) => <button key={session.sessionId} aria-label={`${sessionTitle(session)}, ${session.runtime.state}`} className={session.sessionId === opened?.sessionId ? "session active" : "session"} onClick={() => client && void openSession(client, session.sessionId)}><span className={`session-icon ${session.runtime.state}`} aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 3.5h10v7H7l-3 2v-2H3z" /></svg></span><span><strong>{sessionTitle(session)}</strong><small>{session.cwd}</small></span></button>)}{visibleSessions.length === 0 && <p className="no-sessions">No matching sessions</p>}</nav>
       <button className="daemon" onClick={() => { setUsageOpen(false); setTranscriptSearchOpen(false); setControlCenter("providers"); }}><span className="daemon-status" aria-hidden="true"></span><span><strong>Local daemon</strong><small>{opened?.runtime.state ?? "Ready"} · {connection}</small></span></button>
       {!sidebarCollapsed && <div className="panel-resizer left" role="separator" aria-orientation="vertical" aria-label="Resize session sidebar" aria-valuemin={200} aria-valuemax={420} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={(event) => resizePanel("left", event)} onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); resizePanelBy("left", event.key === "ArrowLeft" ? -16 : 16); } }} />}
     </aside>
     <section className="workspace">
-      <header className="topbar"><div><span className="crumb">Sessions</span><span className="separator">›</span><strong>{opened ? currentTitle : "Select a session"}</strong>{peers.length > 0 && <span className="session-presence" role="status" aria-label={peerDescription} title={peerDescription}><i aria-hidden="true"></i>{peers.length} other</span>}</div><div className="top-actions"><button className="command-toggle" aria-label="Open command palette" title="Commands (Ctrl+K)" onClick={() => { setCommandPaletteOpen(true); void refreshCommandDirectory(opened?.sessionId).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not refresh commands")); }}>/</button><button className={controlCenter === "settings" ? "settings-toggle active" : "settings-toggle"} aria-label="Web settings" aria-expanded={controlCenter !== undefined} onClick={() => { setUsageOpen(false); setTranscriptSearchOpen(false); setControlCenter("settings"); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.25" /><path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.6 3.6l1.05 1.05M11.35 11.35l1.05 1.05M12.4 3.6l-1.05 1.05M4.65 11.35 3.6 12.4" /></svg></button>{opened && canManageSession && <button className={sessionLifecycleOpen ? "session-manage active" : "session-manage"} aria-label="Manage session" aria-expanded={sessionLifecycleOpen} onClick={() => { setControlCenter(undefined); setSessionLifecycleOpen(true); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg></button>}{opened && <button className={usageOpen ? "usage-toggle active" : "usage-toggle"} aria-label="Show session usage" aria-expanded={usageOpen} onClick={() => { setControlCenter(undefined); setTranscriptSearchOpen(false); setUsageOpen((open) => !open); }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 12V8M8 12V4M13 12V6" /></svg><span>Usage</span></button>}{opened && <button className={transcriptSearchOpen ? "transcript-search-toggle active" : "transcript-search-toggle"} aria-label="Search transcript" aria-expanded={transcriptSearchOpen} onClick={() => { setControlCenter(undefined); setUsageOpen(false); setTranscriptSearchOpen((open) => !open); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" /></svg></button>}{canBrowseWorkspace && opened && <button className={changesOpen && workspaceTab === "files" ? "changes-toggle active" : "changes-toggle"} onClick={() => toggleWorkspace("files")} aria-label="Browse workspace files" aria-expanded={changesOpen && workspaceTab === "files"}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h4l1.2 1.5h5.8v7h-11z" /></svg><span>Files</span></button>}{canReviewWorkspace && opened && <button className={changesOpen && workspaceTab === "changes" ? "changes-toggle active" : "changes-toggle"} onClick={() => toggleWorkspace("changes")} aria-expanded={changesOpen && workspaceTab === "changes"}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10M3 8h10M3 12.5h10M5 2v3M11 6.5v3M7 11v3" /></svg><span>Changes</span>{workspaceReview && <b>{workspaceReview.status.entries.length}</b>}</button>}</div></header>
+      <header className="topbar"><div><span className="crumb">Sessions</span><span className="separator">›</span><strong>{opened ? currentTitle : "Select a session"}</strong>{opened && <span className={`session-profile ${opened.profile}`}>{opened.profile === "chat" ? "Chat" : opened.profile === "standard" ? "Code" : opened.profile}</span>}{peers.length > 0 && <span className="session-presence" role="status" aria-label={peerDescription} title={peerDescription}><i aria-hidden="true"></i>{peers.length} other</span>}</div><div className="top-actions"><button className="command-toggle" aria-label="Open command palette" title="Commands (Ctrl+K)" onClick={() => { setCommandPaletteOpen(true); void refreshCommandDirectory(opened?.sessionId).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not refresh commands")); }}>/</button><button className={controlCenter === "settings" ? "settings-toggle active" : "settings-toggle"} aria-label="Web settings" aria-expanded={controlCenter !== undefined} onClick={() => { setUsageOpen(false); setTranscriptSearchOpen(false); setControlCenter("settings"); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.25" /><path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.6 3.6l1.05 1.05M11.35 11.35l1.05 1.05M12.4 3.6l-1.05 1.05M4.65 11.35 3.6 12.4" /></svg></button>{opened && canManageSession && <button className={sessionLifecycleOpen ? "session-manage active" : "session-manage"} aria-label="Manage session" aria-expanded={sessionLifecycleOpen} onClick={() => { setControlCenter(undefined); setSessionLifecycleOpen(true); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg></button>}{opened && <button className={usageOpen ? "usage-toggle active" : "usage-toggle"} aria-label="Show session usage" aria-expanded={usageOpen} onClick={() => { setControlCenter(undefined); setTranscriptSearchOpen(false); setUsageOpen((open) => !open); }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 12V8M8 12V4M13 12V6" /></svg><span>Usage</span></button>}{opened && <button className={transcriptSearchOpen ? "transcript-search-toggle active" : "transcript-search-toggle"} aria-label="Search transcript" aria-expanded={transcriptSearchOpen} onClick={() => { setControlCenter(undefined); setUsageOpen(false); setTranscriptSearchOpen((open) => !open); }}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" /></svg></button>}{canBrowseWorkspace && opened && <button className={changesOpen && workspaceTab === "files" ? "changes-toggle active" : "changes-toggle"} onClick={() => toggleWorkspace("files")} aria-label="Browse workspace files" aria-expanded={changesOpen && workspaceTab === "files"}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h4l1.2 1.5h5.8v7h-11z" /></svg><span>Files</span></button>}{canReviewWorkspace && opened && <button className={changesOpen && workspaceTab === "changes" ? "changes-toggle active" : "changes-toggle"} onClick={() => toggleWorkspace("changes")} aria-expanded={changesOpen && workspaceTab === "changes"}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10M3 8h10M3 12.5h10M5 2v3M11 6.5v3M7 11v3" /></svg><span>Changes</span>{workspaceReview && <b>{workspaceReview.status.entries.length}</b>}</button>}</div></header>
       {opened && conversation.sandbox?.enforced === false && <div className="unsafe-banner" role="alert"><strong>Unsafe session</strong><span>Sandbox enforcement is disabled. Tools run with your host permissions.</span></div>}
       {usageOpen && <section className="session-usage" aria-label="Session usage"><header><strong>Session usage</strong><button type="button" aria-label="Close session usage" onClick={() => setUsageOpen(false)}>×</button></header><p>{conversation.provider && conversation.model ? `${conversation.provider} / ${conversation.model}` : conversation.model ?? "No model selected"}{conversation.thinking ? ` · ${conversation.thinking}` : ""}</p><dl><div><dt>Input</dt><dd>{compactNumber(conversation.usage.inputTokens)}</dd></div><div><dt>Output</dt><dd>{compactNumber(conversation.usage.outputTokens)}</dd></div><div><dt>Cache read</dt><dd>{compactNumber(conversation.usage.cacheReadTokens)}</dd></div><div><dt>Cache hit</dt><dd>{usageStats.cacheHitPercent.toFixed(1)}%</dd></div><div><dt>Reasoning</dt><dd>{compactNumber(conversation.usage.reasoningTokens)}</dd></div><div><dt>Throughput</dt><dd>{usageStats.tokensPerSecond === undefined ? "Unknown" : `${usageStats.tokensPerSecond.toFixed(1)} tok/s`}</dd></div><div><dt>Recorded cost</dt><dd>${conversation.usage.costUsd.toFixed(4)}</dd></div></dl>{usageStats.unknownCostResponses > 0 && <small>{usageStats.unknownCostResponses} response{usageStats.unknownCostResponses === 1 ? " has" : "s have"} no cost data.</small>}{stateHistory.length > 0 && <details className="state-history"><summary>Configuration history</summary><ol>{stateHistory.map((entry) => <li key={entry.id}><span><strong>{entry.label}</strong><small>{entry.detail}</small></span><time>{new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></li>)}</ol></details>}</section>}
       {transcriptSearchOpen && <div className="transcript-search" role="search"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" /><path d="m10.25 10.25 3 3" /></svg><input autoFocus type="search" aria-label="Search transcript" placeholder="Search transcript" value={transcriptQuery} onChange={(event) => setTranscriptQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); moveTranscriptMatch(event.shiftKey ? -1 : 1); } }} /><span>{transcriptQuery.trim() ? `${transcriptMatches.length === 0 ? 0 : Math.max(0, transcriptMatch + 1)} / ${transcriptMatches.length}` : ""}</span><button type="button" aria-label="Previous result" disabled={transcriptMatches.length === 0} onClick={() => moveTranscriptMatch(-1)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4" /></svg></button><button type="button" aria-label="Next result" disabled={transcriptMatches.length === 0} onClick={() => moveTranscriptMatch(1)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></button><button type="button" aria-label="Close transcript search" onClick={() => { setTranscriptSearchOpen(false); setTranscriptQuery(""); }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg></button></div>}
       <div className="thread" ref={transcript} onScroll={trackTranscriptScroll}>
-        {opened ? <div className="thread-inner"><div className="thread-title"><h1>{currentTitle}</h1><p>{opened.cwd}</p></div><Suspense fallback={null}><Conversation conversation={conversation} searchQuery={transcriptQuery} resolveBlobUrl={(blob) => preview?.resolveBlobUrl?.(blob.sha256) ?? blobUrls.get(blob.sha256)} loadFullToolOutput={preview?.readBlob !== undefined || client?.connection.grantedCapabilities.includes("session.blob.read") === true ? loadFullToolOutput : undefined} onRespondInteraction={preview !== undefined || client?.connection.grantedCapabilities.includes("session.interaction.respond") === true ? respondInteraction : undefined} onCopyMessage={(text) => void copyMessage(text)} onForkMessage={preview !== undefined || client?.connection.grantedCapabilities.includes("session.fork") === true ? (eventId) => void forkMessage(eventId) : undefined} /></Suspense>{conversation.activity && <article className="message assistant live"><span className="avatar axl">◆</span><div><header><strong>Axl</strong><time>working</time></header>{conversation.activity.thinking && <details><summary>Thinking</summary><p>{conversation.activity.thinking}</p></details>}<p className="waiting-response">{conversation.activity.text || "Waiting for response"}<span className="waiting-dots" aria-hidden="true"><i></i><i></i><i></i></span></p></div></article>}</div> : <div className="empty"><span className="brand-mark large">◆</span><h1>No session selected</h1><p>Resume a durable session or start one in this workspace.</p><button onClick={() => void createSession()}>New session</button></div>}
+        {opened ? <div className="thread-inner"><div className="thread-title"><h1>{currentTitle}</h1>{opened.profile !== "chat" && <p>{opened.cwd}</p>}</div><Suspense fallback={null}><Conversation conversation={conversation} searchQuery={transcriptQuery} resolveBlobUrl={(blob) => preview?.resolveBlobUrl?.(blob.sha256) ?? blobUrls.get(blob.sha256)} loadFullToolOutput={preview?.readBlob !== undefined || client?.connection.grantedCapabilities.includes("session.blob.read") === true ? loadFullToolOutput : undefined} onRespondInteraction={preview !== undefined || client?.connection.grantedCapabilities.includes("session.interaction.respond") === true ? respondInteraction : undefined} onCopyMessage={(text) => void copyMessage(text)} onForkMessage={preview !== undefined || client?.connection.grantedCapabilities.includes("session.fork") === true ? (eventId) => void forkMessage(eventId) : undefined} /></Suspense>{conversation.activity && <article className="message assistant live"><span className="avatar axl">◆</span><div><header><strong>Axl</strong><time>working</time></header>{conversation.activity.thinking && <details><summary>Thinking</summary><p>{conversation.activity.thinking}</p></details>}<p className="waiting-response">{conversation.activity.text || "Waiting for response"}<span className="waiting-dots" aria-hidden="true"><i></i><i></i><i></i></span></p></div></article>}</div> : <div className="empty"><span className="brand-mark large">◆</span><h1>No session selected</h1><p>Resume a durable session or start one in this workspace.</p><button onClick={() => openNewSession()}>New session</button></div>}
       </div>
       {promptBreakpoints.length > 1 && <nav className={`prompt-breakpoints${transcriptNavigationVisible || transcriptSearchOpen ? " visible" : ""}`} aria-label="Conversation prompts" onMouseEnter={() => { if (transcriptNavigationTimer.current !== undefined) clearTimeout(transcriptNavigationTimer.current); setTranscriptNavigationVisible(true); }} onMouseLeave={() => setTranscriptNavigationVisible(false)}>{promptBreakpoints.map((point) => <button type="button" key={point.id} className={point.id === activePromptId ? "active" : ""} title={point.text} onClick={() => jumpToMessage(point.id)}><span>{point.text}</span></button>)}</nav>}
       {!connected && <div className="connection-banner" role="status" aria-live="polite"><span>{connection === "disconnected" ? "Connection to the daemon was lost." : connection === "incompatible" ? "The browser and daemon versions are incompatible." : "Connecting to the daemon…"}</span>{connection === "disconnected" && client !== undefined && <button onClick={() => void reconnect()}>Reconnect</button>}</div>}
@@ -1801,5 +1840,6 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     {controlCenter && <Suspense fallback={null}><ControlCenter tab={controlCenter} preferences={{ sidebarWidth, changesWidth, sidebarCollapsed, changesView }} theme={theme} providers={providerInventory} providerLoading={providerLoading} providerError={providerError} providerLogin={providerLogin} canRefresh={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.catalog.refresh") === true} canLogin={canLoginProvider} canLogout={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.auth.logout") === true} onTab={setControlCenter} onPreferences={applyWebPreferences} onTheme={setTheme} onRefresh={(providerId) => void refreshProviders(providerId)} onLogin={(providerId, method) => void startProviderLogin(providerId, method)} onCancelLogin={cancelProviderLogin} onLogout={(providerId) => void logoutProvider(providerId)} onCopyLogin={(providerId, method) => void copyProviderLogin(providerId, method)} onClose={() => setControlCenter(undefined)} /></Suspense>}
     {sessionLifecycleOpen && selectedSummary && <SessionLifecycle session={selectedSummary} busy={busy} capabilities={lifecycleCapabilities} onRename={(title) => void renameSession(title)} onClone={() => void cloneSession()} onExport={() => void exportArtifact()} onDispose={() => void disposeSession()} onDelete={() => void deleteSession()} onClose={() => setSessionLifecycleOpen(false)} />}
     {requeueOpen && <RequeueDialog items={pausedQueue} busyItemId={requeueBusyItemId} error={requeueError} onRequeue={(queueItemId) => void requeueItem(queueItemId)} onClose={() => { setRequeueOpen(false); setRequeueError(undefined); }} />}
+    {newSessionOpen && <NewSessionDialog draft={newSessionDraft} models={modelCatalog} busy={busy} {...(newSessionError === undefined ? {} : { error: newSessionError })} onChange={updateNewSession} onSubmit={() => void createSession()} onClose={() => { setNewSessionOpen(false); setNewSessionError(undefined); }} />}
   </main>;
 }

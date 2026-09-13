@@ -5,7 +5,7 @@
 
 Status: implementation in progress for [issue #389](https://github.com/Observal/Axl/issues/389)
 
-The wire-version 15 baseline implements a capability-filtered daemon catalog, strict protocol validation, an SDK command controller, daemon-backed TUI and web discovery, TUI shared-command dispatch, and dynamic client presentation-command merging. Dynamic daemon catalog invalidation, staged new-session commands, and daemon extension registration remain pending.
+The wire-version 16 baseline implements a capability-filtered daemon catalog, strict protocol validation, an SDK command controller, daemon-backed TUI and web discovery, TUI shared-command dispatch, dynamic client presentation-command merging, and staged browser session creation. Dynamic daemon catalog invalidation and daemon extension registration remain pending.
 
 ## Purpose
 
