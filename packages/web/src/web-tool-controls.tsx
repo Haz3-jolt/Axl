@@ -18,6 +18,7 @@ function ToolRow({
   pending,
   error,
   disabled,
+  unavailableReason,
   onChange,
 }: {
   readonly field: WebToolField;
@@ -28,6 +29,7 @@ function ToolRow({
   readonly pending: boolean;
   readonly error: string | undefined;
   readonly disabled: boolean;
+  readonly unavailableReason: string | undefined;
   readonly onChange: (field: WebToolField, value: boolean | undefined) => void;
 }): JSX.Element {
   return (
@@ -42,6 +44,7 @@ function ToolRow({
           aria-label={`${label} configuration`}
           value={stagedWebToolValue(value)}
           disabled={disabled}
+          title={unavailableReason}
           onChange={(event) =>
             onChange(field, parseStagedWebToolValue(event.target.value as StagedWebToolValue))
           }
@@ -57,6 +60,7 @@ function ToolRow({
           aria-checked={value ?? false}
           aria-label={`${label} ${value === undefined ? "loading" : value ? "enabled" : "disabled"}`}
           disabled={disabled || value === undefined}
+          title={unavailableReason}
           onClick={() => onChange(field, !value)}
         >
           <i aria-hidden="true" />
@@ -74,6 +78,7 @@ export function WebToolControls({
   pending = [],
   errors = {},
   disabled,
+  unavailableReason,
   compact = false,
   onChange,
 }: {
@@ -83,6 +88,7 @@ export function WebToolControls({
   readonly pending?: readonly WebToolField[];
   readonly errors?: Readonly<Partial<Record<WebToolField, string>>>;
   readonly disabled: boolean;
+  readonly unavailableReason?: string;
   readonly compact?: boolean;
   readonly onChange: (field: WebToolField, value: boolean | undefined) => void;
 }): JSX.Element {
@@ -99,6 +105,7 @@ export function WebToolControls({
         pending={pending.includes("webSearch")}
         error={errors.webSearch}
         disabled={disabled || pending.length > 0}
+        unavailableReason={unavailableReason}
         onChange={onChange}
       />
       <ToolRow
@@ -110,6 +117,7 @@ export function WebToolControls({
         pending={pending.includes("webFetch")}
         error={errors.webFetch}
         disabled={disabled || pending.length > 0}
+        unavailableReason={unavailableReason}
         onChange={onChange}
       />
     </div>
@@ -131,7 +139,7 @@ export function WebToolControls({
         summary.current?.focus();
       }}
     >
-      <summary ref={summary}>
+      <summary ref={summary} title={unavailableReason}>
         <span>Web tools</span>
         <small>{state}</small>
       </summary>

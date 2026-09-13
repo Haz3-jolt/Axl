@@ -12,6 +12,7 @@ export function ModelPicker({
   thinking,
   disabled,
   error,
+  unavailableReason,
   openRequest,
   initialFocus = "model",
   onModel,
@@ -23,6 +24,7 @@ export function ModelPicker({
   readonly thinking: ThinkingLevel | undefined;
   readonly disabled: boolean;
   readonly error?: string;
+  readonly unavailableReason?: string;
   readonly openRequest?: number;
   readonly initialFocus?: "model" | "thinking";
   readonly onModel: (choice: ModelChoice) => void;
@@ -63,6 +65,10 @@ export function ModelPicker({
       className="model-picker"
       ref={details}
       onToggle={(event) => {
+        if (disabled && event.currentTarget.open) {
+          close();
+          return;
+        }
         if (event.currentTarget.open) focusPicker();
         else setQuery("");
       }}
@@ -77,8 +83,13 @@ export function ModelPicker({
       <summary
         ref={summary}
         aria-label="Choose model and effort"
+        aria-disabled={disabled}
         aria-keyshortcuts="Control+L Meta+L"
-        title="Choose model (Ctrl/⌘+L)"
+        title={unavailableReason ?? "Choose model (Ctrl/⌘+L)"}
+        onClick={(event) => {
+          if (!disabled) return;
+          event.preventDefault();
+        }}
       >
         <span>{model ?? "Daemon default"}</span>
         {thinking && (

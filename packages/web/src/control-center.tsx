@@ -4,6 +4,7 @@
 import { useEffect, useRef, type JSX } from "react";
 import type { ProviderInventoryGroup, ProviderLoginMethod } from "@axl/sdk";
 import type { WebTheme } from "./commands.ts";
+import { trapDialogFocus } from "./dialog-focus.ts";
 import type { WebPreferences } from "./environment.ts";
 
 export type ControlCenterTab = "settings" | "providers";
@@ -85,23 +86,12 @@ export function ControlCenter({
       onClose();
       return;
     }
-    if (event.key !== "Tab" || dialog.current === null) return;
-    const controls = [...dialog.current.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)")];
-    const first = controls[0];
-    const last = controls.at(-1);
-    if (first === undefined || last === undefined) return;
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    trapDialogFocus(event, dialog.current);
   };
 
   return <div className="control-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="control-center" ref={dialog} role="dialog" aria-modal="true" aria-label="Web controls" onKeyDown={trapFocus}>
-      <header><nav aria-label="Web controls"><button className={tab === "settings" ? "active" : ""} onClick={() => onTab("settings")}>Settings</button><button className={tab === "providers" ? "active" : ""} onClick={() => onTab("providers")}>Providers</button></nav><button className="control-close" aria-label="Close" onClick={onClose}>×</button></header>
+      <header><nav aria-label="Web controls"><button className={tab === "settings" ? "active" : ""} onClick={() => onTab("settings")}>Settings</button><button className={tab === "providers" ? "active" : ""} onClick={() => onTab("providers")}>Providers</button></nav><button className="control-close" aria-label="Close" onClick={onClose}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8" /></svg></button></header>
       {tab === "settings" ? <div className="settings-pane">
         <div className="setting-row"><span><strong>Session rail</strong><small>Keep the session list visible on desktop</small></span><button className={preferences.sidebarCollapsed ? "setting-switch" : "setting-switch active"} role="switch" aria-checked={!preferences.sidebarCollapsed} onClick={() => onPreferences({ ...preferences, sidebarCollapsed: !preferences.sidebarCollapsed })}><i /></button></div>
         <div className="setting-row"><span><strong>Default changes view</strong><small>Choose how workspace changes open</small></span><div className="setting-segments"><button className={preferences.changesView === "files" ? "active" : ""} onClick={() => onPreferences({ ...preferences, changesView: "files" })}>Files</button><button className={preferences.changesView === "all" ? "active" : ""} onClick={() => onPreferences({ ...preferences, changesView: "all" })}>All</button></div></div>

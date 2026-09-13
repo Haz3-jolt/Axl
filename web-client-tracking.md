@@ -120,7 +120,7 @@ The normal local chat path is available. These items close the remaining gap bet
 - [x] `axl web <session-id>` opens that session in the browser without launching the TUI.
 - [x] `axl web --no-open` starts the gateway and prints the safe token-free origin.
 - [ ] **Deferred:** `axl web --dev` uses the explicit same-origin development proxy.
-- [ ] **Before stable release:** rename the ambiguous model-tool flags `--web` and `--no-web` to `--web-tools` and `--no-web-tools`. Keep `--web-search` and `--web-fetch` explicit.
+- [x] Rename the ambiguous model-tool flags `--web` and `--no-web` to `--web-tools` and `--no-web-tools`. Keep `--web-search` and `--web-fetch` explicit.
 - [x] Make command parsing distinguish the `web` subcommand from session IDs before any daemon or TUI startup work.
 - [x] Keep gateway shutdown distinct from browser detach, operation interrupt, session disposal, and daemon shutdown.
 
@@ -162,7 +162,7 @@ The web client is a static single-page application. It has no server-side render
 - [x] Keep browser preferences independent of the gateway's random origin where persistence across launches is required.
 - [ ] **Deferred:** add an IndexedDB cursor-store adapter. Cursor-store failure must remain visible and fall back to a fresh snapshot.
 - [x] Avoid a service worker initially. Entry documents use `no-store`; hashed assets may be immutable.
-- [ ] Add tracked tests for the fake environment adapter so presentation behavior is not verified only by ignored local preview fixtures.
+- [x] Add a tracked fake environment fixture and run the browser behavior smoke suite against it.
 
 ## Trusted local gateway
 
@@ -241,7 +241,7 @@ web tool configuration
 - [x] Render a running session's exact profile as identity rather than a lossy Chat/Code toggle.
 - [x] Never display `minimal` or `exec` as mutable `standard` Code.
 - [x] Keep workspace navigation absent from Chat.
-- [ ] Refine the staged-session entry UI from visual review: make the initial Chat/Code toggle substantially larger and more prominent, simplify the form into a clearer linear sequence, and use a restrained layered/translucent surface treatment consistent with the existing Linear-inspired shell. Preserve keyboard access, profile honesty, and the single atomic create action.
+- [x] Refine the staged-session entry UI with a prominent compact Chat/Code choice, a clear linear setup sequence, restrained translucent layering, keyboard access, profile honesty, and one atomic create action.
 
 ## Model and thinking selection
 
@@ -432,7 +432,7 @@ Do not request a capability before its interaction, error behavior, and security
 - [x] Refresh session catalog metadata after another client changes it.
 - [ ] **Deferred until a second locale:** replace hardcoded English copy with a typed localization owner.
 - [x] Show errors inside the dialog or picker that initiated the action.
-- [ ] Keep disabled features absent from menus, empty states, prompts, and background work.
+- [x] Keep disabled features absent from menus, empty states, prompts, and background work.
 - [ ] **Blocked on an approved source and license:** replace visual components with Linear UI Kit only if that migration is still desired.
 
 ## Original implementation order
@@ -460,8 +460,8 @@ This sequence is historical planning context, not a completion checklist. Curren
 
 - [x] `packages/web` has no runtime dependency on kernel, daemon, runtime, AI, sandbox, or TUI packages.
 - [x] React consumes the public SDK projector instead of reducing canonical events.
-- [ ] The same browser behavior suite passes through fake and loopback gateway environments.
-- [ ] Missing capabilities remove or disable controls with an explicit reason.
+- [x] The same browser behavior suite passes through fake and loopback gateway environments.
+- [x] Missing capabilities remove or disable controls with an explicit reason.
 - [x] Detaching the browser never interrupts daemon-owned work.
 
 ### Behavior
@@ -479,7 +479,7 @@ This sequence is historical planning context, not a completion checklist. Curren
 
 ### Security and packaging
 
-- [ ] Gateway security acceptance tests in `docs/architecture/web-gateway-security.md` pass.
+- [ ] Gateway security acceptance tests in `docs/architecture/web-gateway-security.md` pass. Production gateway cases pass; the development-origin case remains deferred with `axl web --dev`.
 - [x] Production assets fail closed when missing, altered, or incompatible.
 - [ ] Development mode keeps one authenticated browser origin.
 - [x] The installed package works without the repository, Vite, or pnpm.
@@ -488,7 +488,7 @@ This sequence is historical planning context, not a completion checklist. Curren
 
 ### Accessibility and presentation
 
-- [ ] Session navigation, tabs, dialogs, menus, composer, interrupt, and reconnect are keyboard-operable.
+- [x] Session navigation, tabs, dialogs, menus, composer, interrupt, and reconnect are keyboard-operable.
 - [x] Focus restoration and Escape behavior are deterministic for Web settings, provider status, transcript search, and the mobile session drawer.
 - [x] Connection and action outcomes use accessible status regions.
 - [x] Reduced motion and no-color-only meaning are supported.
