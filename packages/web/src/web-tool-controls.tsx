@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { JSX } from "react";
+import { useRef, type JSX } from "react";
 import {
   parseStagedWebToolValue,
   stagedWebToolValue,
@@ -86,6 +86,8 @@ export function WebToolControls({
   readonly compact?: boolean;
   readonly onChange: (field: WebToolField, value: boolean | undefined) => void;
 }): JSX.Element {
+  const details = useRef<HTMLDetailsElement>(null);
+  const summary = useRef<HTMLElement>(null);
   const rows = (
     <div className="web-tool-rows">
       <ToolRow
@@ -118,8 +120,18 @@ export function WebToolControls({
       : `Search ${webSearch ? "on" : "off"} · Fetch ${webFetch ? "on" : "off"}`;
 
   return compact ? (
-    <details className="web-tool-config compact">
-      <summary>
+    <details
+      className="web-tool-config compact"
+      ref={details}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !event.currentTarget.open) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.removeAttribute("open");
+        summary.current?.focus();
+      }}
+    >
+      <summary ref={summary}>
         <span>Web tools</span>
         <small>{state}</small>
       </summary>

@@ -17,6 +17,7 @@ export function NewSessionDialog({
   modelPickerOpenRequest,
   busy,
   error,
+  unavailableReason,
   onChange,
   onSubmit,
   onClose,
@@ -26,6 +27,7 @@ export function NewSessionDialog({
   readonly modelPickerOpenRequest: number;
   readonly busy: boolean;
   readonly error?: string;
+  readonly unavailableReason?: string;
   readonly onChange: (update: NewSessionDraftUpdate) => void;
   readonly onSubmit: () => void;
   readonly onClose: () => void;
@@ -45,7 +47,9 @@ export function NewSessionDialog({
     }
     if (event.key !== "Tab" || dialog.current === null) return;
     const controls = [
-      ...dialog.current.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)"),
+      ...dialog.current.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), input:not(:disabled), select:not(:disabled), summary",
+      ),
     ];
     const first = controls[0];
     const last = controls.at(-1);
@@ -86,8 +90,9 @@ export function NewSessionDialog({
         {selected === undefined && <small className="new-session-default">The daemon will choose its configured model and effort.</small>}
         {draft.mode === "code" && <WebToolControls webSearch={draft.webSearch} webFetch={draft.webFetch} staged disabled={busy} onChange={(field, value) => onChange(field === "webSearch" ? { webSearch: value } : { webFetch: value })} />}
         {error && <p className="new-session-error" role="alert">{error}</p>}
+        {unavailableReason && <p className="new-session-error" role="status">{unavailableReason}</p>}
       </div>
-      <footer><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={busy || (draft.mode === "code" && !draft.workspace?.trim())} onClick={onSubmit}>{busy ? "Creating…" : `Create ${draft.mode === "chat" ? "Chat" : "Code"}`}</button></footer>
+      <footer><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary" title={unavailableReason} disabled={busy || unavailableReason !== undefined || (draft.mode === "code" && !draft.workspace?.trim())} onClick={onSubmit}>{busy ? "Creating…" : `Create ${draft.mode === "chat" ? "Chat" : "Code"}`}</button></footer>
     </section>
   </div>;
 }

@@ -177,7 +177,7 @@ The web client is a static single-page application. It has no server-side render
 - [x] Require cookie, exact origin, exact host, and random process path for each WebSocket upgrade.
 - [x] Keep browser credentials out of JavaScript, URLs, persistent storage, and logs.
 - [x] Apply CSP, frame denial, nosniff, no-referrer, no-store, and cross-origin isolation headers.
-- [ ] Finish gateway bounds. Request bodies, WebSocket frames, assembled daemon messages, message rate, buffered output, artifact size, and attachment count are bounded; HTTP handshake/request timeouts and remaining queue bounds still need explicit coverage.
+- [x] Finish gateway bounds. Request bodies, HTTP handshake and request timeouts, WebSocket frames, assembled daemon messages, rolling rate and burst, buffered bytes and message counts, artifact size, and attachment count are bounded.
 - [x] Reject binary frames and disable compression.
 - [x] Evict a slow browser attachment without blocking another attachment.
 - [x] Open one independent daemon connection per browser attachment.
@@ -431,7 +431,7 @@ Do not request a capability before its interaction, error behavior, and security
 - [x] Expose browser-owned layout and change-review preferences through a focused Web settings surface.
 - [x] Refresh session catalog metadata after another client changes it.
 - [ ] **Deferred until a second locale:** replace hardcoded English copy with a typed localization owner.
-- [ ] Show errors inside the dialog or picker that initiated the action.
+- [x] Show errors inside the dialog or picker that initiated the action.
 - [ ] Keep disabled features absent from menus, empty states, prompts, and background work.
 - [ ] **Blocked on an approved source and license:** replace visual components with Linear UI Kit only if that migration is still desired.
 
@@ -475,7 +475,7 @@ This sequence is historical planning context, not a completion checklist. Curren
 - [x] Thinking choices match model support.
 - [x] Active-turn delivery modes remain distinct.
 - [x] Ordinary failed prompt sends preserve drafts and show visible errors. Other delivery modes remain.
-- [ ] Attachments survive upload, reload, retrieval, and second-client projection.
+- [x] Attachments survive upload, reload, retrieval, and second-client projection.
 
 ### Security and packaging
 
