@@ -219,6 +219,25 @@ The daemon publishes capability-filtered session-catalog invalidations after lis
 
 Switching sessions replaces the conversation snapshot and clears all prior Explorer, Changes, branch, file, diff, queue, interaction, cursor, and status state before loading the selected session's recorded `cwd`.
 
+## Browser keyboard controls
+
+The browser preserves Pi's model and reasoning shortcuts where browser semantics permit them. It also documents the complete active keymap in **Settings → Keyboard shortcuts**.
+
+| Shortcut | Browser action |
+| --- | --- |
+| `Ctrl+K` or `⌘K` | Open the command palette. |
+| `Ctrl+L` or `⌘L` | Open the searchable, provider-grouped model picker for the active session. |
+| `Shift+Tab` | Cycle the selected model's supported reasoning levels while the composer is focused. Normal reverse tab navigation remains available outside the composer. |
+| `Ctrl+F` or `⌘F` | Search the active transcript. |
+| `Alt+Up` | Restore all pending prompts to the initiating editor. |
+| `Escape` | Close the top browser overlay first. With no overlay, restore pending prompts and interrupt active work. |
+| `Enter` | Send while idle or steer during active work. |
+| `Alt+Enter` | Queue a follow-up. |
+| `Ctrl+Enter` or `⌘Enter` | Interrupt active work and atomically deliver the replacement prompt. |
+| `Shift+Enter` | Insert a newline. |
+
+`/model` opens the same picker as `Ctrl+L`. `/thinking` opens its reasoning section. New Chat and Code sessions use the same picker before their single atomic `session.create` request.
+
 ## Web assets
 
 The detailed build and release contract is specified in [web-packaging.md](web-packaging.md).

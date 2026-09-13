@@ -14,6 +14,7 @@ export interface ClientModelCost {
 /** Provider-neutral model metadata used by presentation clients. */
 export interface ModelChoice {
   readonly providerId: string;
+  readonly providerDisplayName: string;
   readonly modelId: string;
   readonly displayName: string;
   readonly thinkingLevels: readonly ThinkingLevel[];
@@ -27,6 +28,7 @@ export interface ProviderDirectoryState {
   readonly status: "idle" | "loading" | "ready" | "error";
   readonly providers: readonly ProviderInventoryGroup[];
   readonly models: readonly ModelChoice[];
+  readonly refresh?: { readonly providerId?: string };
   readonly error?: string;
 }
 
@@ -59,7 +61,8 @@ export class ProviderDirectoryController {
     this.cancellation?.abort();
     const cancellation = new AbortController();
     this.cancellation = cancellation;
-    this.setState({ ...this.stateValue, status: "loading" });
+    const { refresh: _, ...current } = this.stateValue;
+    this.setState({ ...current, status: "loading" });
     const loading = this.read(cancellation.signal)
       .then((state) => {
         if (!cancellation.signal.aborted) this.setState(state);
@@ -89,24 +92,39 @@ export class ProviderDirectoryController {
     this.cancellation?.abort();
     const cancellation = new AbortController();
     this.cancellation = cancellation;
-    this.setState({ ...this.stateValue, status: "loading" });
+    const { error: _, ...current } = this.stateValue;
+    this.setState({
+      ...current,
+      refresh: providerId === undefined ? {} : { providerId },
+    });
     try {
       await this.client.refreshProviderCatalogs(providerId === undefined ? {} : { providerId }, {
         signal: cancellation.signal,
       });
+      const state = await this.read(cancellation.signal);
+      if (!cancellation.signal.aborted) this.setState(state);
+      return state;
     } catch (error) {
-      if (!cancellation.signal.aborted) {
-        this.setState({
-          ...this.stateValue,
-          status: "error",
-          error: error instanceof Error ? error.message : "Could not refresh providers",
-        });
+      if (this.cancellation === cancellation) {
+        const { refresh: _, ...current } = this.stateValue;
+        this.setState(
+          cancellation.signal.aborted
+            ? current
+            : {
+                ...current,
+                status: "error",
+                error: error instanceof Error ? error.message : "Could not refresh providers",
+              },
+        );
       }
       throw error;
     } finally {
       if (this.cancellation === cancellation) this.cancellation = undefined;
     }
-    return this.load(true);
+  }
+
+  cancelRefresh(): void {
+    if (this.stateValue.refresh !== undefined) this.cancellation?.abort();
   }
 
   dispose(): void {
@@ -143,6 +161,7 @@ export class ProviderDirectoryController {
       models: providers.flatMap((provider) =>
         provider.models.map((model) => ({
           providerId: model.providerId,
+          providerDisplayName: provider.displayName,
           modelId: model.modelId,
           displayName: model.displayName,
           thinkingLevels: model.supportedThinkingLevels,

@@ -62,6 +62,30 @@ test("provider directory retains usable inventory when authentication status fai
   controller.dispose();
 });
 
+test("provider refresh exposes its target and supports cancellation", async () => {
+  const client = {
+    connection: { grantedCapabilities: [] },
+    listProviders: async () => ({ providers: [] }),
+    refreshProviderCatalogs: async (_params: unknown, options: { readonly signal?: AbortSignal }) =>
+      new Promise<never>((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+          once: true,
+        });
+      }),
+    onReconnect: () => () => undefined,
+  } as unknown as AxlClient;
+  const controller = new ProviderDirectoryController(client);
+  await controller.load();
+
+  const refreshing = controller.refresh("provider");
+  assert.deepEqual(controller.state.refresh, { providerId: "provider" });
+  controller.cancelRefresh();
+  await assert.rejects(refreshing, { name: "AbortError" });
+  assert.equal(controller.state.status, "ready");
+  assert.equal(controller.state.refresh, undefined);
+  controller.dispose();
+});
+
 test("configuration mutations run in order and retain field-scoped failures", async () => {
   const calls: string[] = [];
   const client = {

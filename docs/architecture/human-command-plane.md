@@ -99,6 +99,8 @@ Web examples:
 - panel layout
 - custom web panels and renderers
 
+Browser keybindings are presentation behavior but may invoke shared SDK workflows. The active web keymap, including Pi-equivalent `Ctrl/⌘+L` model selection and composer-focused `Shift+Tab` reasoning cycling, is specified in [web-client.md](web-client.md#browser-keyboard-controls) and shown from the browser Settings surface.
+
 A presentation extension may read bounded projected state and mutate only client-local presentation or draft state. It cannot invoke daemon internals. If it needs a shared effect, it calls an authorized SDK operation or pairs with a daemon-registered extension command.
 
 The existing terminal extension API remains the only implemented client extension host. A parallel web extension API is added only with its first real custom web contribution.
