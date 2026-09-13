@@ -210,6 +210,23 @@ function deferredTurn(
   return { kind, operationId, controller: new AbortController(), done, finish: resolveDone };
 }
 
+function reinsertQueueItem<Value>(
+  items: Map<EventId, Value>,
+  queueItemId: EventId,
+  value: Value,
+  priority: "front" | "back",
+): void {
+  items.delete(queueItemId);
+  if (priority === "back") {
+    items.set(queueItemId, value);
+    return;
+  }
+  const existing = [...items];
+  items.clear();
+  items.set(queueItemId, value);
+  for (const [id, item] of existing) items.set(id, item);
+}
+
 function userMessageText(event: CanonicalEvent): string | undefined {
   if (event.type !== "user.message") return undefined;
   const text = event.payload.content
@@ -1597,16 +1614,26 @@ export class SessionManager {
     const pending = new Map<EventId, RestoredQueueItem>();
     for (const event of managed.events) {
       if (event.type === "queue.enqueued") {
-        pending.set(event.id, {
-          queueItemId: event.id,
-          content: event.payload.content,
-          priority: event.payload.priority,
-          source: "queue",
-        });
+        reinsertQueueItem(
+          pending,
+          event.id,
+          {
+            queueItemId: event.id,
+            content: event.payload.content,
+            priority: event.payload.priority,
+            source: "queue",
+          },
+          event.payload.priority,
+        );
       } else if (event.type === "queue.requeued") {
         const item = pending.get(event.payload.queueItemId);
         if (item !== undefined)
-          pending.set(event.payload.queueItemId, { ...item, priority: event.payload.priority });
+          reinsertQueueItem(
+            pending,
+            event.payload.queueItemId,
+            { ...item, priority: event.payload.priority },
+            event.payload.priority,
+          );
       } else if (event.type === "queue.started") {
         pending.delete(event.payload.queueItemId);
       } else if (event.type === "queue.restored") {
@@ -2013,7 +2040,7 @@ export class SessionManager {
     const pending = new Map<EventId, OperationId>();
     for (const event of managed.events) {
       if (event.type === "queue.enqueued" && event.operationId !== undefined) {
-        pending.set(event.id, event.operationId);
+        reinsertQueueItem(pending, event.id, event.operationId, event.payload.priority);
       } else if (event.type === "queue.started" || event.type === "queue.paused") {
         pending.delete(event.payload.queueItemId);
       } else if (event.type === "queue.requeued") {
@@ -2021,7 +2048,8 @@ export class SessionManager {
           (candidate) =>
             candidate.type === "queue.enqueued" && candidate.id === event.payload.queueItemId,
         );
-        if (queued?.operationId !== undefined) pending.set(queued.id, queued.operationId);
+        if (queued?.operationId !== undefined)
+          reinsertQueueItem(pending, queued.id, queued.operationId, event.payload.priority);
       } else if (event.type === "queue.restored") {
         for (const item of event.payload.items) {
           if (item.queueItemId !== undefined) pending.delete(item.queueItemId);

@@ -3334,6 +3334,91 @@ test("queued prompts become paused after restart and require explicit re-queuein
   );
 });
 
+test("restart recovery preserves later front and back queue ordering", async (context) => {
+  const initialBlock = pausedActivityPort();
+  const fixture = await startDaemon(context, initialBlock.port);
+  const client = await connectUnixClient(fixture.socketPath);
+  const created = await client.request("session.create", { cwd: fixture.cwd });
+  const active = client
+    .request("session.send", {
+      sessionId: created.sessionId,
+      delivery: "prompt",
+      content: [{ type: "text", text: "hold initial queue" }],
+    })
+    .catch(() => undefined);
+  await initialBlock.started;
+  const queued = [];
+  for (const text of ["first", "second", "third"]) {
+    queued.push(
+      await client.request("session.queue.enqueue", {
+        sessionId: created.sessionId,
+        content: [{ type: "text", text }],
+        priority: "back",
+      }),
+    );
+  }
+  const initialStop = fixture.daemon.stop();
+  initialBlock.finish();
+  await Promise.allSettled([active, initialStop]);
+  client.close();
+
+  const requeueBlock = pausedActivityPort();
+  const requeueDaemon = new AxlDaemon({
+    socketPath: fixture.socketPath,
+    dataDirectory: fixture.dataDirectory,
+    runtime: () => ({
+      model: requeueBlock.port,
+      tools: new ToolRegistry(),
+      system: "You are Axl.",
+    }),
+  });
+  await requeueDaemon.start();
+  const requeueClient = await connectUnixClient(fixture.socketPath);
+  await requeueClient.request("session.resume", { sessionId: created.sessionId });
+  const holding = requeueClient
+    .request("session.send", {
+      sessionId: created.sessionId,
+      delivery: "prompt",
+      content: [{ type: "text", text: "hold requeues" }],
+    })
+    .catch(() => undefined);
+  await requeueBlock.started;
+  for (const [index, priority] of [
+    [1, "front"],
+    [0, "back"],
+    [2, "front"],
+  ] as const) {
+    await requeueClient.request("session.queue.requeue", {
+      sessionId: created.sessionId,
+      queueItemId: queued[index]?.queueItemId ?? assert.fail("missing queued item"),
+      priority,
+    });
+  }
+  const requeueStop = requeueDaemon.stop();
+  requeueBlock.finish();
+  await Promise.allSettled([holding, requeueStop]);
+  requeueClient.close();
+
+  const recoveredDaemon = new AxlDaemon({
+    socketPath: fixture.socketPath,
+    dataDirectory: fixture.dataDirectory,
+    runtime: () => ({ model: replyPort(), tools: new ToolRegistry(), system: "You are Axl." }),
+  });
+  await recoveredDaemon.start();
+  context.after(() => recoveredDaemon.stop());
+  const recovered = await connectUnixClient(fixture.socketPath);
+  context.after(() => recovered.close());
+  await recovered.request("session.resume", { sessionId: created.sessionId });
+  const restored = await recovered.request("session.queue.restore", {
+    sessionId: created.sessionId,
+    interrupt: false,
+  });
+  assert.deepEqual(
+    restored.items.map((item) => item.content.find((part) => part.type === "text")?.text),
+    ["third", "second", "first"],
+  );
+});
+
 test("subscribe supports opaque acknowledged cursors and multiple attachments", async (context) => {
   const { socketPath, cwd } = await startDaemon(context);
   const one = await connectUnixClient(socketPath);
