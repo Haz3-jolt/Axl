@@ -3,6 +3,14 @@
 
 import type { ModelChoice, ThinkingLevel } from "@axl/sdk";
 
+export function isModelPickerShortcut(event: {
+  readonly key: string;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+}): boolean {
+  return (event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "l";
+}
+
 export function filterModelChoices(
   choices: readonly ModelChoice[],
   query: string,

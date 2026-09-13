@@ -22,6 +22,7 @@ import {
   type ModelRequestSettings,
   type ProviderLoginMethod,
   parseModelRequestSettings,
+  type SessionId,
   type SessionProfile,
   type ThinkingLevel,
 } from "@axl/protocol";
@@ -45,6 +46,23 @@ import { loadTuiSettings, saveTuiSettings, type TuiSettings } from "./settings.t
 
 const AXL_VERSION = process.env.AXL_BUILD_VERSION ?? "0.0.0-dev";
 const WEB_ASSET_RELATIVE_PATH = process.env.AXL_WEB_ASSET_PATH ?? "../../web/dist";
+
+function openBrowser(url: string): Promise<void> {
+  const command =
+    process.platform === "darwin"
+      ? { file: "open", args: [url] }
+      : process.platform === "win32"
+        ? { file: "rundll32", args: ["url.dll,FileProtocolHandler", url] }
+        : { file: "xdg-open", args: [url] };
+  return new Promise((resolve, reject) => {
+    const child = spawn(command.file, command.args, { detached: true, stdio: "ignore" });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
 
 const HELP = `Usage: axl [session-id] [options]
        axl web [session-id] [--no-open]
@@ -1054,6 +1072,27 @@ async function main(): Promise<void> {
     sandbox: cli.sandbox,
     ...(cli.image === undefined ? {} : { image: cli.image }),
   };
+  const webGateways = new Set<{ readonly close: () => Promise<void> }>();
+  const openWebForTarget =
+    (target: LocalDaemonTarget) =>
+    async (sessionId: SessionId, cwd: string): Promise<string> => {
+      const { startWebGateway } = await import("./web-gateway.ts");
+      const gateway = await startWebGateway({
+        socketPath: target.socketPath,
+        stateDirectory: target.stateDirectory,
+        cwd,
+        assetDirectory: resolve(dirname(fileURLToPath(import.meta.url)), WEB_ASSET_RELATIVE_PATH),
+        packageVersion: AXL_VERSION,
+      });
+      try {
+        await openBrowser(`${gateway.launchUrl}&session=${encodeURIComponent(sessionId)}`);
+      } catch (error) {
+        await gateway.close();
+        throw error;
+      }
+      webGateways.add(gateway);
+      return gateway.origin;
+    };
   const client = await connectTarget(currentTarget);
   timing.mark("daemon connect");
   if (cli.daemonAction === "restart") {
@@ -1092,14 +1131,12 @@ async function main(): Promise<void> {
         cli.sessionId === undefined
           ? gateway.launchUrl
           : `${gateway.launchUrl}&session=${encodeURIComponent(cli.sessionId)}`;
-      const browser =
-        process.platform === "darwin"
-          ? { file: "open", args: [launchUrl] }
-          : process.platform === "win32"
-            ? { file: "rundll32", args: ["url.dll,FileProtocolHandler", launchUrl] }
-            : { file: "xdg-open", args: [launchUrl] };
-      const child = spawn(browser.file, browser.args, { detached: true, stdio: "ignore" });
-      child.unref();
+      try {
+        await openBrowser(launchUrl);
+      } catch (error) {
+        await gateway.close();
+        throw error;
+      }
     }
     const stop = (): void => {
       void gateway.close().finally(() => process.exit(0));
@@ -1165,6 +1202,7 @@ async function main(): Promise<void> {
       client: await connectTarget(target),
       reconnectClient: () => connectTarget(target),
       daemonHost: createUnixDaemonHost(target.socketPath),
+      openWeb: openWebForTarget(target),
     };
   };
 
@@ -1226,6 +1264,7 @@ async function main(): Promise<void> {
     ],
     clearStartupLine: startupIndicator,
     reconnectClient: () => connectTarget(currentTarget),
+    openWeb: openWebForTarget(currentTarget),
     loginProvider: (providerId, method, signal, presentation) =>
       loginFromThisHost(providerId, method, signal, presentation),
     onPreferenceChange: persistSettings,
@@ -1238,7 +1277,9 @@ async function main(): Promise<void> {
     webSearch: active.webSearch,
     ...(cli.sessionId === undefined ? {} : { sessionId: cli.sessionId }),
     onExit: () => {
-      void settingsWrite.finally(() => process.exit(0));
+      void Promise.allSettled([...webGateways].map((gateway) => gateway.close())).finally(() =>
+        settingsWrite.finally(() => process.exit(0)),
+      );
     },
   });
   timing.mark("first paint");

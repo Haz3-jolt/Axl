@@ -226,7 +226,7 @@ The browser preserves Pi's model and reasoning shortcuts where browser semantics
 | Shortcut | Browser action |
 | --- | --- |
 | `Ctrl+K` or `⌘K` | Open the command palette. |
-| `Ctrl+L` or `⌘L` | Open the searchable, provider-grouped model picker for the active session. |
+| `Ctrl+L` or `⌘L` | Open the searchable, provider-grouped model picker. With no active session, open staged session creation at model selection. |
 | `Shift+Tab` | Cycle the selected model's supported reasoning levels while the composer is focused. Normal reverse tab navigation remains available outside the composer. |
 | `Ctrl+F` or `⌘F` | Search the active transcript. |
 | `Alt+Up` | Restore all pending prompts to the initiating editor. |

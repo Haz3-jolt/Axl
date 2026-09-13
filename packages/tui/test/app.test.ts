@@ -1454,7 +1454,7 @@ test("every TUI command has an explicit owner", async (context) => {
       "requeue",
       "thinking",
     ],
-    "trusted-host": ["edit", "quit"],
+    "trusted-host": ["edit", "quit", "web"],
     presentation: [
       "commands",
       "details",
@@ -1534,6 +1534,7 @@ test("command discovery, history, autocomplete, and external editing behave", as
   const input = new PassThrough();
   const { output, text } = captureOutput();
   const edited: string[] = [];
+  const openedWebSessions: string[] = [];
   const app = await AxlApp.start({
     client: await connectUnixClient(socketPath),
     input,
@@ -1545,7 +1546,15 @@ test("command discovery, history, autocomplete, and external editing behave", as
       edited.push(content);
       return `${content} from editor`;
     },
+    openWeb: async (sessionId) => {
+      openedWebSessions.push(sessionId);
+      return "http://127.0.0.1:1234";
+    },
   });
+
+  input.write("/web\r");
+  await until(() => text().includes("opened http://127.0.0.1:1234"), "browser launch");
+  assert.deepEqual(openedWebSessions, [app.sessionId]);
 
   input.write("draft\x07");
   await until(() => text().includes("external editor closed"), "external editor");
