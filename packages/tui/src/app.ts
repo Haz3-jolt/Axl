@@ -41,12 +41,13 @@ import {
   CommandController,
   type CommandOutcome,
   ConversationProjector,
-  type PresentationCommand,
   type DaemonHostControl,
   type DaemonHostStatus,
   type ModelRequestSettings,
   orderPendingTurnInputs,
+  type PresentationCommand,
   ProviderClientError,
+  restoreQueuedPrompts,
   type SessionSubscription,
   subscribeSession,
   supportedThinkingLevels,
@@ -381,6 +382,7 @@ function isReservedExtensionShortcut(value: string): boolean {
     decoded.key.kind === "newline" ||
     decoded.key.kind === "follow-up" ||
     decoded.key.kind === "interrupt-deliver" ||
+    decoded.key.kind === "dequeue" ||
     decoded.key.kind === "escape"
   ) {
     return true;
@@ -395,6 +397,7 @@ const HOTKEYS: readonly { readonly key: string; readonly action: string }[] = [
   { key: "Shift+Enter / Ctrl+J", action: "Insert a newline" },
   { key: "\\ then Enter", action: "Insert a newline in every terminal" },
   { key: "Alt+Enter", action: "Queue a follow-up after the active turn" },
+  { key: "Alt+Up", action: "Restore all queued prompts to the editor" },
   { key: "Ctrl+Enter", action: "Interrupt the active turn and deliver this prompt" },
   { key: "Ctrl+A", action: "Select the entire prompt" },
   { key: "Ctrl+C", action: "Copy selection or clear; press twice within 500 ms to quit" },
@@ -423,7 +426,7 @@ const HOTKEYS: readonly { readonly key: string; readonly action: string }[] = [
   { key: "Ctrl+F", action: "Search the fullscreen transcript" },
   { key: "PageUp/PageDown", action: "Navigate the fullscreen transcript" },
   { key: "Shift+PageUp/PageDown", action: "Navigate by half a page" },
-  { key: "Alt+Up/Down", action: "Navigate the transcript by line" },
+  { key: "Alt+Down", action: "Navigate the transcript down by one line" },
   { key: "Ctrl+Shift+Up/Down", action: "Jump between user prompts" },
   { key: "Ctrl+Z", action: "Suspend the terminal" },
   { key: "!command", action: "Run shell and include output in context" },
@@ -629,7 +632,6 @@ export class AxlApp {
   }> = [];
   private sending = false;
   private awaitingOperationOwnership = false;
-  private interrupting = false;
   private activeRequest: "turn" | "shell" | "compaction" | undefined;
   private configuring = false;
   private providerOperation: AbortController | undefined;
@@ -1908,6 +1910,8 @@ export class AxlApp {
         const mode = this.view.cycleThinkingDisplay();
         void this.persistPreferences({ thinkingDisplay: mode });
         this.notice = this.view.palette.dim(`· thoughts ${mode}`);
+      } else if (key.kind === "dequeue" || (key.kind === "alt" && key.char.toLowerCase() === "q")) {
+        void this.restoreQueuedInputs(false);
       } else if (key.kind === "shift-tab") {
         void this.cycleThinkingLevel();
       } else if (key.kind === "tab") {
@@ -1921,9 +1925,14 @@ export class AxlApp {
           this.sending ||
           this.activeRequest !== undefined ||
           this.awaitingOperationOwnership ||
+          this.queued.length > 0 ||
+          this.pendingTurnInputs.length > 0 ||
+          this.sessionSubscription?.projector.state.queue.some(
+            (item) => item.status === "queued" || item.status === "paused",
+          ) === true ||
           this.sessionSubscription?.projector.overview.activeOperationId !== undefined
         ) {
-          void this.interrupt();
+          void this.restoreQueuedInputs(true);
         } else if (this.editorMode === "vim") this.vim.handle(key, this.editor);
         else {
           this.editor.clear();
@@ -5142,6 +5151,49 @@ export class AxlApp {
     this.pendingTurnInputs.splice(this.pendingTurnInputs.indexOf(pending), 1);
   }
 
+  private async restoreQueuedInputs(interrupt: boolean): Promise<void> {
+    try {
+      const result = await restoreQueuedPrompts(this.client, this.sessionId, interrupt);
+      const local = this.queued.splice(0);
+      this.pendingTurnInputs.length = 0;
+      const text = [
+        ...result.items.map((item) =>
+          item.content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join("\n"),
+        ),
+        ...local.map((item) => item.text),
+        this.editor.text,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      const blobs = [
+        ...result.items.flatMap((item) =>
+          item.content.flatMap((part) => (part.type === "blob" ? [part.blob] : [])),
+        ),
+        ...local.flatMap((item) => item.attachments),
+      ];
+      for (const blob of blobs) {
+        if (!this.pendingAttachments.some((item) => item.sha256 === blob.sha256))
+          this.pendingAttachments.push(blob);
+      }
+      this.editor.setText(text);
+      this.notice = this.view.palette.dim(
+        result.items.length + local.length === 0
+          ? interrupt && result.interrupted
+            ? "· interrupted"
+            : "· no queued prompts"
+          : `· restored ${result.items.length + local.length} queued prompt${result.items.length + local.length === 1 ? "" : "s"}`,
+      );
+    } catch (error) {
+      this.notice = this.view.palette.error(
+        `✖ ${error instanceof Error ? error.message : "could not restore queued prompts"}`,
+      );
+    }
+    this.redraw();
+  }
+
   private async enqueuePrompt(
     queued: { readonly text: string; readonly attachments: readonly BlobReference[] },
     priority: "front" | "back",
@@ -5292,29 +5344,6 @@ export class AxlApp {
         `✖ ${error instanceof Error ? error.message : "reload failed"}`,
       );
       this.redraw();
-    }
-  }
-
-  private async interrupt(): Promise<void> {
-    if (this.interrupting) return;
-    this.interrupting = true;
-    try {
-      const result = await this.client.request("session.interrupt", {
-        sessionId: this.sessionId,
-      });
-      if (result.interrupted) {
-        this.awaitingOperationOwnership = false;
-      } else {
-        this.notice = this.view.palette.dim("· no active operation to interrupt");
-        this.redraw();
-      }
-    } catch (error) {
-      this.notice = this.view.palette.error(
-        `✖ ${error instanceof Error ? error.message : "interrupt failed"}`,
-      );
-      this.redraw();
-    } finally {
-      this.interrupting = false;
     }
   }
 }

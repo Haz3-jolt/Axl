@@ -296,6 +296,7 @@ function EventRow({ item, tool, queue, interruption, interaction, attribution, r
     case "queue.requeued":
     case "queue.started":
     case "queue.paused":
+    case "queue.restored":
     case "interrupt.updated":
     case "tool.result":
     case "config.request":

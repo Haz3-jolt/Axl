@@ -23,10 +23,7 @@ export type WebHostCapability = "provider.auth.login";
 
 export const WEB_REQUESTED_CAPABILITIES = Object.freeze(
   WIRE_CAPABILITIES.filter(
-    (capability) =>
-      capability !== "provider.auth.login" &&
-      capability !== "session.queue.requeue" &&
-      capability !== "session.presence",
+    (capability) => capability !== "provider.auth.login" && capability !== "session.presence",
   ),
 );
 

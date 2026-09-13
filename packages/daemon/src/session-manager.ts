@@ -35,20 +35,22 @@ import {
   type AssistantStopReason,
   type BlobReference,
   type CanonicalEvent,
+  DEFAULT_MODEL_REQUEST_SETTINGS,
   EVENT_FORMAT_VERSION,
   type EventId,
   type EventPayloadMap,
   encodeCanonicalEvent,
-  DEFAULT_MODEL_REQUEST_SETTINGS,
-  type ModelRequestSettings,
   type InteractionAction,
   type JsonObject,
   type JsonValue,
+  MAX_WIRE_MESSAGE_BYTES,
+  type ModelRequestSettings,
   type OperationId,
   parseEvent,
   parseEventId,
   parseOperationId,
   parseSessionId,
+  type RestoredQueueItem,
   type SessionActivityFrame,
   type SessionConfiguration,
   type SessionId,
@@ -763,6 +765,30 @@ export class SessionManager {
       }
       return { interrupted: false };
     }
+    if (acceptance.method === "session.queue.restore") {
+      const restored = evidence.find((event) => event.type === "queue.restored");
+      if (restored?.type !== "queue.restored") return undefined;
+      await this.resume(target);
+      const base = this.restoredQueueResult(this.managed(target), restored.payload.items, false);
+      const affected =
+        acceptance.affectedOperationId === undefined
+          ? undefined
+          : parseOperationId(acceptance.affectedOperationId, "affectedOperationId");
+      if (affected === undefined) return base;
+      const terminal = stored.findLast(
+        (event) =>
+          event.operationId === affected &&
+          ((event.type === "assistant.message" && event.payload.stopReason !== "tool_use") ||
+            event.type === "session.error"),
+      );
+      if (terminal === undefined) {
+        await this.managed(target).session.abortRecoveredTurn(affected);
+        return { ...base, interrupted: true, operationId: affected };
+      }
+      return terminal.type === "assistant.message" && terminal.payload.stopReason === "aborted"
+        ? { ...base, interrupted: true, operationId: affected }
+        : base;
+    }
     if (acceptance.method === "session.rename") {
       const renamed = evidence.find((event) => event.type === "session.renamed");
       return renamed?.type === "session.renamed"
@@ -1201,6 +1227,14 @@ export class SessionManager {
             );
           }
           payload.queueItemId = queueItemId;
+        } else if (event.type === "queue.restored" && Array.isArray(payload.items)) {
+          payload.items = payload.items.map((value) => {
+            if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+            const item = value as Record<string, JsonValue>;
+            const replacement =
+              typeof item.queueItemId === "string" ? eventIds.get(item.queueItemId) : undefined;
+            return replacement === undefined ? item : { ...item, queueItemId: replacement };
+          });
         } else if (event.type === "context.compacted" && Array.isArray(payload.replacedEventIds)) {
           payload.replacedEventIds = payload.replacedEventIds.flatMap((id) => {
             const replacement = typeof id === "string" ? eventIds.get(id) : undefined;
@@ -1517,6 +1551,113 @@ export class SessionManager {
     else managed.queue.push(entry);
     this.startQueueDrain(managed);
     return { queueItemId, state: "queued" };
+  }
+
+  async restoreQueue(
+    sessionId: unknown,
+    interrupt: boolean,
+    operationId: OperationId | undefined,
+    acceptedTargetOperationId?: OperationId,
+  ): Promise<{
+    items: readonly RestoredQueueItem[];
+    interrupted: boolean;
+    operationId?: OperationId;
+  }> {
+    if (operationId === undefined)
+      throw new DaemonError("internal_error", "Queue restore operation ID is missing");
+    const managed = this.managed(sessionId);
+    const prior = managed.events.find(
+      (event) => event.type === "queue.restored" && event.operationId === operationId,
+    );
+    if (prior?.type === "queue.restored") {
+      return this.restoredQueueResult(
+        managed,
+        prior.payload.items,
+        interrupt,
+        acceptedTargetOperationId,
+      );
+    }
+
+    const pending = new Map<EventId, RestoredQueueItem>();
+    for (const event of managed.events) {
+      if (event.type === "queue.enqueued") {
+        pending.set(event.id, {
+          queueItemId: event.id,
+          content: event.payload.content,
+          priority: event.payload.priority,
+          source: "queue",
+        });
+      } else if (event.type === "queue.requeued") {
+        const item = pending.get(event.payload.queueItemId);
+        if (item !== undefined)
+          pending.set(event.payload.queueItemId, { ...item, priority: event.payload.priority });
+      } else if (event.type === "queue.started") {
+        pending.delete(event.payload.queueItemId);
+      } else if (event.type === "queue.restored") {
+        for (const item of event.payload.items) {
+          if (item.queueItemId !== undefined) pending.delete(item.queueItemId);
+        }
+      }
+    }
+    const live = managed.queue
+      .map((item) => pending.get(item.queueItemId))
+      .filter((item): item is RestoredQueueItem => item !== undefined);
+    const liveIds = new Set(live.flatMap((item) => item.queueItemId ?? []));
+    const transient = managed.session.queuedMessages();
+    const items: RestoredQueueItem[] = [
+      ...transient.steering.map((content) => ({
+        content,
+        priority: "front" as const,
+        source: "steer" as const,
+      })),
+      ...transient.followUp.map((content) => ({
+        content,
+        priority: "back" as const,
+        source: "follow_up" as const,
+      })),
+      ...live,
+      ...[...pending.values()].filter(
+        (item) => item.queueItemId !== undefined && !liveIds.has(item.queueItemId),
+      ),
+    ];
+    if (new TextEncoder().encode(JSON.stringify(items)).byteLength > MAX_WIRE_MESSAGE_BYTES / 2) {
+      throw new DaemonError("content_too_large", "Queued prompts are too large to restore safely");
+    }
+
+    const savedQueue = managed.queue.splice(0);
+    managed.session.clearQueuedMessages();
+    const interruption = interrupt
+      ? this.interrupt(sessionId, acceptedTargetOperationId)
+      : { interrupted: false as const };
+    try {
+      await managed.session.recordQueueEvent(operationId, "queue.restored", { items });
+    } catch (error) {
+      const addedQueue = managed.queue.splice(0);
+      managed.queue.push(
+        ...addedQueue.filter((item) => item.priority === "front"),
+        ...savedQueue,
+        ...addedQueue.filter((item) => item.priority === "back"),
+      );
+      managed.session.restoreQueuedMessages(transient);
+      throw error;
+    }
+    return { items, ...interruption };
+  }
+
+  private restoredQueueResult(
+    managed: ManagedSession,
+    items: readonly RestoredQueueItem[],
+    interrupt: boolean,
+    acceptedTargetOperationId?: OperationId,
+  ): {
+    items: readonly RestoredQueueItem[];
+    interrupted: boolean;
+    operationId?: OperationId;
+  } {
+    const interruption = interrupt
+      ? this.interrupt(managed.session.log.sessionId, acceptedTargetOperationId)
+      : { interrupted: false as const };
+    return { items, ...interruption };
   }
 
   steer(sessionId: unknown, content: readonly UserContent[]): Promise<{ queued: true }> {
@@ -1859,6 +2000,10 @@ export class SessionManager {
             candidate.type === "queue.enqueued" && candidate.id === event.payload.queueItemId,
         );
         if (queued?.operationId !== undefined) pending.set(queued.id, queued.operationId);
+      } else if (event.type === "queue.restored") {
+        for (const item of event.payload.items) {
+          if (item.queueItemId !== undefined) pending.delete(item.queueItemId);
+        }
       }
     }
     for (const [queueItemId, operationId] of pending) {
