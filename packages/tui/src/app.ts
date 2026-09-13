@@ -56,7 +56,12 @@ import {
 
 import { ActivityComponent } from "./activity.ts";
 import { droppedImages, type LocalAttachment, readImageFile } from "./attachments.ts";
-import { type ClipboardContent, readClipboard, writeClipboardText } from "./clipboard.ts";
+import {
+  type ClipboardContent,
+  readClipboard,
+  readClipboardText,
+  writeClipboardText,
+} from "./clipboard.ts";
 import { loadThemeCatalog, type ThemeCatalog, watchThemeDirectories } from "./custom-themes.ts";
 import { DeveloperPanelComponent } from "./developer-panel.ts";
 import { renderDialog } from "./dialog.ts";
@@ -1834,7 +1839,13 @@ export class AxlApp {
   private handleInput(data: string): void {
     if (this.stopped) return;
     if (data.startsWith("\x1b[200~") && data.endsWith("\x1b[201~")) {
-      void this.handleBracketedPaste(data.slice(6, -6));
+      const text = data.slice(6, -6);
+      if (this.overlays.paste(text)) this.redraw();
+      else void this.handleBracketedPaste(text);
+      return;
+    }
+    if (data === "\x16" && this.overlays.active?.paste !== undefined) {
+      void this.pasteClipboardIntoOverlay(this.overlays.active);
       return;
     }
     if (data === "\x1b[I") {
@@ -2008,6 +2019,26 @@ export class AxlApp {
     if (now - this.lastAttentionAt < 2_000) return;
     this.lastAttentionAt = now;
     this.options.output.write("\x07");
+  }
+
+  private async pasteClipboardIntoOverlay(overlay: Overlay): Promise<void> {
+    if (this.clipboardBusy) return;
+    this.clipboardBusy = true;
+    try {
+      const content = this.options.readClipboard
+        ? await this.options.readClipboard()
+        : await readClipboardText();
+      if (this.overlays.active !== overlay) return;
+      if (typeof content === "string") overlay.paste?.(content);
+      else this.notice = this.view.palette.error("✖ paste text into login fields, not an image");
+    } catch (error) {
+      this.notice = this.view.palette.error(
+        `✖ ${error instanceof Error ? error.message : "clipboard read failed"}`,
+      );
+    } finally {
+      this.clipboardBusy = false;
+      this.redraw();
+    }
   }
 
   private async pasteClipboard(): Promise<void> {
