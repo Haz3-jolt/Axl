@@ -2131,6 +2131,7 @@ test("provider commands group models, show status, mutate auth, and cancel refre
     color: false,
     currentProvider: "alpha",
     currentModel: "shared-model",
+    readClipboard: () => Promise.resolve("runtime-login-secret"),
     loginProvider: async (providerId, method, _signal, presentation) => {
       calls.push(`host-login:${providerId}:${method}`);
       assert.equal(
@@ -2181,7 +2182,9 @@ test("provider commands group models, show status, mutate auth, and cancel refre
   );
   input.write("\r");
   await until(() => text().includes("Provider secret"), "secret prompt");
-  input.write("runtime-login-secret\r");
+  input.write("\x16");
+  await until(() => text().includes("********************"), "pasted secret");
+  input.write("\r");
   await until(() => calls.includes("host-login:beta:api_key"), "provider login");
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(calls.includes("login:beta:api_key"), false);
