@@ -1,9 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import type { EffectiveCommand, PresentationCommand } from "@axl/sdk";
+import type { EffectiveCommand, PresentationCommand, WorkspaceStatusScope } from "@axl/sdk";
 
 export type WebTheme = "system" | "light" | "dark";
+
+export function workspaceReviewScope(argument?: string): WorkspaceStatusScope | undefined {
+  if (argument === "off") return undefined;
+  return argument === "last-turn" ? "last-turn" : "working";
+}
 
 export function webPresentationCommands({
   canLogin,
