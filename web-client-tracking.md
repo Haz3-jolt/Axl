@@ -37,7 +37,7 @@ The branch now contains the first complete local-session slice:
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
 - The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
-- Ordinary and staged Chat/Code creation, shared-command routing, paused-item requeue, queue restoration, and browser presence work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Provider/configuration ownership and several hardening tests remain.
+- Ordinary and staged Chat/Code creation, shared-command routing, paused-item requeue, queue restoration, browser presence, and SDK-owned provider/configuration state work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Model/provider UX, search/fetch controls, and several hardening tests remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
 
@@ -47,9 +47,8 @@ The visual foundation, ordinary local conversation path, provider authentication
 
 Active remaining work:
 
-1. Move the provider directory and remaining configuration sequencing into reusable SDK controllers.
-2. Complete model/provider UX and search/fetch configuration.
-3. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
+1. Complete model/provider UX and search/fetch configuration.
+2. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
 
 Deferred work is labeled in place. It includes extension-driven command invalidation, `axl web --dev`, IndexedDB cursor persistence, localization, long-session React measurement, and pre-stable CLI flag renames.
 
@@ -213,13 +212,13 @@ This is a protocol and ownership change and requires architecture review before 
 
 - [x] Add command discovery, execution, explicit refresh, and typed outcome projection.
 - [ ] Add event-driven command-catalog invalidation when daemon extension registration exists.
-- [ ] Move the provider directory into the SDK with observable loading, ready, partial-failure, refresh, auth-change, reconnect, and disposal states. The current web-owned directory preserves partial results and supports explicit refresh.
+- [x] Move the provider directory into the SDK with observable loading, ready, partial-failure, refresh, auth-change, reconnect, and disposal states.
 - [x] Add staged new-session intent shared by direct controls and slash commands.
-- [ ] Add session-configuration mutation ordering, optimistic intent, effective values, and field-scoped failures.
+- [x] Add session-configuration mutation ordering, pending intent, effective values, and field-scoped failures.
 - [x] Add attachment upload, abort, retry, and retrieval helpers over blob RPCs.
 - [x] Add high-level steer, follow-up, interrupt, and interrupt-and-deliver methods with draft-safe semantics.
 - [x] Keep direct shell's explicit uncertain-outcome behavior.
-- [ ] Move remaining reusable provider and configuration behavior out of the React shell.
+- [x] Move remaining reusable provider and configuration behavior out of the React shell.
 - [x] Keep SDK caches disposable and daemon state authoritative.
 
 ## Staged new-session composition

@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useRef, type JSX } from "react";
-import type { NewSessionDraft, NewSessionDraftUpdate, ThinkingLevel } from "@axl/sdk";
-import type { ModelChoice } from "./model-catalog.ts";
+import type {
+  ModelChoice,
+  NewSessionDraft,
+  NewSessionDraftUpdate,
+  ThinkingLevel,
+} from "@axl/sdk";
 import { ModelPicker } from "./model-picker.tsx";
 
 export function NewSessionDialog({
