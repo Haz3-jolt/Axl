@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { EffectiveCommand } from "@axl/sdk";
 
-import { filterCommands, webPresentationCommands } from "../src/commands.ts";
+import { filterCommands, webPresentationCommands, workspaceReviewScope } from "../src/commands.ts";
 
 const commands: readonly EffectiveCommand[] = [
   {
@@ -83,6 +83,13 @@ test("web presentation commands open login and configure appearance", async () =
     }).map((command) => command.name),
     ["new", "theme"],
   );
+});
+
+test("web review commands map off to a closed panel", () => {
+  assert.equal(workspaceReviewScope(), "working");
+  assert.equal(workspaceReviewScope("working"), "working");
+  assert.equal(workspaceReviewScope("last-turn"), "last-turn");
+  assert.equal(workspaceReviewScope("off"), undefined);
 });
 
 test("command palette search matches names and descriptions", () => {

@@ -51,6 +51,7 @@ import {
   filterCommands,
   type WebTheme,
   webPresentationCommands,
+  workspaceReviewScope,
 } from "./commands.ts";
 import type { ControlCenterTab } from "./control-center.tsx";
 import {
@@ -1566,10 +1567,14 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
       } else if (outcome.surface === "dispose" || outcome.surface === "delete") {
         setSessionLifecycleError(undefined);
         setSessionLifecycleOpen(true);
-      } else {
-        setWorkspaceTab("changes");
-        setChangesOpen(true);
-        await loadWorkspaceChanges((outcome.argument ?? "working") as WorkspaceStatusScope);
+      } else if (outcome.surface === "review") {
+        const scope = workspaceReviewScope(outcome.argument);
+        if (scope === undefined) setChangesOpen(false);
+        else {
+          setWorkspaceTab("changes");
+          setChangesOpen(true);
+          await loadWorkspaceChanges(scope);
+        }
       }
     } catch (cause) {
       if (generation !== selectionGeneration.current) return;
