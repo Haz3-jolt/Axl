@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Hari Srinivasan
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useRef, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import type { ModelChoice, ThinkingLevel } from "@axl/sdk";
+import { filterModelChoices } from "./model-picker-state.ts";
 
 export function ModelPicker({
   choices,
@@ -12,6 +13,7 @@ export function ModelPicker({
   disabled,
   error,
   openRequest,
+  initialFocus = "model",
   onModel,
   onThinking,
 }: {
@@ -22,36 +24,141 @@ export function ModelPicker({
   readonly disabled: boolean;
   readonly error?: string;
   readonly openRequest?: number;
+  readonly initialFocus?: "model" | "thinking";
   readonly onModel: (choice: ModelChoice) => void;
   readonly onThinking: (level: ThinkingLevel) => void;
 }): JSX.Element {
   const details = useRef<HTMLDetailsElement>(null);
-  const selected = choices.find((choice) => choice.providerId === provider && choice.modelId === model);
+  const search = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const selected = choices.find(
+    (choice) => choice.providerId === provider && choice.modelId === model,
+  );
   const levels = selected?.thinkingLevels ?? [];
-  const close = (): void => details.current?.removeAttribute("open");
+  const groups = useMemo(() => filterModelChoices(choices, query), [choices, query]);
+  const visibleCount = [...groups.values()].reduce((count, models) => count + models.length, 0);
+  const close = (): void => {
+    details.current?.removeAttribute("open");
+    setQuery("");
+  };
+  const focusPicker = (): void => {
+    queueMicrotask(() => {
+      const target =
+        initialFocus === "thinking"
+          ? (details.current?.querySelector<HTMLButtonElement>(".effort-options button") ??
+            search.current)
+          : search.current;
+      target?.focus();
+    });
+  };
   useEffect(() => {
     if (openRequest === undefined || openRequest === 0) return;
     details.current?.setAttribute("open", "");
-    queueMicrotask(() => details.current?.querySelector<HTMLButtonElement>("button")?.focus());
-  }, [openRequest]);
-  return <details className="model-picker" ref={details}>
-    <summary aria-label="Choose model and effort">
-      <span>{model ?? "Daemon default"}</span>
-      {thinking && <><i>·</i><span>{thinking}</span></>}
-      <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" /></svg>
-    </summary>
-    <div className="model-menu">
-      <p className="model-menu-label">Model</p>
-      <div className="model-options">
-        {choices.length === 0 && <p className="model-empty">No models available</p>}
-        {choices.map((choice) => {
-          const active = choice.providerId === provider && choice.modelId === model;
-          const unavailable = choice.availability.status === "unavailable";
-          return <button key={`${choice.providerId}:${choice.modelId}`} type="button" className={active ? "selected" : ""} disabled={disabled || unavailable} title={choice.availability.reason} onClick={() => { onModel(choice); close(); }}><i aria-hidden="true">{active ? "✓" : ""}</i><span><strong>{choice.displayName}</strong><small>{unavailable ? choice.availability.reason ?? "Unavailable" : choice.providerId}</small></span></button>;
-        })}
+    focusPicker();
+  }, [openRequest, initialFocus]);
+
+  return (
+    <details
+      className="model-picker"
+      ref={details}
+      onToggle={(event) => {
+        if (event.currentTarget.open) focusPicker();
+        else setQuery("");
+      }}
+    >
+      <summary
+        aria-label="Choose model and effort"
+        aria-keyshortcuts="Control+L Meta+L"
+        title="Choose model (Ctrl/⌘+L)"
+      >
+        <span>{model ?? "Daemon default"}</span>
+        {thinking && (
+          <>
+            <i>·</i>
+            <span>{thinking}</span>
+          </>
+        )}
+        <svg viewBox="0 0 12 12" aria-hidden="true">
+          <path d="m3 4.5 3 3 3-3" />
+        </svg>
+      </summary>
+      <div className="model-menu">
+        <label className="model-search">
+          <span className="sr-only">Search models</span>
+          <input
+            ref={search}
+            type="search"
+            value={query}
+            placeholder="Search models"
+            autoComplete="off"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        <div className="model-options" aria-label="Models">
+          {visibleCount === 0 && (
+            <p className="model-empty">{choices.length === 0 ? "No models available" : "No matching models"}</p>
+          )}
+          {[...groups].map(([providerId, models]) => (
+            <section className="model-provider-group" key={providerId}>
+              <p className="model-menu-label">
+                {models[0]?.providerDisplayName ?? providerId}
+              </p>
+              {models.map((choice) => {
+                const active = choice.providerId === provider && choice.modelId === model;
+                const unavailable = choice.availability.status === "unavailable";
+                return (
+                  <button
+                    key={`${choice.providerId}:${choice.modelId}`}
+                    type="button"
+                    className={active ? "selected" : ""}
+                    disabled={disabled || unavailable}
+                    onClick={() => {
+                      onModel(choice);
+                      close();
+                    }}
+                  >
+                    <i aria-hidden="true">{active ? "✓" : ""}</i>
+                    <span>
+                      <strong>{choice.displayName}</strong>
+                      <small>
+                        {unavailable ? choice.availability.reason ?? "Unavailable" : choice.modelId}
+                      </small>
+                    </span>
+                  </button>
+                );
+              })}
+            </section>
+          ))}
+        </div>
+        {error && (
+          <p className="model-error" role="alert">
+            {error}
+          </p>
+        )}
+        {levels.length > 0 && (
+          <>
+            <div className="model-menu-rule" />
+            <p className="model-menu-label">Reasoning effort</p>
+            <div className="effort-options">
+              {levels.map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  className={level === thinking ? "selected" : ""}
+                  disabled={disabled}
+                  onClick={() => {
+                    onThinking(level);
+                    close();
+                  }}
+                >
+                  <i aria-hidden="true">{level === thinking ? "✓" : ""}</i>
+                  <span>{level}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
-      {error && <p className="model-error" role="alert">{error}</p>}
-      {levels.length > 0 && <><div className="model-menu-rule" /><p className="model-menu-label">Reasoning effort</p><div className="effort-options">{levels.map((level) => <button key={level} type="button" className={level === thinking ? "selected" : ""} disabled={disabled} onClick={() => { onThinking(level); close(); }}><i aria-hidden="true">{level === thinking ? "✓" : ""}</i><span>{level}</span></button>)}</div></>}
-    </div>
-  </details>;
+    </details>
+  );
 }

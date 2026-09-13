@@ -37,7 +37,7 @@ The branch now contains the first complete local-session slice:
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
 - The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
-- Ordinary and staged Chat/Code creation, shared-command routing, paused-item requeue, queue restoration, browser presence, and SDK-owned provider/configuration state work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Model/provider UX, search/fetch controls, and several hardening tests remain.
+- Ordinary and staged Chat/Code creation, shared-command routing, paused-item requeue, queue restoration, browser presence, SDK-owned provider/configuration state, and model/provider UX work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Search/fetch controls and several hardening tests remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
 
@@ -47,7 +47,7 @@ The visual foundation, ordinary local conversation path, provider authentication
 
 Active remaining work:
 
-1. Complete model/provider UX and search/fetch configuration.
+1. Complete search/fetch configuration.
 2. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
 
 Deferred work is labeled in place. It includes extension-driven command invalidation, `axl web --dev`, IndexedDB cursor persistence, localization, long-session React measurement, and pre-stable CLI flag renames.
@@ -247,14 +247,15 @@ web tool configuration
 
 - [x] Use provider-qualified `{ providerId, modelId }` identity throughout.
 - [x] Load one provider/model directory for the active daemon generation.
-- [ ] Share one focused picker between `/model`, composer controls, and new-session creation. The composer picker is implemented.
-- [ ] Group searchable model rows by provider.
+- [x] Share one focused picker between `/model`, composer controls, and new-session creation.
+- [x] Group searchable model rows by provider.
 - [x] Show provider-local errors without erasing usable providers.
-- [ ] Disable unavailable models and explain why. Unavailable models are currently omitted.
+- [x] Disable unavailable models and explain why.
 - [x] Reject ambiguous bare model IDs.
 - [x] Derive thinking choices from the selected model's supported levels.
 - [x] Preserve the daemon thinking default until the user explicitly changes it.
 - [x] Stage model and thinking choices before creation and submit them atomically.
+- [x] Match Pi's model and reasoning shortcuts with `Ctrl/⌘+L` and composer-focused `Shift+Tab`, and document the browser keymap in Settings and the architecture specification.
 - [x] Show effective clamped thinking values.
 - [x] Keep model and thinking controls out of generic Web settings.
 
@@ -395,9 +396,9 @@ Do not request a capability before its interaction, error behavior, and security
 
 ## Provider management
 
-- [ ] Add provider region detail. The `/providers` route and web provider status surface cover authentication, catalog, enabled state, and model counts.
+- [x] Add provider region detail. The `/providers` route and web provider status surface cover authentication, catalog, enabled state, model counts, and available region metadata.
 - [x] Refresh inventory after login, logout, catalog refresh, settings changes, and reconnect.
-- [ ] Add per-provider catalog-refresh cancellation. Web already shows bounded refresh progress, results, and retry; trusted-host login has correlated cancellation.
+- [x] Add per-provider catalog-refresh cancellation with visible progress and an explicit Cancel action.
 - [x] Preserve usable provider groups when one provider fails.
 - [x] Present errors beside the owning provider.
 - [x] Acquire credentials only through an injected trusted-process-host interaction.
