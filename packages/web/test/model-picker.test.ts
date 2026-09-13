@@ -4,7 +4,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelChoice } from "@axl/sdk";
-import { filterModelChoices, nextThinkingLevel } from "../src/model-picker-state.ts";
+import {
+  filterModelChoices,
+  isModelPickerShortcut,
+  nextThinkingLevel,
+} from "../src/model-picker-state.ts";
+
+test("recognizes the Pi-equivalent model shortcut", () => {
+  assert.equal(isModelPickerShortcut({ key: "l", ctrlKey: true, metaKey: false }), true);
+  assert.equal(isModelPickerShortcut({ key: "L", ctrlKey: false, metaKey: true }), true);
+  assert.equal(isModelPickerShortcut({ key: "l", ctrlKey: false, metaKey: false }), false);
+});
 
 const choices: readonly ModelChoice[] = [
   {

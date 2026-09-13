@@ -64,7 +64,7 @@ import {
   type WebPreferences,
 } from "./environment.ts";
 import { ModelPicker } from "./model-picker.tsx";
-import { nextThinkingLevel } from "./model-picker-state.ts";
+import { isModelPickerShortcut, nextThinkingLevel } from "./model-picker-state.ts";
 import { NewSessionDialog } from "./new-session-dialog.tsx";
 import { presenceDescription, sessionPeers } from "./presence.ts";
 import { RequeueDialog } from "./requeue-dialog.tsx";
@@ -310,6 +310,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [slashCommandIndex, setSlashCommandIndex] = useState(0);
   const [modelPickerOpenRequest, setModelPickerOpenRequest] = useState(0);
+  const [newSessionModelPickerOpenRequest, setNewSessionModelPickerOpenRequest] = useState(0);
   const [modelPickerInitialFocus, setModelPickerInitialFocus] = useState<"model" | "thinking">("model");
   const [blobUrls, setBlobUrls] = useState<ReadonlyMap<string, string>>(new Map());
   const commandController = useRef<CommandController | undefined>(undefined);
@@ -604,20 +605,25 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
   }, [sidebarOpen]);
   useEffect(() => {
     const keydown = (event: KeyboardEvent): void => {
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLocaleLowerCase() === "l" &&
-        opened !== undefined &&
+      if (isModelPickerShortcut(event) && newSessionOpen) {
+        event.preventDefault();
+        setNewSessionModelPickerOpenRequest((current) => current + 1);
+      } else if (
+        isModelPickerShortcut(event) &&
         !commandPaletteOpen &&
         !transcriptSearchOpen &&
         controlCenter === undefined &&
         !sidebarOpen &&
-        !requeueOpen &&
-        !newSessionOpen
+        !requeueOpen
       ) {
         event.preventDefault();
-        setModelPickerInitialFocus("model");
-        setModelPickerOpenRequest((current) => current + 1);
+        if (opened === undefined) {
+          openNewSession();
+          setNewSessionModelPickerOpenRequest((current) => current + 1);
+        } else {
+          setModelPickerInitialFocus("model");
+          setModelPickerOpenRequest((current) => current + 1);
+        }
       } else if (
         event.shiftKey &&
         event.key === "Tab" &&
@@ -683,6 +689,7 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
         : newSessionController.current.update({ mode });
     setNewSessionDraft(draft);
     setNewSessionError(undefined);
+    setNewSessionModelPickerOpenRequest(0);
     setNewSessionOpen(true);
   };
 
@@ -1881,6 +1888,6 @@ export function AxlApp({ preview }: { readonly preview?: WebPreview } = {}): Rea
     {controlCenter && <Suspense fallback={null}><ControlCenter tab={controlCenter} preferences={{ sidebarWidth, changesWidth, sidebarCollapsed, changesView }} theme={theme} providers={providerInventory} providerLoading={providerLoading} providerRefresh={providerDirectory.refresh} providerError={providerError} providerLogin={providerLogin} canRefresh={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.catalog.refresh") === true} canLogin={canLoginProvider} canLogout={preview !== undefined || client?.connection.grantedCapabilities.includes("provider.auth.logout") === true} onTab={setControlCenter} onPreferences={applyWebPreferences} onTheme={setTheme} onRefresh={(providerId) => void refreshProviders(providerId)} onCancelRefresh={() => providerDirectoryController.current?.cancelRefresh()} onLogin={(providerId, method) => void startProviderLogin(providerId, method)} onCancelLogin={cancelProviderLogin} onLogout={(providerId) => void logoutProvider(providerId)} onCopyLogin={(providerId, method) => void copyProviderLogin(providerId, method)} onClose={() => setControlCenter(undefined)} /></Suspense>}
     {sessionLifecycleOpen && selectedSummary && <SessionLifecycle session={selectedSummary} busy={busy} capabilities={lifecycleCapabilities} onRename={(title) => void renameSession(title)} onClone={() => void cloneSession()} onExport={() => void exportArtifact()} onDispose={() => void disposeSession()} onDelete={() => void deleteSession()} onClose={() => setSessionLifecycleOpen(false)} />}
     {requeueOpen && <RequeueDialog items={pausedQueue} busyItemId={requeueBusyItemId} error={requeueError} onRequeue={(queueItemId) => void requeueItem(queueItemId)} onClose={() => { setRequeueOpen(false); setRequeueError(undefined); }} />}
-    {newSessionOpen && <NewSessionDialog draft={newSessionDraft} models={modelCatalog} busy={busy} {...(newSessionError === undefined ? {} : { error: newSessionError })} onChange={updateNewSession} onSubmit={() => void createSession()} onClose={() => { setNewSessionOpen(false); setNewSessionError(undefined); }} />}
+    {newSessionOpen && <NewSessionDialog draft={newSessionDraft} models={modelCatalog} modelPickerOpenRequest={newSessionModelPickerOpenRequest} busy={busy} {...(newSessionError === undefined ? {} : { error: newSessionError })} onChange={updateNewSession} onSubmit={() => void createSession()} onClose={() => { setNewSessionOpen(false); setNewSessionError(undefined); }} />}
   </main>;
 }

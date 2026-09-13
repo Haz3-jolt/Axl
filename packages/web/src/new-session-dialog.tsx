@@ -13,6 +13,7 @@ import { ModelPicker } from "./model-picker.tsx";
 export function NewSessionDialog({
   draft,
   models,
+  modelPickerOpenRequest,
   busy,
   error,
   onChange,
@@ -21,6 +22,7 @@ export function NewSessionDialog({
 }: {
   readonly draft: NewSessionDraft;
   readonly models: readonly ModelChoice[];
+  readonly modelPickerOpenRequest: number;
   readonly busy: boolean;
   readonly error?: string;
   readonly onChange: (update: NewSessionDraftUpdate) => void;
@@ -79,7 +81,7 @@ export function NewSessionDialog({
           <button type="button" disabled={busy} aria-pressed={draft.mode === "code"} onClick={() => onChange({ mode: "code" })}><strong>Code</strong><small>Work in an explicit workspace</small></button>
         </div>
         {draft.mode === "code" && <label className="new-session-workspace"><span>Workspace</span><input value={draft.workspace ?? ""} disabled={busy} onChange={(event) => onChange({ workspace: event.target.value })} placeholder="/path/to/workspace" autoComplete="off" spellCheck={false} /></label>}
-        <div className="new-session-model"><span>Model and effort</span><ModelPicker choices={models} provider={draft.providerId} model={draft.modelId} thinking={draft.thinkingLevel} disabled={busy} onModel={updateModel} onThinking={updateThinking} /></div>
+        <div className="new-session-model"><span>Model and effort</span><ModelPicker choices={models} provider={draft.providerId} model={draft.modelId} thinking={draft.thinkingLevel} openRequest={modelPickerOpenRequest} disabled={busy} onModel={updateModel} onThinking={updateThinking} /></div>
         {selected === undefined && <small className="new-session-default">The daemon will choose its configured model and effort.</small>}
         {error && <p className="new-session-error" role="alert">{error}</p>}
       </div>

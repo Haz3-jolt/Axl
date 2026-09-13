@@ -365,6 +365,7 @@ const TUI_COMMANDS: readonly { readonly name: string; readonly description: stri
   { name: "commands", description: "browse and search available commands" },
   { name: "history", description: "search prompt history" },
   { name: "edit", description: "open the prompt in VISUAL or EDITOR" },
+  { name: "web", description: "open this session in the browser" },
   { name: "hotkeys", description: "browse and search keyboard shortcuts" },
   { name: "help", description: "show commands and keys" },
   { name: "detach", description: "leave the session running in the daemon" },
@@ -472,6 +473,7 @@ export interface ResumeSessionConnection {
   readonly client: AxlClient;
   readonly reconnectClient: () => Promise<AxlClient>;
   readonly daemonHost?: DaemonHostControl;
+  readonly openWeb?: (sessionId: SessionId, cwd: string) => Promise<string>;
 }
 
 export interface AxlAppOptions {
@@ -481,6 +483,7 @@ export interface AxlAppOptions {
   readonly reconnectClient?: () => Promise<AxlClient>;
   readonly listResumeSessions?: () => Promise<readonly ResumeSessionEntry[]>;
   readonly openResumeSession?: (session: ResumeSessionEntry) => Promise<ResumeSessionConnection>;
+  readonly openWeb?: (sessionId: SessionId, cwd: string) => Promise<string>;
   readonly initialResume?: boolean;
   readonly input: TerminalInput;
   readonly output: TerminalOutput;
@@ -567,6 +570,7 @@ export class AxlApp {
   private client: AxlClient;
   private commandController: CommandController;
   private daemonHost: DaemonHostControl | undefined;
+  private openWeb: ((sessionId: SessionId, cwd: string) => Promise<string>) | undefined;
   private quitPending = false;
   private quitting = false;
   private reconnectClient: (() => Promise<AxlClient>) | undefined;
@@ -682,6 +686,7 @@ export class AxlApp {
     this.client = options.client;
     this.reconnectClient = options.reconnectClient;
     this.daemonHost = options.daemonHost;
+    this.openWeb = options.openWeb;
     this.sessionId = sessionId;
     this.cwd = cwd;
     this.width = width;
@@ -2385,6 +2390,12 @@ export class AxlApp {
       case "edit":
         void this.openExternalEditor();
         return;
+      case "web": {
+        if (this.openWeb === undefined) throw new Error("Web launch is unavailable from this host");
+        const origin = await this.openWeb(this.sessionId, this.cwd);
+        this.notice = this.view.palette.dim(`· opened ${origin}`);
+        return;
+      }
       case "hotkeys":
         this.openPicker({
           title: "Keyboard shortcuts",
@@ -4048,6 +4059,7 @@ export class AxlApp {
         : session;
     const previousReconnect = this.reconnectClient;
     const previousHost = this.daemonHost;
+    const previousOpenWeb = this.openWeb;
     let candidate: ResumeSessionConnection | undefined;
     try {
       candidate =
@@ -4056,6 +4068,7 @@ export class AxlApp {
       if (candidate !== undefined) {
         this.reconnectClient = candidate.reconnectClient;
         this.daemonHost = candidate.daemonHost;
+        this.openWeb = candidate.openWeb;
       }
       await this.switchSession(
         await resumeSessionMetadata(client, entry.sessionId),
@@ -4070,6 +4083,7 @@ export class AxlApp {
         candidate?.client.close();
         this.reconnectClient = previousReconnect;
         this.daemonHost = previousHost;
+        this.openWeb = previousOpenWeb;
       } else {
         this.initialResumePending = false;
       }

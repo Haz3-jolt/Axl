@@ -242,6 +242,7 @@ web tool configuration
 - [x] Render a running session's exact profile as identity rather than a lossy Chat/Code toggle.
 - [x] Never display `minimal` or `exec` as mutable `standard` Code.
 - [x] Keep workspace navigation absent from Chat.
+- [ ] Refine the staged-session entry UI from visual review: make the initial Chat/Code toggle substantially larger and more prominent, simplify the form into a clearer linear sequence, and use a restrained layered/translucent surface treatment consistent with the existing Linear-inspired shell. Preserve keyboard access, profile honesty, and the single atomic create action.
 
 ## Model and thinking selection
 
@@ -255,7 +256,7 @@ web tool configuration
 - [x] Derive thinking choices from the selected model's supported levels.
 - [x] Preserve the daemon thinking default until the user explicitly changes it.
 - [x] Stage model and thinking choices before creation and submit them atomically.
-- [x] Match Pi's model and reasoning shortcuts with `Ctrl/⌘+L` and composer-focused `Shift+Tab`, and document the browser keymap in Settings and the architecture specification.
+- [x] Match Pi's model and reasoning shortcuts with `Ctrl/⌘+L` and composer-focused `Shift+Tab`. `Ctrl/⌘+L` opens staged model selection when no session exists or the new-session dialog is active. Document the browser keymap in Settings, `tips.json`, and the architecture specification.
 - [x] Show effective clamped thinking values.
 - [x] Keep model and thinking controls out of generic Web settings.
 
@@ -324,7 +325,7 @@ The browser must support every daemon and SDK command whose capabilities it requ
 | `/hotkeys` | Help generated from the actual browser keymap. |
 | `/help` | Complete command and shortcut directory. |
 | `/detach` | Detach this browser attachment only. |
-| `/web` | Display current local browser attachment information without starting another loop. |
+| `/web` | TUI trusted-host action that starts an authenticated local gateway and opens the current daemon-owned session without starting another agent loop. |
 | `/request` | Edit output-token and HTTP idle limits. |
 | `/quit` | Trusted-host shutdown flow or explicit detach wording, never silent conflation. |
 
