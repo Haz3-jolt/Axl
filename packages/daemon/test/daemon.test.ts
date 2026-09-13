@@ -3163,6 +3163,78 @@ test("queue restore atomically returns pending input and interrupts active work"
   );
 });
 
+test("queue restore leaves queue and active work untouched when its event append fails", async (context) => {
+  let markStarted!: () => void;
+  let release!: () => void;
+  let aborted = false;
+  const started = new Promise<void>((resolvePromise) => {
+    markStarted = resolvePromise;
+  });
+  const pause = new Promise<void>((resolvePromise) => {
+    release = resolvePromise;
+  });
+  const model: ModelPort = {
+    stream(request) {
+      return (async function* (): AsyncGenerator<ModelStreamEvent> {
+        markStarted();
+        await new Promise<void>((resolvePromise) => {
+          request.signal?.addEventListener(
+            "abort",
+            () => {
+              aborted = true;
+              resolvePromise();
+            },
+            { once: true },
+          );
+          void pause.then(resolvePromise);
+        });
+        if (request.signal?.aborted) {
+          yield { type: "aborted" };
+          return;
+        }
+        yield { type: "completed", stopReason: "stop", usage };
+      })();
+    },
+  };
+  const { socketPath, cwd, dataDirectory } = await startDaemon(context, model);
+  const client = await connectUnixClient(socketPath);
+  context.after(() => client.close());
+  const created = await client.request("session.create", { cwd });
+  const subscription = await subscribeSession(client, created.sessionId);
+  context.after(() => subscription.close());
+  const active = client.request("session.send", {
+    sessionId: created.sessionId,
+    delivery: "prompt",
+    content: [{ type: "text", text: "active" }],
+  });
+  await started;
+  const queued = await client.request("session.queue.enqueue", {
+    sessionId: created.sessionId,
+    content: [{ type: "text", text: "keep queued" }],
+    priority: "back",
+  });
+  const logPath = join(dataDirectory, "sessions", `${created.sessionId}.jsonl`);
+  await chmod(logPath, 0o400);
+  try {
+    await assert.rejects(
+      client.request("session.queue.restore", {
+        sessionId: created.sessionId,
+        interrupt: true,
+      }),
+    );
+    assert.equal(aborted, false);
+    assert.equal(
+      subscription.projector.state.queue.find((item) => item.queueItemId === queued.queueItemId)
+        ?.status,
+      "queued",
+    );
+  } finally {
+    await chmod(logPath, 0o600);
+    release();
+  }
+  await active;
+});
+
 test("queued prompts become paused after restart and require explicit re-queueing", async (context) => {
   const paused = pausedActivityPort();
   const fixture = await startDaemon(context, paused.port);
