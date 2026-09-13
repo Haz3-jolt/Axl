@@ -22,9 +22,7 @@ export interface WebPreferences {
 export type WebHostCapability = "provider.auth.login";
 
 export const WEB_REQUESTED_CAPABILITIES = Object.freeze(
-  WIRE_CAPABILITIES.filter(
-    (capability) => capability !== "provider.auth.login" && capability !== "session.presence",
-  ),
+  WIRE_CAPABILITIES.filter((capability) => capability !== "provider.auth.login"),
 );
 
 export interface WebBootstrap {
