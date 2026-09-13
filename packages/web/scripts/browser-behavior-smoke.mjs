@@ -71,6 +71,12 @@ await evaluate(context, "document.querySelector('.session')?.click(); JSON.strin
 await new Promise((resolve) => setTimeout(resolve, 500));
 let state = await inspect(context);
 assert(state.composer && state.hash === "" && state.overflow === 0 && !state.error, `projection: ${JSON.stringify(state)}`);
+await evaluate(context, `document.querySelector('.usage-toggle')?.click(); JSON.stringify(document.querySelector('.session-usage') !== null)`);
+const usageOpened = await evaluate(context, "JSON.stringify(document.querySelector('.session-usage') !== null)");
+assert(usageOpened, "session usage did not open");
+await evaluate(context, `document.querySelector('.thread')?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); JSON.stringify(true)`);
+const usageClosed = await evaluate(context, "JSON.stringify(document.querySelector('.session-usage') === null)");
+assert(usageClosed, "session usage did not dismiss outside");
 if (new URL(targetUrl).searchParams.get("capabilities") === "none") {
   const restricted = await evaluate(context, `JSON.stringify({
     create: { disabled: document.querySelector('[aria-label="New session"]')?.disabled, title: document.querySelector('[aria-label="New session"]')?.title },
@@ -130,7 +136,7 @@ console.log(JSON.stringify({
     "authenticated projection",
     "fragment removal",
     "dialog focus wrapping",
-    "Escape dismissal",
+    "Escape and outside-click dismissal",
     "command shortcut",
     "model shortcut",
     "desktop and mobile overflow",
