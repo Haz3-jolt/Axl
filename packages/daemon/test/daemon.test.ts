@@ -604,7 +604,7 @@ test("expires incomplete snapshots and requires a replacement boundary", async (
   );
 });
 
-test("publishes bounded attachment presence and subscription membership", async (context) => {
+test("publishes bounded TUI and browser presence with subscription membership", async (context) => {
   const fixture = await startDaemon(context);
   const first = await connectUnixClient(fixture.socketPath, {
     identity: { kind: "tui", version: "1.0.0", instanceId: "presence-one" },
@@ -633,8 +633,8 @@ test("publishes bounded attachment presence and subscription membership", async 
   });
 
   const second = await connectUnixClient(fixture.socketPath, {
-    identity: { kind: "future_client", version: "2.0.0", instanceId: "presence-two" },
-    requestedCapabilities: ["session.presence"],
+    identity: { kind: "web", version: "2.0.0", instanceId: "presence-two" },
+    requestedCapabilities: ["session.subscribe", "session.presence"],
   });
   const secondPresence: Array<readonly { attachmentId: string; clientKind: string }[]> = [];
   second.onPresence((message) => secondPresence.push(message.attachments));
@@ -647,7 +647,7 @@ test("publishes bounded attachment presence and subscription membership", async 
       .at(-1)
       ?.map((attachment) => attachment.clientKind)
       .sort(),
-    ["future_client", "headless", "tui"],
+    ["headless", "tui", "web"],
   );
   assert.equal(unauthorizedPresence, 0);
 
@@ -658,6 +658,14 @@ test("publishes bounded attachment presence and subscription membership", async 
   await first.request("session.ack", {
     subscriptionId: subscribed.subscriptionId,
     cursor: boundaryCursor,
+  });
+  const browserSubscribed = await second.request("session.subscribe", {
+    sessionId: created.sessionId,
+  });
+  assert.ok(browserSubscribed.snapshot?.boundaryCursor);
+  await second.request("session.ack", {
+    subscriptionId: browserSubscribed.subscriptionId,
+    cursor: browserSubscribed.snapshot.boundaryCursor,
   });
   for (
     let attempt = 0;
@@ -672,8 +680,8 @@ test("publishes bounded attachment presence and subscription membership", async 
   assert.equal(
     firstPresence
       .at(-1)
-      ?.some((attachment) => attachment.subscribedSessionIds.includes(created.sessionId)),
-    true,
+      ?.filter((attachment) => attachment.subscribedSessionIds.includes(created.sessionId)).length,
+    2,
   );
 
   second.close();

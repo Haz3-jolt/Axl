@@ -37,7 +37,7 @@ The branch now contains the first complete local-session slice:
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
 - The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
-- Ordinary session creation, shared-command routing, paused-item requeue, and queue restoration work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Staged Chat/Code creation, presence presentation, and several hardening tests remain.
+- Ordinary session creation, shared-command routing, paused-item requeue, queue restoration, and browser presence work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Staged Chat/Code creation and several hardening tests remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
 
@@ -47,10 +47,9 @@ The visual foundation, ordinary local conversation path, provider authentication
 
 Active remaining work:
 
-1. Add browser presence presentation.
-2. Add staged Chat/Code creation, including explicit workspace and tool-profile semantics.
-3. Move the provider directory and remaining configuration sequencing into reusable SDK controllers.
-4. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
+1. Add staged Chat/Code creation, including explicit workspace and tool-profile semantics.
+2. Move the provider directory and remaining configuration sequencing into reusable SDK controllers.
+3. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
 
 Deferred work is labeled in place. It includes extension-driven command invalidation, `axl web --dev`, IndexedDB cursor persistence, localization, long-session React measurement, and pre-stable CLI flag renames.
 
@@ -370,7 +369,7 @@ The browser should support every capability granted to its connection.
 - [x] `session.interaction.respond` for explicit MCP interactions, not routine sandboxed tool approval
 - [x] `session.subscribe`
 - [x] `session.activity`
-- [ ] `session.presence`
+- [x] `session.presence`
 
 ### Blobs and workspace
 
