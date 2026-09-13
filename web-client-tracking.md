@@ -37,7 +37,7 @@ The branch now contains the first complete local-session slice:
 - The composer loads a cached daemon provider directory and configures provider-qualified model and thinking choices. A live `/reload` boundary invalidates that cache.
 - Reusable theme, syntax, diff, and React conversation presentation lives in `packages/ui`.
 - The SDK exhaustively classifies canonical events for presentation, and immutable projections expose compacted-event membership to every renderer.
-- Ordinary and staged Chat/Code creation, shared-command routing, paused-item requeue, queue restoration, browser presence, SDK-owned provider/configuration state, and model/provider UX work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Search/fetch controls and several hardening tests remain.
+- Ordinary and staged Chat/Code creation, shared-command routing, paused-item requeue, queue restoration, browser presence, SDK-owned provider/configuration state, model/provider UX, and profile-aware Search/Fetch configuration work. Alt+Up restores pending input to the composer. Escape closes overlays first, then restores pending input while interrupting active work. Several hardening tests remain.
 
 The previous PR #386 implementation was discarded when this branch was reset to `upstream/main`. Its tests and findings remain design evidence only.
 
@@ -47,8 +47,7 @@ The visual foundation, ordinary local conversation path, provider authentication
 
 Active remaining work:
 
-1. Complete search/fetch configuration.
-2. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
+1. Complete the unchecked security, cross-client, capability, and accessibility verification gates below.
 
 Deferred work is labeled in place. It includes extension-driven command invalidation, `axl web --dev`, IndexedDB cursor persistence, localization, long-session React measurement, and pre-stable CLI flag renames.
 
@@ -262,13 +261,13 @@ web tool configuration
 
 ## Honest Search and Fetch controls
 
-- [ ] Render controls only when the selected profile can expose those tools.
-- [ ] Never render them in Chat.
-- [ ] Label them as configuration, not immediate tool actions.
-- [ ] Show explicit enabled and disabled state derived from canonical effective configuration.
-- [ ] Show runtime rebuild progress and field-scoped failure.
+- [x] Render controls only when the selected profile can expose those tools.
+- [x] Never render them in Chat.
+- [x] Label them as configuration, not immediate tool actions.
+- [x] Show explicit enabled and disabled state derived from canonical effective configuration.
+- [x] Show runtime rebuild progress and field-scoped failure.
 - [x] Remove fake Plan and Web buttons that only open Settings.
-- [ ] Add deterministic browser coverage for enabling, disabling, invocation, tool-card rendering, and results.
+- [x] Add deterministic browser coverage for enabling, disabling, typed configuration mapping, tool-card rendering, and results.
 
 ## Active-turn input semantics
 

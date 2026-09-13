@@ -49,11 +49,18 @@ test("requires a workspace for Code and submits staged choices atomically", asyn
     workspace: "  /code  ",
     thinkingLevel: "high",
     webSearch: true,
+    webFetch: false,
   });
 
   await controller.create(client, "/default");
   assert.deepEqual(requests, [
-    { cwd: "/code", profile: "standard", thinkingLevel: "high", webSearch: true },
+    {
+      cwd: "/code",
+      profile: "standard",
+      thinkingLevel: "high",
+      webFetch: false,
+      webSearch: true,
+    },
   ]);
 
   controller.reset("code");

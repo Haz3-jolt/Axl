@@ -238,6 +238,10 @@ The browser preserves Pi's model and reasoning shortcuts where browser semantics
 
 `/model` opens the same picker as `Ctrl+L`. `/thinking` opens its reasoning section. New Chat and Code sessions use the same picker before their single atomic `session.create` request.
 
+## Web tool configuration
+
+Search and Fetch controls appear only for the `standard` Code profile. Chat, minimal, and exec profiles omit them because those profiles cannot expose the tools. Staged Code creation preserves the daemon default until the user explicitly selects Enabled or Disabled. Active-session controls display only canonical `config.tools` state, submit one typed `session.configure` field, show runtime rebuild progress, and retain failures beside the originating field.
+
 ## Web assets
 
 The detailed build and release contract is specified in [web-packaging.md](web-packaging.md).

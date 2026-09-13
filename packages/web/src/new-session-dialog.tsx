@@ -9,6 +9,7 @@ import type {
   ThinkingLevel,
 } from "@axl/sdk";
 import { ModelPicker } from "./model-picker.tsx";
+import { WebToolControls } from "./web-tool-controls.tsx";
 
 export function NewSessionDialog({
   draft,
@@ -83,6 +84,7 @@ export function NewSessionDialog({
         {draft.mode === "code" && <label className="new-session-workspace"><span>Workspace</span><input value={draft.workspace ?? ""} disabled={busy} onChange={(event) => onChange({ workspace: event.target.value })} placeholder="/path/to/workspace" autoComplete="off" spellCheck={false} /></label>}
         <div className="new-session-model"><span>Model and effort</span><ModelPicker choices={models} provider={draft.providerId} model={draft.modelId} thinking={draft.thinkingLevel} openRequest={modelPickerOpenRequest} disabled={busy} onModel={updateModel} onThinking={updateThinking} /></div>
         {selected === undefined && <small className="new-session-default">The daemon will choose its configured model and effort.</small>}
+        {draft.mode === "code" && <WebToolControls webSearch={draft.webSearch} webFetch={draft.webFetch} staged disabled={busy} onChange={(field, value) => onChange(field === "webSearch" ? { webSearch: value } : { webFetch: value })} />}
         {error && <p className="new-session-error" role="alert">{error}</p>}
       </div>
       <footer><button type="button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={busy || (draft.mode === "code" && !draft.workspace?.trim())} onClick={onSubmit}>{busy ? "Creating…" : `Create ${draft.mode === "chat" ? "Chat" : "Code"}`}</button></footer>
