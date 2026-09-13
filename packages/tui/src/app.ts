@@ -2264,7 +2264,7 @@ export class AxlApp {
       return;
     }
     const now = Date.now();
-    if (now - this.lastInterrupt < 500) void this.quit();
+    if (now - this.lastInterrupt < 500) void this.quit(true);
     else {
       this.editor.clear();
       this.lastInterrupt = now;
@@ -2314,7 +2314,7 @@ export class AxlApp {
     });
   }
 
-  private async quit(): Promise<void> {
+  private async quit(confirmedByShortcut = false): Promise<void> {
     if (this.quitPending || this.stopped) return;
     const host = this.daemonHost;
     if (host === undefined) {
@@ -2334,18 +2334,19 @@ export class AxlApp {
       status = await host.status(context);
       const confirmed =
         status.confirmationRequired &&
-        (await this.confirmShutdown("Shut down shared daemon?", [
-          "Active work will be interrupted and all clients disconnected.",
-          ...status.sessions.map(
-            (session) =>
-              `${session.sessionId} · ${session.busy ? "active" : "idle"} · ${session.cwd}`,
-          ),
-          ...status.attachments.map(
-            (attachment) =>
-              `${attachment.kind} client ${attachment.attachmentId} · sessions ${attachment.sessionIds.join(", ") || "none"}`,
-          ),
-          `Pending requests: ${status.pendingRequests}`,
-        ]));
+        (confirmedByShortcut ||
+          (await this.confirmShutdown("Shut down shared daemon?", [
+            "Active work will be interrupted and all clients disconnected.",
+            ...status.sessions.map(
+              (session) =>
+                `${session.sessionId} · ${session.busy ? "active" : "idle"} · ${session.cwd}`,
+            ),
+            ...status.attachments.map(
+              (attachment) =>
+                `${attachment.kind} client ${attachment.attachmentId} · sessions ${attachment.sessionIds.join(", ") || "none"}`,
+            ),
+            `Pending requests: ${status.pendingRequests}`,
+          ])));
       if (this.stopped || (status.confirmationRequired && !confirmed)) return;
       this.quitting = true;
       this.reconnectGeneration += 1;

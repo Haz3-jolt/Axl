@@ -2805,7 +2805,7 @@ test("Ctrl+C clears while busy, double Ctrl+C quits, and empty Ctrl+D quits", as
   }
 });
 
-test("confirmed shared quit does not make the other TUI relaunch the daemon", async (context) => {
+test("double Ctrl+C confirms shared quit without another prompt", async (context) => {
   const { socketPath, directory } = await startStack(context);
   const input = new PassThrough();
   const first = captureOutput();
@@ -2837,10 +2837,9 @@ test("confirmed shared quit does not make the other TUI relaunch the daemon", as
     },
   });
   context.after(() => observer.stop());
-  input.write("/quit\r");
-  await until(() => first.text().includes("Shut down shared daemon?"), "shared shutdown preview");
-  input.write("y");
-  await until(() => exited, "confirmed shutdown");
+  input.write("\x03\x03");
+  await until(() => exited, "shortcut-confirmed shutdown");
+  assert.doesNotMatch(first.text(), /Shut down shared daemon\?/);
   await until(() => second.text().includes("daemon shut down"), "observer shutdown notice");
   await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal(reconnects, 0);
