@@ -96,8 +96,8 @@ Options:
   -r, --resume       Open the all-session resume picker
   --image <digest>   Use a locally available digest-pinned OCI image
   --unsafe           Disable operating-system isolation
-  --web               Enable web_fetch and web_search (default)
-  --no-web            Disable web_fetch and web_search
+  --web-tools         Enable web_fetch and web_search (default)
+  --no-web-tools      Disable web_fetch and web_search
   --web-fetch         Enable web_fetch
   --no-web-fetch      Disable web_fetch
   --web-search        Enable web_search
@@ -247,10 +247,10 @@ function parseArguments(argv: readonly string[]): CliArguments {
         throw new Error(`Unknown profile ${profile}; expected standard or exec`);
       }
       parsed.profile = profile;
-    } else if (argument === "--web") {
+    } else if (argument === "--web-tools") {
       parsed.webFetch = true;
       parsed.webSearch = true;
-    } else if (argument === "--no-web") {
+    } else if (argument === "--no-web-tools") {
       parsed.webFetch = false;
       parsed.webSearch = false;
     } else if (argument === "--web-fetch") parsed.webFetch = true;
