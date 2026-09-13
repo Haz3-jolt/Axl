@@ -52,6 +52,7 @@ import {
   subscribeSession,
   supportedThinkingLevels,
   THINKING_LEVELS,
+  type TrustedProviderHost,
 } from "@axl/sdk";
 
 import { ActivityComponent } from "./activity.ts";
@@ -478,7 +479,11 @@ export interface ResumeSessionConnection {
   readonly client: AxlClient;
   readonly reconnectClient: () => Promise<AxlClient>;
   readonly daemonHost?: DaemonHostControl;
-  readonly openWeb?: (sessionId: SessionId, cwd: string) => Promise<string>;
+  readonly openWeb?: (
+    sessionId: SessionId,
+    cwd: string,
+    providerHost: TrustedProviderHost,
+  ) => Promise<string>;
 }
 
 export interface AxlAppOptions {
@@ -488,7 +493,11 @@ export interface AxlAppOptions {
   readonly reconnectClient?: () => Promise<AxlClient>;
   readonly listResumeSessions?: () => Promise<readonly ResumeSessionEntry[]>;
   readonly openResumeSession?: (session: ResumeSessionEntry) => Promise<ResumeSessionConnection>;
-  readonly openWeb?: (sessionId: SessionId, cwd: string) => Promise<string>;
+  readonly openWeb?: (
+    sessionId: SessionId,
+    cwd: string,
+    providerHost: TrustedProviderHost,
+  ) => Promise<string>;
   readonly initialResume?: boolean;
   readonly input: TerminalInput;
   readonly output: TerminalOutput;
@@ -575,7 +584,9 @@ export class AxlApp {
   private client: AxlClient;
   private commandController: CommandController;
   private daemonHost: DaemonHostControl | undefined;
-  private openWeb: ((sessionId: SessionId, cwd: string) => Promise<string>) | undefined;
+  private openWeb:
+    | ((sessionId: SessionId, cwd: string, providerHost: TrustedProviderHost) => Promise<string>)
+    | undefined;
   private quitPending = false;
   private quitting = false;
   private reconnectClient: (() => Promise<AxlClient>) | undefined;
@@ -2432,7 +2443,10 @@ export class AxlApp {
         return;
       case "web": {
         if (this.openWeb === undefined) throw new Error("Web launch is unavailable from this host");
-        const origin = await this.openWeb(this.sessionId, this.cwd);
+        const origin = await this.openWeb(this.sessionId, this.cwd, {
+          loginProvider: (request, options) =>
+            this.loginProviderFromWeb(request.providerId, request.method, options?.signal),
+        });
         this.notice = this.view.palette.dim(`· opened ${origin}`);
         return;
       }
@@ -4938,8 +4952,36 @@ export class AxlApp {
       this.redraw();
       return;
     }
-    const selectedMethod = method;
+    try {
+      await this.performProviderLogin(provider, method);
+    } catch (error) {
+      this.notice = this.view.palette.error(`✖ ${providerErrorText(error)}`);
+      this.redraw();
+    }
+  }
+
+  private async loginProviderFromWeb(
+    providerId: string,
+    method: ProviderLoginMethod,
+    signal?: AbortSignal,
+  ): Promise<ProviderAuthenticationStatus> {
+    await this.loadProviderInventory(providerId);
+    const provider = this.providerById(providerId);
+    if (provider === undefined || !provider.loginMethods.includes(method)) {
+      throw new Error(`Provider ${providerId} does not support ${method} login`);
+    }
+    return this.performProviderLogin(provider, method, signal);
+  }
+
+  private async performProviderLogin(
+    provider: ProviderInventoryGroup,
+    method: ProviderLoginMethod,
+    externalSignal?: AbortSignal,
+  ): Promise<ProviderAuthenticationStatus> {
     const controller = new AbortController();
+    const signal = externalSignal
+      ? AbortSignal.any([controller.signal, externalSignal])
+      : controller.signal;
     this.providerOperation?.abort();
     this.providerOperation = controller;
     this.notice = this.view.palette.dim(`· authenticating ${provider.displayName} · Esc to cancel`);
@@ -4947,7 +4989,7 @@ export class AxlApp {
     const dialog = new ProviderLoginOverlay({
       title: `Login to ${provider.displayName}`,
       palette: () => this.view.palette,
-      signal: controller.signal,
+      signal,
       cancel: () => controller.abort(),
       refresh: () => this.redraw(),
     });
@@ -4956,21 +4998,15 @@ export class AxlApp {
     try {
       const status =
         this.options.loginProvider === undefined
-          ? await this.client.loginProvider(
-              { providerId: provider.providerId, method: selectedMethod },
-              { signal: controller.signal },
-            )
-          : await this.options.loginProvider(
-              provider.providerId,
-              selectedMethod,
-              controller.signal,
-              dialog,
-            );
+          ? await this.client.loginProvider({ providerId: provider.providerId, method }, { signal })
+          : await this.options.loginProvider(provider.providerId, method, signal, dialog);
       this.notice = this.view.palette.dim(
         `· ${provider.displayName} · ${authenticationLabel(status)} · ${provider.catalog.refreshable && provider.models.length === 0 ? `Run /refresh ${provider.providerId} to load models` : "Use /model to select a model"}`,
       );
+      return status;
     } catch (error) {
       this.notice = this.view.palette.error(`✖ ${providerErrorText(error)}`);
+      throw error;
     } finally {
       if (this.overlays.active === dialog) this.overlays.close();
       if (this.providerOperation === controller) this.providerOperation = undefined;

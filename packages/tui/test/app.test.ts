@@ -33,7 +33,7 @@ import type {
   Usage,
 } from "@axl/protocol";
 import { DEFAULT_MODEL_REQUEST_SETTINGS } from "@axl/protocol";
-import { AxlClientError, subscribeSession } from "@axl/sdk";
+import { AxlClientError, subscribeSession, type TrustedProviderHost } from "@axl/sdk";
 import { connectUnixClient, createUnixDaemonHost } from "@axl/sdk/unix";
 
 import { AxlApp, saveClipboardImage, stripAnsi } from "../src/index.ts";
@@ -2036,7 +2036,7 @@ test("/model opens a selector and switches the model live", async (context) => {
   app.stop();
 });
 
-test("provider commands group models, show status, mutate auth, and cancel refresh", async (context) => {
+test("provider commands and /web use trusted TUI login and cancel refresh", async (context) => {
   const calls: string[] = [];
   let blockRefresh = false;
   let refreshCancelled = false;
@@ -2135,6 +2135,7 @@ test("provider commands group models, show status, mutate auth, and cancel refre
   const input = new PassThrough();
   const { output, text } = captureOutput();
   const preferences: Array<Record<string, unknown>> = [];
+  let webProviderHost: TrustedProviderHost | undefined;
   const app = await AxlApp.start({
     client: await connectUnixClient(socketPath),
     input,
@@ -2144,6 +2145,10 @@ test("provider commands group models, show status, mutate auth, and cancel refre
     currentProvider: "alpha",
     currentModel: "shared-model",
     readClipboard: () => Promise.resolve("runtime-login-secret"),
+    openWeb: async (_sessionId, _cwd, providerHost) => {
+      webProviderHost = providerHost;
+      return "http://127.0.0.1:1234";
+    },
     loginProvider: async (providerId, method, _signal, presentation) => {
       calls.push(`host-login:${providerId}:${method}`);
       assert.equal(
@@ -2162,6 +2167,22 @@ test("provider commands group models, show status, mutate auth, and cancel refre
     onPreferenceChange: (update) => {
       preferences.push(update);
     },
+  });
+
+  input.write("/web\r");
+  await until(() => webProviderHost !== undefined, "browser provider host");
+  assert.ok(webProviderHost);
+  const webLogin = webProviderHost.loginProvider({ providerId: "beta", method: "api_key" });
+  await until(() => text().includes("Enterprise domain (blank for default)"), "web login prompt");
+  input.write("\r");
+  await until(() => text().includes("Provider secret"), "web secret prompt");
+  input.write("\x16");
+  await until(() => text().includes("********************"), "web pasted secret");
+  input.write("\r");
+  assert.deepEqual(await webLogin, {
+    providerId: "beta",
+    phase: "authenticated",
+    method: "api_key",
   });
 
   input.write("/model\r");
