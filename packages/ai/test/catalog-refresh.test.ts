@@ -92,6 +92,43 @@ test("explicit static refresh validates live facts, pins policy, and restores of
   await restored.dispose();
 });
 
+test("concurrent models.dev provider refreshes share one public bounded request", async () => {
+  let requests = 0;
+  const body = {
+    ...source(),
+    deepseek: {
+      models: {
+        "deepseek-r1": {
+          ...source().openai.models["gpt-5-refresh-test"],
+          id: "deepseek-r1",
+          reasoning: false,
+        },
+      },
+    },
+  };
+  const providers = createBuiltinProviders({
+    store: new InMemoryCredentialStore(),
+    context: { env: () => undefined, fileExists: async () => false },
+    fetch: async (_url, init) => {
+      requests += 1;
+      assert.equal(new Headers(init?.headers).has("authorization"), false);
+      return Response.json(body);
+    },
+  });
+  const registry = new ProviderRegistry({ catalogStore: new InMemoryCatalogStore() });
+  for (const id of ["openai", "deepseek"]) {
+    const provider = providers.find((item) => item.id === id);
+    assert.ok(provider);
+    registry.register(provider);
+  }
+  const refreshed = await registry.refresh();
+  assert.equal(refreshed.errors.size, 0);
+  assert.deepEqual(refreshed.refreshedProviderIds, ["openai", "deepseek"]);
+  assert.equal(requests, 1);
+  assert.equal((await registry.getModel("deepseek", "deepseek-r1")).apiDialect, "openai-chat");
+  await registry.dispose();
+});
+
 test("cancelling a static refresh does not publish a candidate", async () => {
   const controller = new AbortController();
   const provider = createBuiltinProviders({
@@ -110,6 +147,38 @@ test("cancelling a static refresh does not publish a candidate", async () => {
     /abort/i,
   );
   assert.equal(registry.catalogSnapshot("openai"), undefined);
+  await registry.dispose();
+});
+
+test("cancelling the last models.dev reader aborts its shared network request", async () => {
+  const controller = new AbortController();
+  let started: () => void = () => {};
+  const fetchStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let networkAborted = false;
+  const provider = createBuiltinProviders({
+    store: new InMemoryCredentialStore(),
+    context: { env: () => undefined, fileExists: async () => false },
+    fetch: async (_url, init) => {
+      const signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          networkAborted = true;
+          reject(signal.reason);
+        });
+        started();
+      });
+    },
+  }).find((entry) => entry.id === "openai");
+  assert.ok(provider);
+  const registry = new ProviderRegistry();
+  registry.register(provider);
+  const refresh = registry.refresh({ providerId: "openai", signal: controller.signal });
+  await fetchStarted;
+  controller.abort();
+  await assert.rejects(refresh, /abort/i);
+  assert.equal(networkAborted, true);
   await registry.dispose();
 });
 

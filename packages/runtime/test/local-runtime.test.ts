@@ -125,6 +125,7 @@ test("provider output cannot persist rotating request credentials", async (conte
     defaults: { providerId: "custom", modelId: "echo-model", thinkingLevel: "off" },
     store: new FileCredentialStore(join(axlHome, "credentials.json")),
     unsafe: true,
+    modelsDevAutoRefresh: { enabled: false },
   });
   context.after(() => daemon.stop());
   const client = await connectUnixClient(socketPath);
@@ -286,6 +287,7 @@ test("assembles an authoritative local runtime without a presentation client", a
     },
     store,
     unsafe: true,
+    modelsDevAutoRefresh: { enabled: false },
   });
   context.after(() => daemon.stop());
   const client = await connectUnixClient(socketPath);
@@ -618,6 +620,7 @@ export default (axl) => axl.registerProvider(provider);
     defaults: { modelId: "gpt-5", thinkingLevel: "off" },
     store,
     unsafe: true,
+    modelsDevAutoRefresh: { enabled: false },
   });
   context.after(() => daemon.stop());
   const client = await connectUnixClient(socketPath);
@@ -661,6 +664,7 @@ test("disposes loaded daemon extensions when later runtime setup fails", async (
     defaults: { modelId: "gpt-5", thinkingLevel: "off" },
     store: new FileCredentialStore(join(axlHome, "credentials.json")),
     unsafe: true,
+    modelsDevAutoRefresh: { enabled: false },
   });
   context.after(() => daemon.stop());
   const client = await connectUnixClient(socketPath);
@@ -703,6 +707,7 @@ test("manages global, explicit, and trusted project daemon extensions through th
     defaults: { modelId: "gpt-5", thinkingLevel: "off" },
     store,
     unsafe: true,
+    modelsDevAutoRefresh: { enabled: false },
   });
   context.after(() => daemon.stop());
   const client = await connectUnixClient(socketPath);

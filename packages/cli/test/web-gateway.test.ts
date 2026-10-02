@@ -93,6 +93,7 @@ test("authenticated browser modules honor project trust and disablement", async 
     defaults: { modelId: "gpt-5", thinkingLevel: "off" },
     store,
     unsafe: true,
+    modelsDevAutoRefresh: { enabled: false },
   });
   context.after(() => daemon.stop());
   const client = await connectUnixClient(socketPath);

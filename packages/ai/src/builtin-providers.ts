@@ -3,7 +3,11 @@
 
 import { createAntLingProvider } from "./ant-ling.ts";
 import { createBasetenProvider } from "./baseten.ts";
-import { enableStaticCatalogRefresh } from "./catalog-refresh.ts";
+import {
+  createModelsDevCatalogReader,
+  enableStaticCatalogRefresh,
+  type ModelsDevCatalogReader,
+} from "./catalog-refresh.ts";
 import { createCerebrasProvider } from "./cerebras.ts";
 import { createDeepSeekProvider } from "./deepseek.ts";
 import { createFireworksProvider } from "./fireworks.ts";
@@ -97,6 +101,7 @@ export const BUILTIN_PROVIDER_IDS = [
 export function createBuiltinProviders(
   options: ProviderFactoryOptions,
   custom?: CustomProviderConfiguration,
+  readCatalog: ModelsDevCatalogReader = createModelsDevCatalogReader(options.fetch),
 ): readonly ModelProvider[] {
   const providers = [
     createOpenAiProvider(options),
@@ -141,6 +146,7 @@ export function createBuiltinProviders(
     createRadiusProvider(options),
     createCustomProvider({ ...options, ...custom }),
   ];
-  for (const provider of providers) enableStaticCatalogRefresh(provider, options.fetch);
+  for (const provider of providers)
+    enableStaticCatalogRefresh(provider, options.fetch, readCatalog);
   return providers;
 }

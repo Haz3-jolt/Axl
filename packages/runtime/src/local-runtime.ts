@@ -22,6 +22,7 @@ import {
 } from "@axl/protocol";
 
 import { extensionDiagnosticsExtension } from "./core-daemon-extension.ts";
+import { startModelsDevAutoRefresh } from "./models-dev-auto-refresh.ts";
 import {
   createProviderManagementService,
   type TrustedProviderLoginAdapter,
@@ -237,6 +238,12 @@ export interface LocalDaemonOptions {
   readonly store: CredentialStore;
   readonly unsafe: boolean;
   readonly sandbox?: LocalSandboxSelection;
+  /** Defaults to a background startup and daily refresh. Use false for explicitly offline hosts. */
+  readonly modelsDevAutoRefresh?: {
+    readonly enabled?: boolean;
+    readonly intervalMs?: number;
+    readonly fetch?: typeof fetch;
+  };
 }
 
 /**
@@ -244,6 +251,10 @@ export interface LocalDaemonOptions {
  * extensions, policy, and sandbox without depending on a presentation client.
  */
 export async function startLocalDaemon(options: LocalDaemonOptions): Promise<AxlDaemon> {
+  const intervalMs = options.modelsDevAutoRefresh?.intervalMs;
+  if (intervalMs !== undefined && (!Number.isSafeInteger(intervalMs) || intervalMs < 1)) {
+    throw new TypeError("models.dev refresh interval must be a positive safe integer");
+  }
   const { axlHome, stateDirectory, socketPath, defaults, store, unsafe } = options;
   const sandboxSelection = options.sandbox ?? { type: "native" as const };
   let assemblyPromise:
@@ -252,6 +263,8 @@ export async function startLocalDaemon(options: LocalDaemonOptions): Promise<Axl
         kernel: typeof import("@axl/kernel");
         sandbox: import("@axl/sandbox").PlatformSandbox;
         providers: import("@axl/ai").ProviderRegistry;
+        modelsDevProviderIds: readonly string[];
+        readModelsDevCatalog: import("@axl/ai").ModelsDevCatalogReader;
       }>
     | undefined;
   const extensionProviders = new Map<
@@ -283,12 +296,23 @@ export async function startLocalDaemon(options: LocalDaemonOptions): Promise<Axl
         store,
         context: ai.nodeAuthContext,
       });
-      for (const provider of ai.createBuiltinProviders({ store, context: ai.nodeAuthContext })) {
-        if (!configured.some((entry) => entry.id === provider.id)) providers.register(provider);
+      const modelsDevIds = new Set(ai.modelsDevProviderIds());
+      const modelsDevProviderIds: string[] = [];
+      const readModelsDevCatalog = ai.createModelsDevCatalogReader(
+        options.modelsDevAutoRefresh?.fetch,
+      );
+      for (const provider of ai.createBuiltinProviders(
+        { store, context: ai.nodeAuthContext },
+        undefined,
+        readModelsDevCatalog,
+      )) {
+        if (configured.some((entry) => entry.id === provider.id)) continue;
+        providers.register(provider);
+        if (modelsDevIds.has(provider.id)) modelsDevProviderIds.push(provider.id);
       }
       for (const provider of configured) providers.register(provider);
-      const restored = await providers.restoreCatalogs();
-      return { ai, kernel, sandbox, providers, catalogErrors: restored.errors };
+      await providers.restoreCatalogs();
+      return { ai, kernel, sandbox, providers, modelsDevProviderIds, readModelsDevCatalog };
     });
     return assemblyPromise;
   };
@@ -356,12 +380,25 @@ export async function startLocalDaemon(options: LocalDaemonOptions): Promise<Axl
       throw error;
     }
   };
+  const refreshLifecycle = new AbortController();
+  let refreshStartup: Promise<void> | undefined;
+  let autoRefresh: ReturnType<typeof startModelsDevAutoRefresh> | undefined;
+  let explicitRefreshes = 0;
   const providerManagement = {
     list: async (...args: Parameters<import("@axl/daemon").ProviderManagementService["list"]>) =>
       createProviderManagementService((await loadAssembly()).providers).list(...args),
     refresh: async (
       ...args: Parameters<import("@axl/daemon").ProviderManagementService["refresh"]>
-    ) => createProviderManagementService((await loadAssembly()).providers).refresh(...args),
+    ) => {
+      explicitRefreshes += 1;
+      try {
+        return await createProviderManagementService((await loadAssembly()).providers).refresh(
+          ...args,
+        );
+      } finally {
+        explicitRefreshes -= 1;
+      }
+    },
     authenticationStatus: async (
       ...args: Parameters<import("@axl/daemon").ProviderManagementService["authenticationStatus"]>
     ) =>
@@ -374,6 +411,9 @@ export async function startLocalDaemon(options: LocalDaemonOptions): Promise<Axl
       ...args: Parameters<import("@axl/daemon").ProviderManagementService["logout"]>
     ) => createProviderManagementService((await loadAssembly()).providers).logout(...args),
     dispose: async () => {
+      refreshLifecycle.abort();
+      await refreshStartup;
+      await autoRefresh?.dispose();
       if (assemblyPromise !== undefined) await (await assemblyPromise).providers.dispose();
     },
   } satisfies import("@axl/daemon").ProviderManagementService;
@@ -758,5 +798,27 @@ export async function startLocalDaemon(options: LocalDaemonOptions): Promise<Axl
     },
   });
   await daemon.start();
+  if (options.modelsDevAutoRefresh?.enabled !== false) {
+    refreshStartup = (async () => {
+      try {
+        const { providers, modelsDevProviderIds, readModelsDevCatalog } = await loadAssembly();
+        if (refreshLifecycle.signal.aborted) return;
+        autoRefresh = startModelsDevAutoRefresh(providers, modelsDevProviderIds, {
+          ...(options.modelsDevAutoRefresh?.intervalMs === undefined
+            ? {}
+            : { intervalMs: options.modelsDevAutoRefresh.intervalMs }),
+          shouldRun: () => explicitRefreshes === 0,
+          withBatch: (signal, refresh) => readModelsDevCatalog.withBatch(signal, refresh),
+          onFailure: (message) => console.error(`Axl: ${message}`),
+        });
+      } catch (error) {
+        if (!refreshLifecycle.signal.aborted) {
+          console.error(
+            `Axl: could not start automatic models.dev refresh (${error instanceof Error ? error.name : "unknown error"})`,
+          );
+        }
+      }
+    })();
+  }
   return daemon;
 }

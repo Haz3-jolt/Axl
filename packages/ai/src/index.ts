@@ -14,6 +14,8 @@ export * from "./builtin-providers.ts";
 export * from "./capabilities.ts";
 export * from "./catalog.ts";
 export * from "./catalog-store.ts";
+export { createModelsDevCatalogReader, modelsDevProviderIds } from "./catalog-refresh.ts";
+export type { ModelsDevCatalogReader } from "./catalog-refresh.ts";
 export * from "./cerebras.ts";
 export * from "./cloud-auth.ts";
 export * from "./credentials.ts";
