@@ -71,6 +71,7 @@ test("daemon refreshes models.dev at startup and exposes models through the SDK"
   }
   assert.equal(found, true);
   assert.equal(requests, 1);
+  for (let attempts = 0; attempts < 200 && diagnostics.length === 0; attempts++) await sleep(10);
   assert.equal(diagnostics.length, 1);
   assert.match(diagnostics[0] ?? "", /models.dev automatic refresh failed for/);
 });

@@ -252,8 +252,11 @@ export interface LocalDaemonOptions {
  */
 export async function startLocalDaemon(options: LocalDaemonOptions): Promise<AxlDaemon> {
   const intervalMs = options.modelsDevAutoRefresh?.intervalMs;
-  if (intervalMs !== undefined && (!Number.isSafeInteger(intervalMs) || intervalMs < 1)) {
-    throw new TypeError("models.dev refresh interval must be a positive safe integer");
+  if (
+    intervalMs !== undefined &&
+    (!Number.isSafeInteger(intervalMs) || intervalMs < 1 || intervalMs > 2_147_483_647)
+  ) {
+    throw new TypeError("models.dev refresh interval must be between 1 and 2147483647 ms");
   }
   const { axlHome, stateDirectory, socketPath, defaults, store, unsafe } = options;
   const sandboxSelection = options.sandbox ?? { type: "native" as const };

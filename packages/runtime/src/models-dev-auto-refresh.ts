@@ -18,8 +18,8 @@ export function startModelsDevAutoRefresh(
   },
 ): { dispose(): Promise<void> } {
   const intervalMs = options.intervalMs ?? DAY_MS;
-  if (!Number.isSafeInteger(intervalMs) || intervalMs < 1) {
-    throw new TypeError("models.dev refresh interval must be a positive safe integer");
+  if (!Number.isSafeInteger(intervalMs) || intervalMs < 1 || intervalMs > 2_147_483_647) {
+    throw new TypeError("models.dev refresh interval must be between 1 and 2147483647 ms");
   }
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
